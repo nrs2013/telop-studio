@@ -10,3 +10,5 @@ vite.config.ts.*
 uploads/
 tmp/
 tmp_audio/
+TEST_FROM_CLAUDE.txt
+*-LOCAL-READY.zip
