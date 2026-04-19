@@ -1,0 +1,6 @@
+# Nixpacks configuration for Railway deployment.
+# Ensures FFmpeg 7.x is installed so VP9 alpha (transparent) video encoding works.
+# See https://nixpacks.com/docs/configuration/file
+
+[phases.setup]
+nixPkgs = ["...", "ffmpeg_7-full"]

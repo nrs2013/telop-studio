@@ -993,7 +993,7 @@ export default function Home() {
                     </ol>
                   </div>
                   <div className="rounded-md p-2 text-[10px] font-mono" style={{ background: "hsl(0 0% 8%)", color: "hsl(0 0% 50%)" }}>
-                    現在の状態: Replit コネクタ使用中 (接続が切れる場合あり)
+                    現在の状態: Dropbox 未設定 (環境変数を設定してデプロイしてください)
                   </div>
                 </>
               )}

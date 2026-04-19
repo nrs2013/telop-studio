@@ -4847,7 +4847,7 @@ export default function ProjectPage() {
               ) : (
                 <div className="space-y-2">
                   <p className="text-sm" style={{ color: "hsl(0 60% 60%)" }}>DROPBOX_APP_KEY が設定されていません。</p>
-                  <p className="text-xs" style={{ color: "hsl(0 0% 50%)" }}>Replit Secrets に DROPBOX_APP_KEY と DROPBOX_APP_SECRET を設定してください。</p>
+                  <p className="text-xs" style={{ color: "hsl(0 0% 50%)" }}>サーバーの環境変数に DROPBOX_APP_KEY と DROPBOX_APP_SECRET を設定してください。</p>
                 </div>
               )}
             </div>

@@ -4,16 +4,39 @@ import { createServer, type Server } from "http";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
-import { spawn } from "child_process";
+import { spawn, spawnSync } from "child_process";
 import archiver from "archiver";
 
+// Resolve FFmpeg binary: prefer bundled bin/ffmpeg7, otherwise use system ffmpeg.
+// Detect the system ffmpeg major version so we only warn when it's actually old (< 7).
 const FFMPEG7_PATH = path.join(process.cwd(), "bin", "ffmpeg7");
+function detectFfmpegMajorVersion(bin: string): number | null {
+  try {
+    const out = spawnSync(bin, ["-version"], { encoding: "utf8" });
+    const text = (out.stdout || "") + (out.stderr || "");
+    const m = text.match(/ffmpeg version\s+n?(\d+)/i);
+    return m ? parseInt(m[1], 10) : null;
+  } catch {
+    return null;
+  }
+}
 const FFMPEG_BIN = fs.existsSync(FFMPEG7_PATH) ? FFMPEG7_PATH : "ffmpeg";
+const FFMPEG_VERSION = detectFfmpegMajorVersion(FFMPEG_BIN);
 if (FFMPEG_BIN === "ffmpeg") {
-  console.warn("[FFmpeg] WARNING: bin/ffmpeg7 not found, falling back to system ffmpeg. VP9 alpha encoding may produce all-opaque output due to FFmpeg 6.x bug.");
+  if (FFMPEG_VERSION === null) {
+    console.warn("[FFmpeg] WARNING: ffmpeg binary not found. Video export will fail. Install ffmpeg (`brew install ffmpeg` on Mac).");
+  } else if (FFMPEG_VERSION < 7) {
+    console.warn(`[FFmpeg] WARNING: system ffmpeg is version ${FFMPEG_VERSION}.x. VP9 alpha encoding may produce all-opaque output (known FFmpeg 6.x bug). Upgrade to FFmpeg 7+ or place a custom build at bin/ffmpeg7.`);
+  } else {
+    console.log(`[FFmpeg] Using system ffmpeg version ${FFMPEG_VERSION}.x (VP9 alpha supported).`);
+  }
+} else {
+  console.log(`[FFmpeg] Using bundled binary: ${FFMPEG7_PATH}`);
 }
 import { serverStorage, verifyPassword, upgradePasswordIfNeeded } from "./storage";
 import session from "express-session";
+import connectPgSimple from "connect-pg-simple";
+import pg from "pg";
 import { uploadToDropbox, downloadFromDropbox, listDropboxFiles, searchDropboxFiles, checkDropboxConnection, checkDropboxFileExists, deleteFromDropbox, renameInDropbox, getUncachableDropboxClient, getTeamDropboxClient, getDropboxAuthUrl, exchangeDropboxCode, disconnectDropboxCustom, getDropboxOAuthStatus, browseDropboxFolder, diagnoseDrpboxStructure } from "./dropbox";
 import kuromoji from "kuromoji";
 
@@ -88,7 +111,27 @@ export async function registerRoutes(
   if (isProduction && (!process.env.SESSION_SECRET || process.env.SESSION_SECRET === "telop-studio-secret")) {
     console.warn("[security] SESSION_SECRET is not set to a secure value in production. Please set a strong SESSION_SECRET env var.");
   }
+
+  // Persist sessions in PostgreSQL so users stay logged in across server restarts / redeploys.
+  // Falls back to in-memory (default) if DATABASE_URL is not set.
+  let sessionStore: session.Store | undefined;
+  if (process.env.DATABASE_URL) {
+    const PgStore = connectPgSimple(session);
+    const pgPool = new pg.Pool({
+      connectionString: process.env.DATABASE_URL,
+      ssl: isProduction ? { rejectUnauthorized: false } : undefined,
+    });
+    sessionStore = new PgStore({
+      pool: pgPool,
+      tableName: "session",
+      createTableIfMissing: true,
+    });
+  } else {
+    console.warn("[session] DATABASE_URL not set; falling back to in-memory session store (sessions lost on restart).");
+  }
+
   app.use(session({
+    store: sessionStore,
     secret: process.env.SESSION_SECRET || "telop-studio-secret",
     resave: false,
     saveUninitialized: false,

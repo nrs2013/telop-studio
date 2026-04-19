@@ -4,13 +4,9 @@ import { dropboxTokens } from '@shared/schema';
 import { eq } from 'drizzle-orm';
 
 // ─── Custom OAuth (self-managed refresh token) ───────────────────────────────
-// When DROPBOX_APP_KEY + DROPBOX_APP_SECRET are set and a refresh token is stored
-// in the database, we manage the token lifecycle ourselves. This is the reliable,
-// permanent method. The refresh token has no expiry.
-//
-// ─── Fallback: Replit connector ───────────────────────────────────────────────
-// When the above is not configured, we fall back to the Replit-managed connector.
-// This method can lose the connection when the connector OAuth token expires.
+// Requires DROPBOX_APP_KEY + DROPBOX_APP_SECRET environment variables and a
+// refresh token stored in the database (obtained via the in-app OAuth flow).
+// The refresh token has no expiry; access tokens are auto-refreshed.
 
 const APP_KEY = () => process.env.DROPBOX_APP_KEY?.trim();
 const APP_SECRET = () => process.env.DROPBOX_APP_SECRET?.trim();
@@ -81,61 +77,21 @@ async function getAccessTokenCustom(): Promise<string> {
   return refreshWithStoredToken(stored.refreshToken);
 }
 
-// ── Replit connector fallback ──────────────────────────────────────────────────
-let replitConnectionSettings: any;
-
-async function getAccessTokenReplit(): Promise<string> {
-  if (
-    replitConnectionSettings &&
-    replitConnectionSettings.settings?.expires_at &&
-    new Date(replitConnectionSettings.settings.expires_at).getTime() > Date.now()
-  ) {
-    const cached = replitConnectionSettings.settings?.access_token ||
-      replitConnectionSettings.settings?.oauth?.credentials?.access_token;
-    if (cached) return cached;
-  }
-
-  replitConnectionSettings = null;
-
-  const hostname = process.env.REPLIT_CONNECTORS_HOSTNAME;
-  const xReplitToken = process.env.REPL_IDENTITY
-    ? 'repl ' + process.env.REPL_IDENTITY
-    : process.env.WEB_REPL_RENEWAL
-    ? 'depl ' + process.env.WEB_REPL_RENEWAL
-    : null;
-
-  if (!hostname) throw new Error('REPLIT_CONNECTORS_HOSTNAME not set');
-  if (!xReplitToken) throw new Error('X-Replit-Token not found for repl/depl');
-
-  const resp = await fetch(
-    'https://' + hostname + '/api/v2/connection?include_secrets=true&connector_names=dropbox',
-    { headers: { 'Accept': 'application/json', 'X-Replit-Token': xReplitToken } }
-  );
-
-  if (!resp.ok) throw new Error(`Dropbox connector fetch failed: ${resp.status} ${resp.statusText}`);
-
-  const data = await resp.json();
-  replitConnectionSettings = data.items?.[0];
-
-  if (!replitConnectionSettings) throw new Error('Dropbox not connected');
-
-  const accessToken =
-    replitConnectionSettings.settings?.access_token ||
-    replitConnectionSettings.settings?.oauth?.credentials?.access_token;
-
-  if (!accessToken) throw new Error('Dropbox: unable to obtain valid access token');
-  return accessToken;
-}
-
 // ── Unified access token getter ────────────────────────────────────────────────
+// Replit connector fallback was removed; we now require the custom OAuth flow
+// (DROPBOX_APP_KEY + DROPBOX_APP_SECRET + stored refresh token).
 async function getAccessToken(): Promise<string> {
-  if (useCustomOAuth()) {
-    return getAccessTokenCustom();
+  if (!useCustomOAuth()) {
+    throw new Error(
+      "Dropbox is not configured. Set DROPBOX_APP_KEY and DROPBOX_APP_SECRET environment variables and connect Dropbox via the app settings."
+    );
   }
-  return getAccessTokenReplit();
+  return getAccessTokenCustom();
 }
 
 // ── 401 retry wrapper ──────────────────────────────────────────────────────────
+// Retries once on 401 (clears cached access token first). Caps at one retry to
+// avoid infinite loops when the refresh token itself is invalid.
 async function withDropboxRetry<T>(fn: () => Promise<T>): Promise<T> {
   try {
     return await fn();
@@ -151,7 +107,6 @@ async function withDropboxRetry<T>(fn: () => Promise<T>): Promise<T> {
     if (is401) {
       console.warn('[Dropbox] 401 received — invalidating cache and retrying');
       invalidateDropboxCacheFull();
-      replitConnectionSettings = null;
       return await fn();
     }
 
@@ -674,7 +629,7 @@ export async function checkDropboxConnection(): Promise<{ connected: boolean; me
   try {
     const dbx = await getTeamDropboxClient();
     await dbx.usersGetCurrentAccount();
-    return { connected: true, method: useCustomOAuth() ? 'custom' : 'replit' };
+    return { connected: true, method: 'custom' };
   } catch {
     return { connected: false, method: 'none' };
   }
@@ -755,7 +710,7 @@ export async function disconnectDropboxCustom(): Promise<void> {
 export async function getDropboxOAuthStatus(): Promise<{
   customConfigured: boolean;
   customConnected: boolean;
-  replitFallback: boolean;
+  replitFallback: boolean; // kept in response for frontend backwards compatibility; always false now
 }> {
   const customConfigured = useCustomOAuth();
   let customConnected = false;
@@ -768,6 +723,6 @@ export async function getDropboxOAuthStatus(): Promise<{
   return {
     customConfigured,
     customConnected,
-    replitFallback: !customConfigured,
+    replitFallback: false,
   };
 }
