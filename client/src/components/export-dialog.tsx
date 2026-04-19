@@ -645,10 +645,10 @@ export function ExportDialog({
         globalMaxY = outputHeight - 1;
       }
       const CROP_PAD = 30;
-      // VP9 in WebCodecs needs a minimum height (~144 in spec, 240+ to be safe).
-      // If the detected text band is too thin, pad equally above + below so we
-      // still get a tight crop but stay above the encoder's minimum.
-      const MIN_ENC_HEIGHT = 240;
+      // VP9 in WebCodecs requires a minimum height. The spec's Level 1.0 says
+      // 144px is the floor; we use 160 as a small safety margin. If the detected
+      // text band is shorter, pad symmetrically (above + below) to reach it.
+      const MIN_ENC_HEIGHT = 160;
       let rawTop = Math.max(0, globalMinY - CROP_PAD);
       let rawBottom = Math.min(outputHeight - 1, globalMaxY + CROP_PAD);
       let rawHeight = rawBottom - rawTop + 1;
