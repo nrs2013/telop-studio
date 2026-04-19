@@ -235,6 +235,24 @@ export default function Home() {
     }, 500);
   }, [fetchDropboxStatus, toast]);
 
+  const disconnectDropbox = useCallback(async () => {
+    if (!confirm("Dropboxの接続を切断しますか?\n\n再度接続するには「Dropboxに接続」ボタンを押してください。")) return;
+    setDropboxConnecting(true);
+    try {
+      const res = await fetch("/api/dropbox/oauth/disconnect", { method: "POST", credentials: "include" });
+      if (res.ok) {
+        toast({ title: "✓ Dropboxを切断しました", description: "保存されていたトークンが削除されました。" });
+        await fetchDropboxStatus();
+      } else {
+        toast({ title: "❌ 切断に失敗", description: `HTTP ${res.status}`, variant: "destructive" });
+      }
+    } catch (e: any) {
+      toast({ title: "❌ 切断エラー", description: e.message ?? String(e), variant: "destructive" });
+    } finally {
+      setDropboxConnecting(false);
+    }
+  }, [fetchDropboxStatus, toast]);
+
   useEffect(() => {
     const fetchEditingStatus = () => {
       fetch("/api/editing/status").then(r => r.json()).then(setEditingStatus).catch(() => {});
@@ -945,6 +963,17 @@ export default function Home() {
                     <Link2 className="w-4 h-4 mr-2" />
                     {dropboxConnecting ? "接続中..." : dropboxStatus.customConnected ? "Dropboxを再接続" : "Dropboxに接続"}
                   </Button>
+                  {dropboxStatus.customConnected && (
+                    <Button
+                      onClick={disconnectDropbox}
+                      disabled={dropboxConnecting}
+                      style={{ background: "hsl(0 60% 35%)", color: "#fff" }}
+                      data-testid="button-dropbox-disconnect"
+                    >
+                      <Unlink2 className="w-4 h-4 mr-2" />
+                      Dropboxを切断
+                    </Button>
+                  )}
                 </>
               ) : (
                 <>
