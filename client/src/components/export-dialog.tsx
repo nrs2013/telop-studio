@@ -15,6 +15,7 @@ import { Download, Copy, Check, ChevronDown, CircleCheck, FolderArchive, Film, Z
 import type { LyricLine, Project } from "@shared/schema";
 import { drawTextWithRuby } from "@/lib/rubyParser";
 import { storage } from "@/lib/storage";
+import { encodeWebMAlpha, checkWebMEncoderSupport } from "@/lib/webmEncoder";
 
 export interface ExportPresetConfig {
   creditFontWeight: string;
@@ -36,7 +37,9 @@ interface ExportDialogProps {
   audioFileName?: string | null;
 }
 
-type ExportMode = "server" | "prores" | "zip";
+// "server" name kept for backwards-compat with stored UI state, but encoding now
+// happens entirely in the browser. ProRes mode removed (no equivalent in WebCodecs).
+type ExportMode = "server" | "zip";
 
 
 
@@ -678,176 +681,81 @@ export function ExportDialog({
         return canvas;
       };
 
-      const canvasToBlob = (cvs: HTMLCanvasElement): Promise<Blob> =>
-        new Promise((resolve, reject) => {
-          cvs.toBlob((b) => { if (b) resolve(b); else reject(new Error("toBlob failed")); }, "image/png");
-        });
+      // ── Browser-side encoding (WebCodecs VP9 alpha + Opus) ──────────────
+      // This replaces the previous server-side FFmpeg pipeline so the app
+      // can run on free static hosting without a backend video processor.
 
-      setStatus(`PNG無損失フレーム生成中... (${totalUniqueFrames}枚, ${encWidth}x${encHeight})`);
-      setProgress(4);
-
-      const sessionRes = await fetch("/api/export/session", { method: "POST" });
-      if (!sessionRes.ok) throw new Error("セッション作成に失敗しました");
-      const { sessionId } = (await sessionRes.json());
-
-      const blobs: Blob[] = [];
-      const segments: { frame: number; duration: number }[] = [];
-
-      for (let i = 0; i < segs.length; i++) {
-        if (cancelRef.current) break;
-        const seg = segs[i];
-        drawFrame(ctx, seg.time + epsilon, sortedLyrics);
-        const source = getCroppedSource();
-        const blob = await canvasToBlob(source);
-        blobs.push(blob);
-        segments.push({ frame: i, duration: seg.duration });
-        const pct = 4 + ((i + 1) / totalUniqueFrames) * 36;
-        setProgress(pct);
-        setStatus(`フレーム生成中... ${i + 1}/${totalUniqueFrames} (${encWidth}x${encHeight})`);
-        if (i % 10 === 0) {
-          await new Promise((r) => setTimeout(r, 0));
-        }
+      const support = await checkWebMEncoderSupport(encWidth, encHeight);
+      if (!support.supported) {
+        throw new Error(support.reason ?? "ブラウザがWebCodecsエンコードに対応していません");
       }
 
-      if (cancelRef.current) {
-        setExporting(false);
-        setProgress(0);
-        setStatus("");
-        return;
-      }
-
-      setStatus("フレームをアップロード中...");
-      setProgress(42);
-
-      const batchSize = 20;
-      const parallelUploads = 3;
-      let uploaded = 0;
-      for (let i = 0; i < blobs.length; i += batchSize * parallelUploads) {
-        if (cancelRef.current) break;
-        const promises: Promise<void>[] = [];
-        for (let p = 0; p < parallelUploads; p++) {
-          const start = i + p * batchSize;
-          if (start >= blobs.length) break;
-          const batch = blobs.slice(start, Math.min(start + batchSize, blobs.length));
-          const formData = new FormData();
-          batch.forEach((blob, idx) => {
-            formData.append("frames", blob, `frame_${String(start + idx).padStart(6, "0")}.png`);
-          });
-          promises.push(
-            fetch(`/api/export/${sessionId}/frames`, { method: "POST", body: formData })
-              .then(async (uploadRes) => {
-                if (!uploadRes.ok) {
-                  const errText = await uploadRes.text().catch(() => "");
-                  throw new Error(`フレームアップロード失敗 (${uploadRes.status}): ${errText}`);
-                }
-                uploaded += batch.length;
-              })
-          );
-        }
-        await Promise.all(promises);
-        const pct = 45 + (Math.min(uploaded, blobs.length) / blobs.length) * 20;
-        setProgress(pct);
-        setStatus(`フレームをアップロード中... ${Math.min(uploaded, blobs.length)}/${blobs.length}`);
-      }
-
-      if (cancelRef.current) {
-        setExporting(false);
-        setProgress(0);
-        setStatus("");
-        return;
-      }
-
-      let hasAudio = false;
+      // Load audio first (we need the Blob in memory for the encoder).
+      let audioBlob: Blob | null = null;
       if (audioUrl) {
-        setStatus("音声ファイルをアップロード中...");
-        setProgress(67);
-        let audioBlob: Blob | null = null;
-        let audioFName = "audio.mp3";
         if (activeAudioTrackId) {
           const track = await storage.getAudioTrack(activeAudioTrackId);
           if (track) {
             audioBlob = new Blob([track.arrayBuffer], { type: track.mimeType || "audio/mpeg" });
-            audioFName = track.fileName;
           }
         }
         if (!audioBlob) {
           const audioData = await storage.getAudio(projectId);
           if (audioData) {
             audioBlob = new Blob([audioData.arrayBuffer], { type: audioData.mimeType || "audio/mpeg" });
-            audioFName = audioData.fileName;
           }
         }
-        if (audioBlob) {
-          const audioFormData = new FormData();
-          audioFormData.append("audio", audioBlob, audioFName);
-          const audioRes = await fetch(`/api/export/${sessionId}/audio`, {
-            method: "POST",
-            body: audioFormData,
-          });
-          if (!audioRes.ok) throw new Error("音声アップロードに失敗しました");
-          hasAudio = true;
-        }
       }
 
-      setStatus(cropActive ? `サーバーでエンコード中... (VP9 Alpha WebM, ${encWidth}x${encHeight})` : "サーバーでエンコード中... (VP9 Alpha WebM)");
-      setProgress(70);
+      setStatus(cropActive
+        ? `ブラウザ内でエンコード開始... (VP9 Alpha WebM, ${encWidth}x${encHeight}${audioBlob ? " + Opus音声" : ""})`
+        : `ブラウザ内でエンコード開始... (VP9 Alpha WebM${audioBlob ? " + Opus音声" : ""})`);
+      setProgress(5);
 
-      const encodeRes = await fetch(`/api/export/${sessionId}/encode`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          fps: fpsNum,
-          videoBitrate,
-          audioBitrate,
-          segments,
-          async: true,
-          cropY: cropActive ? cropY : -1,
-          fullHeight: cropActive ? outputHeight : 0,
-        }),
+      const encodeResult = await encodeWebMAlpha({
+        width: encWidth,
+        height: encHeight,
+        fps: fpsNum,
+        videoBitrate,
+        audioBitrate,
+        audioBlob,
+        frameCount: segs.length,
+        getFrame: (i) => {
+          const seg = segs[i];
+          drawFrame(ctx, seg.time + epsilon, sortedLyrics);
+          return { canvas: getCroppedSource(), duration: seg.duration };
+        },
+        isCancelled: () => cancelRef.current,
+        onProgress: (phase, pct) => {
+          // Video: 5–80%, Audio: 80–93%, Finalize: 93–95%
+          if (phase === "video") {
+            setProgress(5 + pct * 75);
+            setStatus(`映像エンコード中... ${Math.round(pct * 100)}% (${encWidth}x${encHeight})`);
+          } else if (phase === "audio") {
+            setProgress(80 + pct * 13);
+            setStatus(`音声エンコード中... ${Math.round(pct * 100)}%`);
+          } else if (phase === "finalize") {
+            setProgress(93 + pct * 2);
+            setStatus("WebMファイル組み立て中...");
+          }
+        },
       });
 
-      if (!encodeRes.ok) {
-        const errData = await encodeRes.json().catch(() => ({ message: "エンコード失敗" }));
-        throw new Error(errData.message || "エンコードに失敗しました");
-      }
-
-      let encodeComplete = false;
-      let pollFailCount = 0;
-      while (!encodeComplete && !cancelRef.current) {
-        await new Promise((r) => setTimeout(r, 1500));
-        const statusRes = await fetch(`/api/export/${sessionId}/status`, { cache: "no-store" });
-        if (statusRes.status === 304) { continue; }
-        if (!statusRes.ok) {
-          pollFailCount++;
-          if (pollFailCount >= 5) break;
-          continue;
-        }
-        pollFailCount = 0;
-        const st = await statusRes.json();
-        if (st.status === "done") {
-          encodeComplete = true;
-          setProgress(90);
-          setStatus("ダウンロード中...");
-        } else if (st.status === "error") {
-          throw new Error(st.error || "エンコード失敗");
-        } else {
-          setStatus("サーバーでエンコード中...");
-        }
-      }
-
-      if (cancelRef.current || !encodeComplete) {
+      if (cancelRef.current) {
         setExporting(false);
         setProgress(0);
         setStatus("");
         return;
       }
 
-      const dlRes = await fetch(`/api/export/${sessionId}/download`);
-      if (!dlRes.ok) throw new Error("ダウンロードに失敗しました");
-      const outputBlob = await dlRes.blob();
+      const outputBlob = encodeResult.blob;
       const safeName = (projectName || "telop").replace(/[^\w\u3000-\u9fff\uff00-\uffef]/g, "_");
       const yTag = cropActive ? `_Y${cropY}_H${encHeight}` : "";
       const webmFileName = `【TELOP】${safeName}_vp9_alpha${yTag}.webm`;
+      const sizeMB = (outputBlob.size / (1024 * 1024)).toFixed(1);
+      console.log(`[WebM Export] Done: ${sizeMB} MB, ${encodeResult.videoFrames} frames, ${encodeResult.durationSec.toFixed(2)}s`);
+      setProgress(96);
+      setStatus(`ダウンロード準備中... (${sizeMB} MB)`);
       const url = URL.createObjectURL(outputBlob);
       const a = document.createElement("a");
       a.href = url;
@@ -876,298 +784,8 @@ export function ExportDialog({
     setStatus("");
   }, [timedLyrics, fps, videoBitrate, audioBitrate, audioUrl, project, presetConfig, activeAudioTrackId]);
 
-  const handleProResExport = useCallback(async () => {
-    if (timedLyrics.length === 0) return;
-    cancelRef.current = false;
-    setExporting(true);
-    setExportDone(false);
-    setProgress(0);
-    setErrorMsg("");
-
-    try {
-      const fpsNum = parseInt(fps);
-      const sortedLyrics = [...timedLyrics].sort((a, b) => (a.startTime || 0) - (b.startTime || 0));
-      const totalDuration = await getTotalDuration();
-      const segs = buildSegments(sortedLyrics, totalDuration, fpsNum);
-      const totalUniqueFrames = segs.length;
-
-      setStatus("描画エリア解析中...");
-      setProgress(1);
-
-      const scanCanvas = document.createElement("canvas");
-      scanCanvas.width = outputWidth;
-      scanCanvas.height = outputHeight;
-      const scanCtx = scanCanvas.getContext("2d", { alpha: true })!;
-      let globalMinY = outputHeight;
-      let globalMaxY = 0;
-      const SCAN_STEP = Math.max(1, Math.floor(segs.length / 40));
-      for (let i = 0; i < segs.length; i += SCAN_STEP) {
-        const seg = segs[i];
-        drawFrame(scanCtx, seg.time + 0.001, sortedLyrics);
-        const imgData = scanCtx.getImageData(0, 0, outputWidth, outputHeight);
-        const d = imgData.data;
-        for (let row = 0; row < outputHeight; row++) {
-          const rowStart = row * outputWidth * 4;
-          for (let col = 0; col < outputWidth; col++) {
-            if (d[rowStart + col * 4 + 3] > 0) {
-              if (row < globalMinY) globalMinY = row;
-              if (row > globalMaxY) globalMaxY = row;
-              break;
-            }
-          }
-        }
-      }
-
-      if (globalMinY >= globalMaxY) {
-        globalMinY = 0;
-        globalMaxY = outputHeight - 1;
-      }
-      const CROP_PAD = 30;
-      const cropTop = Math.max(0, globalMinY - CROP_PAD);
-      const cropBottom = Math.min(outputHeight - 1, globalMaxY + CROP_PAD);
-      const cropActive = cropBottom > cropTop && (cropBottom - cropTop + 1) < outputHeight * 0.85;
-      const cropY = cropActive ? cropTop : 0;
-      const encWidth = outputWidth;
-      const encHeight = cropActive ? (cropBottom - cropTop + 1) : outputHeight;
-
-      if (cropActive) {
-        console.log(`[ProRes Export] Auto-crop: Y=${cropY} H=${encHeight} (原寸: ${outputWidth}x${outputHeight})`);
-      }
-
-      setStatus(cropActive ? `クロップ: ${encWidth}x${encHeight} (Y=${cropY}) 透過フレーム生成` : `フル解像度: ${encWidth}x${outputHeight} 透過フレーム生成`);
-      setProgress(3);
-
-      const canvas = document.createElement("canvas");
-      canvas.width = outputWidth;
-      canvas.height = outputHeight;
-      const ctx = canvas.getContext("2d", { alpha: true })!;
-      const epsilon = 0.001;
-
-      const cropCanvas = cropActive ? document.createElement("canvas") : null;
-      if (cropCanvas) {
-        cropCanvas.width = encWidth;
-        cropCanvas.height = encHeight;
-      }
-      const cropCtx = cropCanvas ? cropCanvas.getContext("2d", { alpha: true })! : null;
-
-      const getCroppedSource = (): HTMLCanvasElement => {
-        if (cropActive && cropCanvas && cropCtx) {
-          cropCtx.clearRect(0, 0, encWidth, encHeight);
-          cropCtx.drawImage(canvas, 0, cropY, encWidth, encHeight, 0, 0, encWidth, encHeight);
-          return cropCanvas;
-        }
-        return canvas;
-      };
-
-      setStatus(`PNG無損失フレーム生成中... (${totalUniqueFrames}枚, ${encWidth}x${encHeight})`);
-      setProgress(4);
-
-      const sessionRes = await fetch("/api/export/session", { method: "POST" });
-      if (!sessionRes.ok) throw new Error("セッション作成に失敗しました");
-      const sessionId = (await sessionRes.json()).sessionId;
-
-      const canvasToBlob = (cvs: HTMLCanvasElement): Promise<Blob> =>
-        new Promise((resolve, reject) => {
-          cvs.toBlob((b) => { if (b) resolve(b); else reject(new Error("toBlob failed")); }, "image/png");
-        });
-
-      const batchSize = 20;
-      const PARALLEL = 3;
-      const allBatches: { blobs: Blob[]; names: string[] }[] = [];
-      let currentBlobs: Blob[] = [];
-      let currentNames: string[] = [];
-
-      for (let i = 0; i < segs.length; i++) {
-        if (cancelRef.current) break;
-        drawFrame(ctx, segs[i].time + epsilon, sortedLyrics);
-        const frameSource = getCroppedSource();
-        const pngBlob = await canvasToBlob(frameSource);
-        currentBlobs.push(pngBlob);
-        currentNames.push(`frame_${String(i).padStart(6, "0")}.png`);
-
-        if (currentBlobs.length >= batchSize || i === segs.length - 1) {
-          allBatches.push({ blobs: [...currentBlobs], names: [...currentNames] });
-          currentBlobs = [];
-          currentNames = [];
-        }
-
-        if (i % 10 === 0) {
-          const pct = 4 + ((i + 1) / totalUniqueFrames) * 30;
-          setProgress(pct);
-          setStatus(`クロップフレーム生成中... ${i + 1}/${totalUniqueFrames} (${encWidth}x${encHeight})`);
-          await new Promise(r => setTimeout(r, 0));
-        }
-      }
-
-      if (cancelRef.current) { setExporting(false); setProgress(0); setStatus(""); return; }
-
-      setStatus(`フレームアップロード中... (${allBatches.length}バッチ, ${PARALLEL}並列)`);
-      setProgress(35);
-
-      let uploadedBatches = 0;
-      const uploadBatch = async (batch: { blobs: Blob[]; names: string[] }) => {
-        const formData = new FormData();
-        batch.blobs.forEach((b, idx) => formData.append("frames", b, batch.names[idx]));
-        const upRes = await fetch(`/api/export/${sessionId}/frames`, { method: "POST", body: formData });
-        if (!upRes.ok) {
-          const errText = await upRes.text().catch(() => "");
-          throw new Error(`フレームアップロード失敗 (${upRes.status}): ${errText}`);
-        }
-        uploadedBatches++;
-        const pct = 35 + (uploadedBatches / allBatches.length) * 19;
-        setProgress(pct);
-        setStatus(`フレームアップロード中... ${uploadedBatches}/${allBatches.length}バッチ`);
-      };
-
-      for (let i = 0; i < allBatches.length; i += PARALLEL) {
-        if (cancelRef.current) break;
-        const chunk = allBatches.slice(i, i + PARALLEL);
-        await Promise.all(chunk.map(b => uploadBatch(b)));
-      }
-      if (cancelRef.current) { setExporting(false); setProgress(0); setStatus(""); return; }
-
-      let audioBlob: Blob | null = null;
-      let audioFName = "audio.mp3";
-      if (audioUrl) {
-        if (activeAudioTrackId) { const t = await storage.getAudioTrack(activeAudioTrackId); if (t) { audioBlob = new Blob([t.arrayBuffer], { type: t.mimeType || "audio/mpeg" }); audioFName = t.fileName; } }
-        if (!audioBlob) { const d = await storage.getAudio(projectId); if (d) { audioBlob = new Blob([d.arrayBuffer], { type: d.mimeType || "audio/mpeg" }); audioFName = d.fileName; } }
-      }
-      if (audioBlob) {
-        const af = new FormData();
-        af.append("audio", audioBlob, audioFName);
-        await fetch(`/api/export/${sessionId}/audio`, { method: "POST", body: af });
-      }
-
-      setStatus("サーバーでProRes 4444 エンコード開始...");
-      setProgress(56);
-      const encodeRes = await fetch(`/api/export/${sessionId}/encode`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          fps: fpsNum, videoBitrate, audioBitrate, segments: segs.map((s, i) => ({ frame: i, duration: s.duration })),
-          codec: "prores", async: true,
-          cropY: cropActive ? cropY : -1,
-          fullHeight: cropActive ? outputHeight : 0,
-        }),
-      });
-      if (!encodeRes.ok) throw new Error("エンコード開始に失敗しました");
-
-      setStatus(cropActive ? `サーバーでProRes 4444 変換中 (${encWidth}x${encHeight}, Y=${cropY})...` : "サーバーでProRes 4444 変換中...");
-      setProgress(65);
-
-      let encodeComplete = false;
-      let pollCount = 0;
-      let pollErrors = 0;
-      while (!encodeComplete && !cancelRef.current) {
-        await new Promise(r => setTimeout(r, 2000));
-        pollCount++;
-        try {
-          const statusRes = await fetch(`/api/export/${sessionId}/status`, { cache: "no-store" });
-          if (statusRes.status === 304) { continue; }
-          if (!statusRes.ok) {
-            pollErrors++;
-            if (pollErrors >= 3) throw new Error("変換状態の確認に失敗しました");
-            continue;
-          }
-          pollErrors = 0;
-          const statusData = await statusRes.json();
-          if (statusData.status === "done") {
-            encodeComplete = true;
-          } else if (statusData.status === "error") {
-            throw new Error(statusData.error || "ProRes変換に失敗しました");
-          } else {
-            setProgress(65 + Math.min(pollCount * 2, 18));
-            setStatus(`サーバーでProRes 4444 変換中... ${pollCount * 2}秒経過`);
-          }
-        } catch (e: any) {
-          if (e.message === "変換状態の確認に失敗しました" || e.message?.includes("ProRes変換に失敗")) throw e;
-          pollErrors++;
-          if (pollErrors >= 3) throw new Error("変換状態の確認に失敗しました");
-        }
-      }
-      if (cancelRef.current) { setExporting(false); setProgress(0); setStatus(""); return; }
-
-      const safeName = (projectName || "telop").replace(/[^\w\u3000-\u9fff\uff00-\uffef]/g, "_");
-      const yTag = cropActive ? `_Y${cropY}_H${encHeight}` : "";
-      const movFileName = `【TELOP】${safeName}_prores4444${yTag}.mov`;
-      const presetVal = project.preset || "other";
-
-      setStatus("Dropboxにアップロード中...");
-      setProgress(85);
-
-      let dropboxSuccess = false;
-      let dropboxPath = "";
-      try {
-        const dbxRes = await fetch(`/api/export/${sessionId}/upload-to-dropbox`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ preset: presetVal, fileName: movFileName }),
-        });
-        if (dbxRes.ok) {
-          const dbxData = await dbxRes.json();
-          dropboxPath = dbxData.dropboxPath || "";
-          dropboxSuccess = true;
-
-          if (dbxData.downloadUrl) {
-            setStatus("Dropboxからダウンロード中...");
-            setProgress(90);
-            try {
-              const dlRes = await fetch(dbxData.downloadUrl);
-              if (dlRes.ok) {
-                const outputBlob = await dlRes.blob();
-                const url = URL.createObjectURL(outputBlob);
-                const a = document.createElement("a");
-                a.href = url;
-                a.download = movFileName;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
-              }
-            } catch (dlErr) {
-              console.warn("Dropbox download failed, file saved to Dropbox:", dlErr);
-            }
-          }
-        }
-      } catch (dbxErr) {
-        console.warn("Dropbox upload failed, trying direct download:", dbxErr);
-      }
-
-      if (!dropboxSuccess) {
-        setStatus("直接ダウンロード中...");
-        setProgress(87);
-        const dlRes = await fetch(`/api/export/${sessionId}/download`);
-        if (!dlRes.ok) {
-          const errText = await dlRes.text().catch(() => "");
-          throw new Error(`ダウンロードに失敗しました (${dlRes.status}): ${errText}`);
-        }
-        const outputBlob = await dlRes.blob();
-        const url = URL.createObjectURL(outputBlob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = movFileName;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      }
-
-      setProgress(100);
-      const cropInfo = cropActive ? ` [クロップ: ${encWidth}x${encHeight}, Arena配置: Y=${cropY}]` : "";
-      const dbxInfo = dropboxSuccess ? ` → Dropbox: ${dropboxPath}` : "";
-      setStatus(`完了${cropInfo}${dbxInfo}`);
-      setExporting(false);
-      setExportDone(true);
-      return;
-    } catch (err: any) {
-      console.error("ProRes export error:", err);
-      setErrorMsg(`書き出しエラー: ${err.message || err}`);
-    }
-
-    setExporting(false);
-    setProgress(0);
-    setStatus("");
-  }, [timedLyrics, fps, videoBitrate, audioBitrate, audioUrl, project, presetConfig, activeAudioTrackId]);
+  // ProRes 4444 export removed — WebCodecs cannot produce .mov files.
+  // If needed, users can convert the exported VP9 alpha .webm to ProRes externally.
 
   const generateConcatTxt = (segments: { frame: number; duration: number }[]): string => {
     const lines: string[] = [];
@@ -1340,8 +958,6 @@ export function ExportDialog({
   const handleExport = () => {
     if (exportMode === "server") {
       handleServerExport();
-    } else if (exportMode === "prores") {
-      handleProResExport();
     } else {
       handleZipExport();
     }
