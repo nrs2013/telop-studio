@@ -644,37 +644,18 @@ export function ExportDialog({
         globalMinY = 0;
         globalMaxY = outputHeight - 1;
       }
-      // Chrome's WebCodecs VP9 encoder has empirical minimum dimensions and
-      // aspect-ratio constraints that aren't fully documented. Safe reference
-      // points from the PoC: 640x360, 1280x720, 1920x1080 all work. Sizes like
-      // 1920x160 fail silently (isConfigSupported returns supported=false).
-      // We use 360 as the minimum encoded height — it's the smallest we've
-      // verified in a real browser. VP9 alpha compresses the extra transparent
-      // rows very efficiently so the file-size hit is minimal.
-      const CROP_PAD = 30;
-      const MIN_ENC_HEIGHT = 360;
-      let rawTop = Math.max(0, globalMinY - CROP_PAD);
-      let rawBottom = Math.min(outputHeight - 1, globalMaxY + CROP_PAD);
-      let rawHeight = rawBottom - rawTop + 1;
-      if (rawHeight < MIN_ENC_HEIGHT) {
-        const need = MIN_ENC_HEIGHT - rawHeight;
-        const addTop = Math.floor(need / 2);
-        const addBot = need - addTop;
-        rawTop = Math.max(0, rawTop - addTop);
-        rawBottom = Math.min(outputHeight - 1, rawBottom + addBot);
-        const newHeight = rawBottom - rawTop + 1;
-        if (newHeight < MIN_ENC_HEIGHT) {
-          if (rawTop === 0) rawBottom = Math.min(outputHeight - 1, rawTop + MIN_ENC_HEIGHT - 1);
-          else rawTop = Math.max(0, rawBottom - MIN_ENC_HEIGHT + 1);
-        }
-      }
-      const cropTop = rawTop;
-      const cropBottom = rawBottom;
-      const cropActive = cropBottom > cropTop && (cropBottom - cropTop + 1) < outputHeight * 0.85;
-      const cropY = cropActive ? cropTop : 0;
+      // Chrome's WebCodecs VP9-alpha path only accepts certain dimensions —
+      // empirically 1920x1080 works but arbitrary crop sizes (even 1920x720)
+      // can fail isConfigSupported with no explicit reason. Since VP9 + alpha
+      // compresses fully-transparent rows for near-zero bytes, encoding at
+      // the full output size costs only ~10-20% extra over a tight crop but
+      // avoids all the platform-specific alpha-encoding constraints.
+      // Keep the scan for diagnostics only.
+      const cropActive = false;
+      const cropY = 0;
       const encWidth = outputWidth;
-      const encHeight = cropActive ? (cropBottom - cropTop + 1) : outputHeight;
-      console.log(`[WebM Export] Text band: Y=${globalMinY}..${globalMaxY}, encoding crop: ${encWidth}x${encHeight} @ Y=${cropY}`);
+      const encHeight = outputHeight;
+      console.log(`[WebM Export] Text band detected: Y=${globalMinY}..${globalMaxY} (encoding at full ${outputWidth}x${outputHeight})`);
 
       if (cropActive) {
         console.log(`[WebM Export] Auto-crop: Y=${cropY} H=${encHeight} (原寸: ${outputWidth}x${outputHeight})`);

@@ -75,36 +75,48 @@ export async function checkWebMEncoderSupport(width: number, height: number): Pr
   // Try a sequence of VP9 codec strings. Different Chrome versions accept
   // different profile combinations for alpha; we pick the first that works.
   // VP9 codec strings: vp09.<profile>.<level>.<bitDepth>
-  // Level encodes the max resolution the codec is willing to accept:
-  //   5.2 (52) = 1920x1080, 6.0 (60) = 4096x2304, 6.1 (61) = 4096x2304 @ higher fps
-  // Try high-level forms first so 1920-wide content always finds a match.
+  // Level encodes the max resolution:
+  //   5.2 (52) = 1920x1080, 6.0 (60) = 4096x2304, 6.1 (61) = higher fps
   const candidates = [
-    "vp09.00.61.08", // Profile 0, Level 6.1, 8-bit (most permissive)
-    "vp09.00.60.08", // Profile 0, Level 6.0
-    "vp09.00.52.08", // Profile 0, Level 5.2 (1920x1080 cap)
-    "vp09.02.61.10", // Profile 2 (10-bit), Level 6.1 — sometimes preferred for alpha
-    "vp09.00.51.08", // Profile 0, Level 5.1 (1664x912 cap)
-    "vp09.00.10.08", // Profile 0, Level 1.0 (some Chrome builds ignore the level)
-    "vp9",            // generic fallback
+    "vp09.00.61.08",
+    "vp09.00.60.08",
+    "vp09.00.52.08",
+    "vp09.02.61.10",
+    "vp09.00.51.08",
+    "vp09.00.10.08",
+    "vp9",
   ];
+  const attempts: { codec: string; alpha: "keep" | "discard"; supported?: boolean; error?: string }[] = [];
   let lastErr: string | undefined;
+  console.log(`[WebMEncoder] Probing VP9 alpha support for ${width}x${height}...`);
   for (const codec of candidates) {
-    try {
-      const v = await VideoEncoder.isConfigSupported({
-        codec,
-        width, height,
-        bitrate: 4_000_000, framerate: 30,
-        alpha: "keep",
-      });
-      if (v.supported) {
-        details.vp9Alpha = true;
-        details.triedCodec = codec;
-        break;
+    // Try with alpha first, fall back to no-alpha so we can diagnose which
+    // codecs work at all for this resolution vs which only fail because of alpha.
+    for (const alphaMode of ["keep", "discard"] as const) {
+      try {
+        const v = await VideoEncoder.isConfigSupported({
+          codec,
+          width, height,
+          bitrate: 4_000_000, framerate: 30,
+          alpha: alphaMode,
+        });
+        attempts.push({ codec, alpha: alphaMode, supported: !!v.supported });
+        console.log(`[WebMEncoder]  ${codec} alpha=${alphaMode}: ${v.supported ? "✓ supported" : "✗ rejected"}`);
+        if (alphaMode === "keep" && v.supported) {
+          details.vp9Alpha = true;
+          details.triedCodec = codec;
+          break;
+        }
+      } catch (e: any) {
+        const msg = e?.message || String(e);
+        attempts.push({ codec, alpha: alphaMode, error: msg });
+        console.log(`[WebMEncoder]  ${codec} alpha=${alphaMode}: ✗ threw ${msg}`);
+        lastErr = msg;
       }
-    } catch (e: any) {
-      lastErr = e?.message || String(e);
     }
+    if (details.vp9Alpha) break;
   }
+  (details as any).attempts = attempts;
   if (!details.vp9Alpha && lastErr) details.probeError = lastErr;
   try {
     const a = await AudioEncoder.isConfigSupported({
@@ -113,8 +125,13 @@ export async function checkWebMEncoderSupport(width: number, height: number): Pr
     details.opus = !!a.supported;
   } catch { /* ignore */ }
   if (!details.vp9Alpha) {
-    const diag = `(${width}x${height}, probe=${details.probeError || "no error"})`;
-    return { supported: false, details, reason: `VP9 (alpha) エンコードがブラウザでサポートされていません。 ${diag}` };
+    const tryCount = attempts.length;
+    const anyNoAlpha = attempts.some(a => a.alpha === "discard" && a.supported);
+    const hint = anyNoAlpha
+      ? "(VP9自体は動きますがalpha未対応。ブラウザまたはOSのハードウェアエンコーダーが alpha をサポートしていません。)"
+      : "(VP9 自体が動きません。DevToolsのConsoleの [WebMEncoder] ログをご確認ください。)";
+    const diag = `${width}x${height}, ${tryCount}個のコーデックを試行, 最新エラー: ${details.probeError || "なし"}`;
+    return { supported: false, details, reason: `VP9 (alpha) エンコードがブラウザでサポートされていません。 ${hint} [${diag}]` };
   }
   if (!details.opus) {
     return { supported: false, details, reason: "Opus 音声エンコードがブラウザでサポートされていません。" };
