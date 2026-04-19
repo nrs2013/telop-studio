@@ -52,6 +52,7 @@
     "cmdk": "^1.1.1",
     "connect-pg-simple": "^10.0.0",
     "date-fns": "^3.6.0",
+    "dotenv": "^16.4.5",
     "drizzle-kit": "^0.31.8",
     "drizzle-orm": "^0.39.3",
     "drizzle-zod": "^0.7.1",
