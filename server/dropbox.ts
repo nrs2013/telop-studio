@@ -696,8 +696,6 @@ export function getDropboxAuthUrl(redirectUri: string, state: string): string {
       'files.metadata.write',
       'account_info.read',
       'sharing.read',
-      'team_data.member',
-      'team_data.team_space',
     ].join(' '),
   });
   return `https://www.dropbox.com/oauth2/authorize?${params}`;
