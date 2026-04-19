@@ -23,8 +23,10 @@ interface DropboxPickerProps {
   preset?: string;
 }
 
-const TEAM_ROOT = "/nrs チーム フォルダ";
-const NEW_TELOP_ROOT = `${TEAM_ROOT}/NEW TELOP`;
+// Note: チームメンバー(管理者ではない)は /nrs チーム フォルダ を直接見れない仕様なので、
+// シェアフォルダ "NEW TELOP" を起点とする(これはチームメンバーでも見える)
+const TEAM_ROOT = "";
+const NEW_TELOP_ROOT = `/NEW TELOP`;
 const TELOP_ROOT = `${NEW_TELOP_ROOT}/Telop音源`;
 
 const shortcuts = [
@@ -99,10 +101,13 @@ export function DropboxPicker({ open, onClose, onSelect, preset }: DropboxPicker
   useEffect(() => {
     if (open) {
       setPathHistory([]);
-      setCurrentPath(TEAM_ROOT);
+      // 初期パス: NEW TELOP に直接ジャンプ(よく使う場所なので)
+      // ルートに戻りたい時は「戻る」ボタンで戻れる
+      setPathHistory([TEAM_ROOT]);
+      setCurrentPath(NEW_TELOP_ROOT);
       setSearchQuery("");
       setSearchResults(null);
-      browse(TEAM_ROOT);
+      browse(NEW_TELOP_ROOT);
     }
   }, [open, browse]);
 
