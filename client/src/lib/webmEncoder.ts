@@ -1,14 +1,16 @@
 /**
- * Browser-side WebM (VP9 alpha + Opus) encoder.
+ * Browser-side WebM (VP9 alpha + Opus) encoder using MediaRecorder.
  *
- * Replaces the server-side FFmpeg pipeline so the app can run on free static
- * hosting (Netlify) without backend video processing.
+ * Chrome's VideoEncoder API does NOT support VP9 alpha encoding
+ * (see W3C WebCodecs issue #200). MediaRecorder + canvas.captureStream()
+ * DOES support VP9 alpha when the canvas has an alpha channel.
  *
- * Requirements: Chrome 94+ / Edge 94+ (WebCodecs API).
- * Firefox WebCodecs support is partial — encoding may fail there.
+ * Trade-off: MediaRecorder records in real-time (wall clock). A 3-minute
+ * song takes 3 minutes to export. This is the price of running entirely
+ * in the browser without server-side FFmpeg.
+ *
+ * Requirements: Chrome 90+ / Edge 90+. Firefox may output opaque video.
  */
-
-import { Muxer, ArrayBufferTarget } from "webm-muxer";
 
 /**
  * Per-frame descriptor produced by the caller's frame generator.
@@ -16,9 +18,9 @@ import { Muxer, ArrayBufferTarget } from "webm-muxer";
  * clip length.
  */
 export interface FrameSpec {
-  /** Source canvas to capture. Will be wrapped as a VideoFrame. */
+  /** Source canvas to capture. Will be drawn onto the recording canvas. */
   canvas: HTMLCanvasElement;
-  /** Display duration in seconds (will be quantized to per-frame ticks). */
+  /** Display duration in seconds. */
   duration: number;
 }
 
@@ -38,7 +40,7 @@ export interface EncodeOptions {
   /** Audio source (MP3/WAV/etc — anything decodeAudioData accepts). Optional. */
   audioBlob?: Blob | null;
   audioBitrate?: number;
-  /** 0..1 progress callback. */
+  /** Called with phase + 0..1 progress. */
   onProgress?: (phase: "video" | "audio" | "mux" | "finalize", pct: number) => void;
   /** Periodically called for cancellation; if it returns true, encode aborts. */
   isCancelled?: () => boolean;
@@ -52,325 +54,245 @@ export interface EncodeResult {
 }
 
 /**
- * Quick browser support probe. Throws (with a Japanese-friendly message) if any
- * required API is missing so callers can show a clear error before starting.
+ * Pick the best supported MIME type for VP9 alpha + Opus.
+ * Priority: VP9 with alpha → VP9 → VP8 → webm.
  */
-export async function checkWebMEncoderSupport(width: number, height: number): Promise<{
-  supported: boolean;
-  details: { videoEncoder: boolean; audioEncoder: boolean; vp9Alpha: boolean; opus: boolean; triedCodec?: string; probeError?: string };
-  reason?: string;
-}> {
-  const details: any = {
-    videoEncoder: typeof VideoEncoder !== "undefined",
-    audioEncoder: typeof AudioEncoder !== "undefined",
-    vp9Alpha: false,
-    opus: false,
-  };
-  if (!details.videoEncoder) {
-    return { supported: false, details, reason: "このブラウザは VideoEncoder (WebCodecs) に対応していません。Chrome / Edge の最新版をお使いください。" };
-  }
-  if (!details.audioEncoder) {
-    return { supported: false, details, reason: "このブラウザは AudioEncoder に対応していません。Chrome / Edge の最新版をお使いください。" };
-  }
-  // Try a sequence of VP9 codec strings. Different Chrome versions accept
-  // different profile combinations for alpha; we pick the first that works.
-  // VP9 codec strings: vp09.<profile>.<level>.<bitDepth>
-  // Level encodes the max resolution:
-  //   5.2 (52) = 1920x1080, 6.0 (60) = 4096x2304, 6.1 (61) = higher fps
+function pickMimeType(): string | null {
+  if (typeof MediaRecorder === "undefined") return null;
   const candidates = [
-    "vp09.00.61.08",
-    "vp09.00.60.08",
-    "vp09.00.52.08",
-    "vp09.02.61.10",
-    "vp09.00.51.08",
-    "vp09.00.10.08",
-    "vp9",
+    'video/webm;codecs="vp9,opus"',
+    "video/webm;codecs=vp9,opus",
+    'video/webm;codecs="vp09.00.10.08,opus"',
+    "video/webm;codecs=vp9",
+    "video/webm",
   ];
-  const attempts: { codec: string; alpha: "keep" | "discard"; supported?: boolean; error?: string }[] = [];
-  let lastErr: string | undefined;
-  console.log(`[WebMEncoder] Probing VP9 alpha support for ${width}x${height}...`);
-  for (const codec of candidates) {
-    // Try with alpha first, fall back to no-alpha so we can diagnose which
-    // codecs work at all for this resolution vs which only fail because of alpha.
-    for (const alphaMode of ["keep", "discard"] as const) {
-      try {
-        const v = await VideoEncoder.isConfigSupported({
-          codec,
-          width, height,
-          bitrate: 4_000_000, framerate: 30,
-          alpha: alphaMode,
-        });
-        attempts.push({ codec, alpha: alphaMode, supported: !!v.supported });
-        console.log(`[WebMEncoder]  ${codec} alpha=${alphaMode}: ${v.supported ? "✓ supported" : "✗ rejected"}`);
-        if (alphaMode === "keep" && v.supported) {
-          details.vp9Alpha = true;
-          details.triedCodec = codec;
-          break;
-        }
-      } catch (e: any) {
-        const msg = e?.message || String(e);
-        attempts.push({ codec, alpha: alphaMode, error: msg });
-        console.log(`[WebMEncoder]  ${codec} alpha=${alphaMode}: ✗ threw ${msg}`);
-        lastErr = msg;
+  for (const t of candidates) {
+    try {
+      if (MediaRecorder.isTypeSupported(t)) {
+        console.log(`[WebMEncoder] MediaRecorder will use mimeType: ${t}`);
+        return t;
       }
+    } catch {
+      /* ignore */
     }
-    if (details.vp9Alpha) break;
   }
-  (details as any).attempts = attempts;
-  if (!details.vp9Alpha && lastErr) details.probeError = lastErr;
-  try {
-    const a = await AudioEncoder.isConfigSupported({
-      codec: "opus", sampleRate: 48000, numberOfChannels: 2, bitrate: 128_000,
-    });
-    details.opus = !!a.supported;
-  } catch { /* ignore */ }
-  if (!details.vp9Alpha) {
-    const tryCount = attempts.length;
-    const anyNoAlpha = attempts.some(a => a.alpha === "discard" && a.supported);
-    const hint = anyNoAlpha
-      ? "(VP9自体は動きますがalpha未対応。ブラウザまたはOSのハードウェアエンコーダーが alpha をサポートしていません。)"
-      : "(VP9 自体が動きません。DevToolsのConsoleの [WebMEncoder] ログをご確認ください。)";
-    const diag = `${width}x${height}, ${tryCount}個のコーデックを試行, 最新エラー: ${details.probeError || "なし"}`;
-    return { supported: false, details, reason: `VP9 (alpha) エンコードがブラウザでサポートされていません。 ${hint} [${diag}]` };
-  }
-  if (!details.opus) {
-    return { supported: false, details, reason: "Opus 音声エンコードがブラウザでサポートされていません。" };
-  }
-  return { supported: true, details };
+  return null;
 }
 
 /**
- * Encode the given frame sequence (with optional audio) to a WebM Blob.
+ * Quick support probe. Called before starting the UI flow.
+ */
+export async function checkWebMEncoderSupport(_width: number, _height: number): Promise<{
+  supported: boolean;
+  details: { mediaRecorder: boolean; mimeType: string | null };
+  reason?: string;
+}> {
+  const mediaRecorder = typeof MediaRecorder !== "undefined";
+  const mimeType = mediaRecorder ? pickMimeType() : null;
+  if (!mediaRecorder) {
+    return {
+      supported: false,
+      details: { mediaRecorder: false, mimeType: null },
+      reason: "このブラウザは MediaRecorder に対応していません。Chrome / Edge の最新版をお使いください。",
+    };
+  }
+  if (!mimeType) {
+    return {
+      supported: false,
+      details: { mediaRecorder: true, mimeType: null },
+      reason: "このブラウザは VP9 / WebM エンコーディングに対応していません。",
+    };
+  }
+  return { supported: true, details: { mediaRecorder: true, mimeType } };
+}
+
+/**
+ * Encode the given frame sequence (with optional audio) to a WebM Blob
+ * using MediaRecorder + canvas.captureStream().
  *
- * Each EncodeFrame is held on screen for `duration` seconds. The function
- * computes per-frame timestamps so the resulting WebM matches the original
- * timing exactly.
+ * Records in real-time: a 3-minute clip takes 3 minutes to encode.
  */
 export async function encodeWebMAlpha(opts: EncodeOptions): Promise<EncodeResult> {
   if (opts.frameCount === 0) throw new Error("フレームが0枚です");
-  const { width, height, fps, videoBitrate, frameCount, getFrame, audioBlob, audioBitrate = 192_000, onProgress, isCancelled } = opts;
+  const {
+    width, height, fps, videoBitrate, frameCount, getFrame,
+    audioBlob, audioBitrate = 192_000, onProgress, isCancelled,
+  } = opts;
 
-  // isConfigSupported is conservative on many Chrome builds — it can return
-  // supported=false for VP9 alpha even when encoder.configure() actually works.
-  // Strategy: try configuring each codec and use the first one that succeeds.
-  const codecCandidates = [
-    "vp09.00.61.08",
-    "vp09.00.60.08",
-    "vp09.00.52.08",
-    "vp09.02.61.10",
-    "vp09.00.51.08",
-    "vp09.00.10.08",
-    "vp9",
-  ];
-
-  const muxer = new Muxer({
-    target: new ArrayBufferTarget(),
-    video: {
-      codec: "V_VP9",
-      width, height,
-      frameRate: fps,
-      alpha: true,
-    },
-    audio: audioBlob ? {
-      codec: "A_OPUS",
-      sampleRate: 48000,
-      numberOfChannels: 2,
-    } : undefined,
-  });
-
-  // ── Video encoder ────────────────────────────────────────────────────────
-  // Try each codec by configuring and verifying the encoder stays in
-  // "configured" state. Chrome's VideoEncoder may accept configure() but then
-  // async-close due to an unsupported config (e.g. alpha on VP9 without
-  // hardware support). We wait for errors to surface and only trust an
-  // encoder whose state is still "configured" afterwards.
-  let videoChunkCount = 0;
-  let videoEncoder: VideoEncoder | null = null;
-  let workingCodec: string | null = null;
-  const configureErrors: string[] = [];
-
-  for (const codec of codecCandidates) {
-    let asyncError: string | null = null;
-    const enc = new VideoEncoder({
-      output: (chunk, meta) => {
-        muxer.addVideoChunk(chunk, meta);
-        videoChunkCount++;
-      },
-      error: (e: any) => {
-        asyncError = e?.message || String(e);
-        console.log(`[WebMEncoder]  ${codec} async error: ${asyncError}`);
-      },
-    });
-    try {
-      enc.configure({
-        codec,
-        width, height,
-        bitrate: videoBitrate,
-        framerate: fps,
-        alpha: "keep",
-        latencyMode: "quality",
-      });
-    } catch (e: any) {
-      const msg = e?.message || String(e);
-      configureErrors.push(`${codec}: configure threw: ${msg}`);
-      console.log(`[WebMEncoder] ✗ codec=${codec} configure threw: ${msg}`);
-      try { enc.close(); } catch { /* ignore */ }
-      continue;
-    }
-    // Let any async error event fire before we check the state.
-    await new Promise((r) => setTimeout(r, 50));
-    if (asyncError || enc.state === "closed") {
-      configureErrors.push(`${codec}: ${asyncError || "state went to closed"}`);
-      console.log(`[WebMEncoder] ✗ codec=${codec} closed after configure (${asyncError || "no error msg"})`);
-      try { enc.close(); } catch { /* ignore */ }
-      continue;
-    }
-    videoEncoder = enc;
-    workingCodec = codec;
-    console.log(`[WebMEncoder] ✓ codec=${codec} configured + stable at ${width}x${height}@${fps}fps`);
-    break;
+  const mimeType = pickMimeType();
+  if (!mimeType) {
+    throw new Error("このブラウザは VP9 WebM 書き出しに対応していません。Chrome / Edge の最新版をお使いください。");
   }
 
-  if (!videoEncoder || !workingCodec) {
-    throw new Error(
-      `ブラウザがVP9 Alphaエンコーダーを初期化できませんでした。` +
-      `試行コーデック ${codecCandidates.length}個、すべて失敗。\n` +
-      configureErrors.slice(0, 3).map(e => "・" + e).join("\n")
-    );
-  }
+  // ── Prepare the recording canvas ──────────────────────────────────────
+  // This is the canvas whose stream will be recorded. We draw each source
+  // frame onto it at the right time. Alpha channel is preserved.
+  const recCanvas = document.createElement("canvas");
+  recCanvas.width = width;
+  recCanvas.height = height;
+  const recCtx = recCanvas.getContext("2d", { alpha: true });
+  if (!recCtx) throw new Error("2D コンテキストを取得できませんでした");
 
-  // Swap the output handler to the one that counts chunks. The previous
-  // handler attached during the probe loop is shared because encoders were
-  // closed when they failed.
-  // (Already attached; just use the successful encoder.)
+  // captureStream(0) = manual frame requests via requestFrame(). That lets
+  // us pace the capture on our own timer, which matters because getFrame()
+  // can be slightly slow and we don't want the stream to sample a half-drawn
+  // canvas.
+  const videoStream = (recCanvas as HTMLCanvasElement & {
+    captureStream: (fps?: number) => MediaStream;
+  }).captureStream(0);
+  const videoTrack = videoStream.getVideoTracks()[0] as MediaStreamTrack & {
+    requestFrame?: () => void;
+  };
 
-  // We compose our own timestamps because each frame can have arbitrary
-  // duration. timestamps must be monotonic & in microseconds.
-  let cursorMicro = 0;
-  const microsPerFrame = Math.round(1_000_000 / fps);
-  let totalDurationSec = 0;
-  let lastKeyframeMicro = -Infinity; // force first frame to be a keyframe
+  // ── Prepare audio (optional) ──────────────────────────────────────────
+  // Decode the audio file, create an AudioBufferSourceNode, and route it
+  // into a MediaStreamDestination. Playback starts in sync with the
+  // MediaRecorder so timing lines up with the video.
+  let audioCtx: AudioContext | null = null;
+  let audioSource: AudioBufferSourceNode | null = null;
+  let audioStream: MediaStream | null = null;
+  let decodedAudioDuration = 0;
 
-  for (let i = 0; i < frameCount; i++) {
-    if (isCancelled?.()) {
-      try { videoEncoder.close(); } catch { /* ignore */ }
-      throw new Error("キャンセルされました");
-    }
-    const f = await getFrame(i);
-    const durationMicro = Math.max(microsPerFrame, Math.round(f.duration * 1_000_000));
-    const vf = new VideoFrame(f.canvas, {
-      timestamp: cursorMicro,
-      duration: durationMicro,
-      alpha: "keep",
-    });
-    // Force a keyframe every ~1 second to keep seeking responsive.
-    const keyFrame = (cursorMicro - lastKeyframeMicro) >= 1_000_000;
-    if (keyFrame) lastKeyframeMicro = cursorMicro;
-    videoEncoder.encode(vf, { keyFrame });
-    vf.close();
-    cursorMicro += durationMicro;
-    totalDurationSec = cursorMicro / 1_000_000;
-
-    // Throttle progress + yield. Also throttle the encoder when it gets backed up
-    // so we don't overflow the encoder's internal queue on long clips.
-    if (i % 10 === 0) {
-      onProgress?.("video", (i + 1) / frameCount);
-      while (videoEncoder.encodeQueueSize > 30) {
-        await new Promise((r) => setTimeout(r, 16));
-        if (isCancelled?.()) {
-          try { videoEncoder.close(); } catch { /* ignore */ }
-          throw new Error("キャンセルされました");
-        }
-      }
-      await new Promise((r) => setTimeout(r, 0));
-    }
-  }
-  await videoEncoder.flush();
-  videoEncoder.close();
-  onProgress?.("video", 1);
-
-  // ── Audio encoder (optional) ────────────────────────────────────────────
   if (audioBlob) {
-    if (isCancelled?.()) throw new Error("キャンセルされました");
     onProgress?.("audio", 0);
-
-    const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 48000 });
+    audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 48000 });
     const arrayBuf = await audioBlob.arrayBuffer();
     const decoded = await audioCtx.decodeAudioData(arrayBuf.slice(0));
-
-    // Trim audio to match video duration so the file isn't bloated by trailing silence.
-    const targetSamples = Math.min(decoded.length, Math.floor(totalDurationSec * decoded.sampleRate));
-    const channelCount = Math.min(2, decoded.numberOfChannels); // downmix mono->mono, anything else -> stereo
-    const sampleRate = decoded.sampleRate;
-
-    let audioChunkCount = 0;
-    const audioEncoder = new AudioEncoder({
-      output: (chunk, meta) => {
-        muxer.addAudioChunk(chunk, meta);
-        audioChunkCount++;
-      },
-      error: (e) => { throw e; },
-    });
-    audioEncoder.configure({
-      codec: "opus",
-      sampleRate,
-      numberOfChannels: channelCount,
-      bitrate: audioBitrate,
-    });
-
-    // Push audio in ~20ms chunks (matches Opus internal frame size, gives smooth progress).
-    const chunkSamples = Math.floor(sampleRate * 0.02);
-    let written = 0;
-    while (written < targetSamples) {
-      if (isCancelled?.()) {
-        try { audioEncoder.close(); } catch { /* ignore */ }
-        throw new Error("キャンセルされました");
-      }
-      const len = Math.min(chunkSamples, targetSamples - written);
-      // Interleave channels into a single Float32Array (AudioData "f32" format).
-      const interleaved = new Float32Array(len * channelCount);
-      for (let ch = 0; ch < channelCount; ch++) {
-        // If source is mono and we asked for stereo, channelCount==1 above already.
-        const srcCh = ch < decoded.numberOfChannels ? ch : 0;
-        const data = decoded.getChannelData(srcCh);
-        for (let s = 0; s < len; s++) {
-          interleaved[s * channelCount + ch] = data[written + s];
-        }
-      }
-      const audioData = new AudioData({
-        format: "f32",
-        sampleRate,
-        numberOfFrames: len,
-        numberOfChannels: channelCount,
-        timestamp: Math.round((written / sampleRate) * 1_000_000),
-        data: interleaved,
-      });
-      audioEncoder.encode(audioData);
-      audioData.close();
-      written += len;
-      if ((written / chunkSamples) % 25 === 0) {
-        onProgress?.("audio", written / targetSamples);
-        await new Promise((r) => setTimeout(r, 0));
-      }
-    }
-    await audioEncoder.flush();
-    audioEncoder.close();
-    try { await audioCtx.close(); } catch { /* ignore */ }
+    decodedAudioDuration = decoded.duration;
+    audioSource = audioCtx.createBufferSource();
+    audioSource.buffer = decoded;
+    const dest = audioCtx.createMediaStreamDestination();
+    audioSource.connect(dest);
+    audioStream = dest.stream;
     onProgress?.("audio", 1);
   }
 
-  // ── Finalize ─────────────────────────────────────────────────────────────
-  onProgress?.("finalize", 0.5);
-  muxer.finalize();
-  const buffer = (muxer.target as ArrayBufferTarget).buffer;
-  const blob = new Blob([buffer], { type: "video/webm" });
+  // Combine video + audio into one stream for MediaRecorder.
+  const combinedStream = new MediaStream([
+    ...videoStream.getVideoTracks(),
+    ...(audioStream ? audioStream.getAudioTracks() : []),
+  ]);
+
+  // ── Set up MediaRecorder ──────────────────────────────────────────────
+  const chunks: Blob[] = [];
+  const recorder = new MediaRecorder(combinedStream, {
+    mimeType,
+    videoBitsPerSecond: videoBitrate,
+    audioBitsPerSecond: audioBitrate,
+  });
+
+  let recorderError: Error | null = null;
+  recorder.ondataavailable = (e) => {
+    if (e.data && e.data.size > 0) chunks.push(e.data);
+  };
+  recorder.onerror = (e: any) => {
+    recorderError = new Error(`MediaRecorder error: ${e?.error?.message || e?.error || "unknown"}`);
+    console.error("[WebMEncoder] MediaRecorder error:", e);
+  };
+
+  // ── Compute total duration so we know when to stop ────────────────────
+  let totalDurationSec = 0;
+  const frameDurations: number[] = [];
+  const microsPerFrame = 1 / fps;
+  // Pre-compute and clamp durations to at least one frame.
+  for (let i = 0; i < frameCount; i++) {
+    // We can't call getFrame() here to measure because it has side effects
+    // (drawing). Instead we re-ask during playback. But we still need a
+    // total estimate for progress; we'll update on the fly.
+  }
+  // We compute totalDurationSec progressively during playback instead.
+
+  // ── Start recording ───────────────────────────────────────────────────
+  recorder.start();
+  // Give the recorder a beat to settle before we start feeding frames.
+  await new Promise((r) => setTimeout(r, 50));
+
+  // Start audio in sync with the recorder.
+  if (audioSource && audioCtx) {
+    try {
+      await audioCtx.resume();
+    } catch { /* ignore */ }
+    audioSource.start(0);
+  }
+
+  // ── Drive the playback loop in real time ──────────────────────────────
+  const startedAt = performance.now();
+  let frameCountDone = 0;
+
+  try {
+    for (let i = 0; i < frameCount; i++) {
+      if (isCancelled?.()) throw new Error("キャンセルされました");
+      if (recorderError) throw recorderError;
+
+      const f = await getFrame(i);
+      // Draw source canvas onto the recording canvas (it may be a cropped view).
+      // Clear first to preserve alpha from the source.
+      recCtx.clearRect(0, 0, width, height);
+      recCtx.drawImage(f.canvas, 0, 0, width, height);
+      // Ask the stream to sample the just-drawn frame.
+      videoTrack.requestFrame?.();
+
+      const dur = Math.max(microsPerFrame, f.duration);
+      totalDurationSec += dur;
+
+      // Wait until wall clock reaches the next frame's target time.
+      const targetMs = startedAt + totalDurationSec * 1000;
+      const nowMs = performance.now();
+      const sleepMs = targetMs - nowMs;
+      if (sleepMs > 2) {
+        await new Promise((r) => setTimeout(r, sleepMs));
+      }
+
+      frameCountDone++;
+      if (i % 5 === 0 || i === frameCount - 1) {
+        onProgress?.("video", (i + 1) / frameCount);
+      }
+    }
+  } finally {
+    // Stop audio playback if it's still running (happens if we cancelled mid-way
+    // or the audio is longer than the video).
+    try {
+      audioSource?.stop();
+    } catch { /* ignore (already stopped) */ }
+  }
+
+  onProgress?.("video", 1);
+
+  // ── Stop recording + wait for final data ──────────────────────────────
+  onProgress?.("finalize", 0.2);
+  await new Promise<void>((resolve, reject) => {
+    const t = setTimeout(() => {
+      reject(new Error("MediaRecorder stop timeout"));
+    }, 10000);
+    recorder.onstop = () => {
+      clearTimeout(t);
+      resolve();
+    };
+    try {
+      recorder.stop();
+    } catch (e) {
+      clearTimeout(t);
+      reject(e);
+    }
+  });
+  onProgress?.("finalize", 0.7);
+
+  // Cleanup.
+  try { audioCtx?.close(); } catch { /* ignore */ }
+  try {
+    combinedStream.getTracks().forEach((t) => t.stop());
+  } catch { /* ignore */ }
+
+  if (recorderError) throw recorderError;
+  if (chunks.length === 0) throw new Error("録画データが生成されませんでした");
+
+  const blob = new Blob(chunks, { type: mimeType.split(";")[0] });
   onProgress?.("finalize", 1);
 
   return {
     blob,
-    byteLength: buffer.byteLength,
-    videoFrames: videoChunkCount,
-    durationSec: totalDurationSec,
+    byteLength: blob.size,
+    videoFrames: frameCountDone,
+    durationSec: totalDurationSec || decodedAudioDuration,
   };
 }
-
