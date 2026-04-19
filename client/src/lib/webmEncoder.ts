@@ -179,21 +179,29 @@ export async function encodeWebMAlpha(opts: EncodeOptions): Promise<EncodeResult
   });
 
   // ── Video encoder ────────────────────────────────────────────────────────
-  // Try each codec by actually configuring the encoder (isConfigSupported
-  // lies on some Chrome versions for VP9 alpha).
+  // Try each codec by configuring and verifying the encoder stays in
+  // "configured" state. Chrome's VideoEncoder may accept configure() but then
+  // async-close due to an unsupported config (e.g. alpha on VP9 without
+  // hardware support). We wait for errors to surface and only trust an
+  // encoder whose state is still "configured" afterwards.
   let videoChunkCount = 0;
   let videoEncoder: VideoEncoder | null = null;
   let workingCodec: string | null = null;
   const configureErrors: string[] = [];
+
   for (const codec of codecCandidates) {
+    let asyncError: string | null = null;
+    const enc = new VideoEncoder({
+      output: (chunk, meta) => {
+        muxer.addVideoChunk(chunk, meta);
+        videoChunkCount++;
+      },
+      error: (e: any) => {
+        asyncError = e?.message || String(e);
+        console.log(`[WebMEncoder]  ${codec} async error: ${asyncError}`);
+      },
+    });
     try {
-      const enc = new VideoEncoder({
-        output: (chunk, meta) => {
-          muxer.addVideoChunk(chunk, meta);
-          videoChunkCount++;
-        },
-        error: (e) => { throw e; },
-      });
       enc.configure({
         codec,
         width, height,
@@ -202,16 +210,27 @@ export async function encodeWebMAlpha(opts: EncodeOptions): Promise<EncodeResult
         alpha: "keep",
         latencyMode: "quality",
       });
-      videoEncoder = enc;
-      workingCodec = codec;
-      console.log(`[WebMEncoder] ✓ codec=${codec} configured successfully at ${width}x${height}@${fps}fps`);
-      break;
     } catch (e: any) {
       const msg = e?.message || String(e);
-      configureErrors.push(`${codec}: ${msg}`);
-      console.log(`[WebMEncoder] ✗ codec=${codec} failed to configure: ${msg}`);
+      configureErrors.push(`${codec}: configure threw: ${msg}`);
+      console.log(`[WebMEncoder] ✗ codec=${codec} configure threw: ${msg}`);
+      try { enc.close(); } catch { /* ignore */ }
+      continue;
     }
+    // Let any async error event fire before we check the state.
+    await new Promise((r) => setTimeout(r, 50));
+    if (asyncError || enc.state === "closed") {
+      configureErrors.push(`${codec}: ${asyncError || "state went to closed"}`);
+      console.log(`[WebMEncoder] ✗ codec=${codec} closed after configure (${asyncError || "no error msg"})`);
+      try { enc.close(); } catch { /* ignore */ }
+      continue;
+    }
+    videoEncoder = enc;
+    workingCodec = codec;
+    console.log(`[WebMEncoder] ✓ codec=${codec} configured + stable at ${width}x${height}@${fps}fps`);
+    break;
   }
+
   if (!videoEncoder || !workingCodec) {
     throw new Error(
       `ブラウザがVP9 Alphaエンコーダーを初期化できませんでした。` +
@@ -219,6 +238,11 @@ export async function encodeWebMAlpha(opts: EncodeOptions): Promise<EncodeResult
       configureErrors.slice(0, 3).map(e => "・" + e).join("\n")
     );
   }
+
+  // Swap the output handler to the one that counts chunks. The previous
+  // handler attached during the probe loop is shared because encoders were
+  // closed when they failed.
+  // (Already attached; just use the successful encoder.)
 
   // We compose our own timestamps because each frame can have arbitrary
   // duration. timestamps must be monotonic & in microseconds.
