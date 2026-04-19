@@ -645,8 +645,28 @@ export function ExportDialog({
         globalMaxY = outputHeight - 1;
       }
       const CROP_PAD = 30;
-      const cropTop = Math.max(0, globalMinY - CROP_PAD);
-      const cropBottom = Math.min(outputHeight - 1, globalMaxY + CROP_PAD);
+      // VP9 in WebCodecs needs a minimum height (~144 in spec, 240+ to be safe).
+      // If the detected text band is too thin, pad equally above + below so we
+      // still get a tight crop but stay above the encoder's minimum.
+      const MIN_ENC_HEIGHT = 240;
+      let rawTop = Math.max(0, globalMinY - CROP_PAD);
+      let rawBottom = Math.min(outputHeight - 1, globalMaxY + CROP_PAD);
+      let rawHeight = rawBottom - rawTop + 1;
+      if (rawHeight < MIN_ENC_HEIGHT) {
+        const need = MIN_ENC_HEIGHT - rawHeight;
+        const addTop = Math.floor(need / 2);
+        const addBot = need - addTop;
+        rawTop = Math.max(0, rawTop - addTop);
+        rawBottom = Math.min(outputHeight - 1, rawBottom + addBot);
+        // If we hit the canvas edge and still short, expand the other side.
+        const newHeight = rawBottom - rawTop + 1;
+        if (newHeight < MIN_ENC_HEIGHT) {
+          if (rawTop === 0) rawBottom = Math.min(outputHeight - 1, rawTop + MIN_ENC_HEIGHT - 1);
+          else rawTop = Math.max(0, rawBottom - MIN_ENC_HEIGHT + 1);
+        }
+      }
+      const cropTop = rawTop;
+      const cropBottom = rawBottom;
       const cropActive = cropBottom > cropTop && (cropBottom - cropTop + 1) < outputHeight * 0.85;
       const cropY = cropActive ? cropTop : 0;
       const encWidth = outputWidth;
