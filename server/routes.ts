@@ -103,6 +103,23 @@ function requireAuth(req: Request, res: Response, next: NextFunction) {
   next();
 }
 
+// Ownership check for project-scoped routes.
+// Legacy projects (ownerId = null) remain accessible to any authenticated user for
+// backward compatibility; new projects are always tagged with the creating user.
+async function requireProjectAccess(req: Request, res: Response, next: NextFunction) {
+  const projectId = req.params.id;
+  if (!projectId) return res.status(400).json({ message: "projectId が必要です" });
+  const project = await serverStorage.getProject(projectId);
+  if (!project) return res.status(404).json({ message: "プロジェクトが見つかりません" });
+  const userId = req.session.userId!;
+  if (project.ownerId && project.ownerId !== userId) {
+    return res.status(403).json({ message: "このプロジェクトへのアクセス権がありません" });
+  }
+  // Attach so downstream handlers can skip re-fetching.
+  (req as any).project = project;
+  next();
+}
+
 export async function registerRoutes(
   httpServer: Server,
   app: Express
@@ -179,8 +196,15 @@ export async function registerRoutes(
   });
 
   app.post("/api/auth/logout", (req: Request, res: Response) => {
-    req.session.destroy(() => {});
-    res.json({ success: true });
+    req.session.destroy((err) => {
+      if (err) {
+        console.error("[auth] session destroy failed:", err);
+        return res.status(500).json({ message: "ログアウト処理に失敗しました" });
+      }
+      // Also clear the session cookie on the client side.
+      res.clearCookie("connect.sid");
+      res.json({ success: true });
+    });
   });
 
   app.get("/api/auth/me", (req: Request, res: Response) => {
@@ -243,46 +267,49 @@ export async function registerRoutes(
     res.json(result);
   });
 
-  app.get("/api/sync/projects", requireAuth, async (_req: Request, res: Response) => {
-    const all = await serverStorage.getAllProjects();
+  // List only the current user's projects (+ legacy null-owner projects).
+  app.get("/api/sync/projects", requireAuth, async (req: Request, res: Response) => {
+    const userId = req.session.userId!;
+    const all = await serverStorage.getProjectsForUser(userId);
     res.json(all);
   });
 
-  app.get("/api/sync/projects/:id", requireAuth, async (req: Request, res: Response) => {
-    const p = await serverStorage.getProject(req.params.id);
-    if (!p) return res.status(404).json({ message: "Not found" });
-    res.json(p);
+  app.get("/api/sync/projects/:id", requireAuth, requireProjectAccess, async (req: Request, res: Response) => {
+    res.json((req as any).project);
   });
 
-  app.put("/api/sync/projects/:id", requireAuth, async (req: Request, res: Response) => {
+  app.put("/api/sync/projects/:id", requireAuth, requireProjectAccess, async (req: Request, res: Response) => {
     const data = req.body;
     data.id = req.params.id;
+    // Preserve ownerId from existing project; if legacy-null, claim for current user.
+    const existing = (req as any).project;
+    data.ownerId = existing.ownerId ?? req.session.userId!;
     const result = await serverStorage.upsertProject(data);
     res.json(result);
   });
 
-  app.delete("/api/sync/projects/:id", requireAuth, async (req: Request, res: Response) => {
+  app.delete("/api/sync/projects/:id", requireAuth, requireProjectAccess, async (req: Request, res: Response) => {
     await serverStorage.deleteProject(req.params.id);
     res.json({ success: true });
   });
 
-  app.get("/api/sync/projects/:id/lyrics", requireAuth, async (req: Request, res: Response) => {
+  app.get("/api/sync/projects/:id/lyrics", requireAuth, requireProjectAccess, async (req: Request, res: Response) => {
     const lines = await serverStorage.getLyrics(req.params.id);
     res.json(lines);
   });
 
-  app.put("/api/sync/projects/:id/lyrics", requireAuth, async (req: Request, res: Response) => {
+  app.put("/api/sync/projects/:id/lyrics", requireAuth, requireProjectAccess, async (req: Request, res: Response) => {
     const lines = req.body.lines || [];
     await serverStorage.syncLyrics(req.params.id, lines);
     res.json({ success: true });
   });
 
-  app.get("/api/sync/projects/:id/audio-tracks", requireAuth, async (req: Request, res: Response) => {
+  app.get("/api/sync/projects/:id/audio-tracks", requireAuth, requireProjectAccess, async (req: Request, res: Response) => {
     const tracks = await serverStorage.getAudioTrackMeta(req.params.id);
     res.json(tracks);
   });
 
-  app.put("/api/sync/projects/:id/audio-tracks", requireAuth, async (req: Request, res: Response) => {
+  app.put("/api/sync/projects/:id/audio-tracks", requireAuth, requireProjectAccess, async (req: Request, res: Response) => {
     const tracks = req.body.tracks || [];
     await serverStorage.syncAudioTrackMeta(req.params.id, tracks);
     res.json({ success: true });
@@ -291,8 +318,13 @@ export async function registerRoutes(
   app.post("/api/sync/push", requireAuth, async (req: Request, res: Response) => {
     const { project, lyrics: lyricsData, audioTracks: tracksData, markers: markersData } = req.body;
     if (!project || !project.id) return res.status(400).json({ message: "Project data required" });
+    const userId = req.session.userId!;
 
     const serverProject = await serverStorage.getProject(project.id);
+    // Authorization: reject pushes from non-owners on existing projects.
+    if (serverProject && serverProject.ownerId && serverProject.ownerId !== userId) {
+      return res.status(403).json({ message: "このプロジェクトへのアクセス権がありません" });
+    }
     if (serverProject && serverProject.version > (project.version || 0)) {
       return res.status(409).json({
         message: "サーバーに新しいバージョンがあります",
@@ -302,7 +334,9 @@ export async function registerRoutes(
     }
 
     const newVersion = (project.version || 0) + 1;
-    await serverStorage.upsertProject({ ...project, version: newVersion });
+    // Always tag the owner: preserve existing (for legacy, claim it) or assign the pusher.
+    const ownerId = serverProject?.ownerId ?? userId;
+    await serverStorage.upsertProject({ ...project, ownerId, version: newVersion });
     if (lyricsData) await serverStorage.syncLyrics(project.id, lyricsData);
     if (tracksData) await serverStorage.syncAudioTrackMeta(project.id, tracksData);
     if (markersData) await serverStorage.syncCheckMarkers(project.id, markersData);
@@ -312,8 +346,9 @@ export async function registerRoutes(
 
   app.post("/api/sync/pull", requireAuth, async (req: Request, res: Response) => {
     const { projectIds } = req.body;
+    const userId = req.session.userId!;
     if (!projectIds || !Array.isArray(projectIds)) {
-      const allProjects = await serverStorage.getAllProjects();
+      const allProjects = await serverStorage.getProjectsForUser(userId);
       return res.json({ projects: allProjects, lyrics: {}, audioTracks: {} });
     }
 
@@ -326,7 +361,8 @@ export async function registerRoutes(
 
     for (const pid of projectIds) {
       const p = await serverStorage.getProject(pid);
-      if (p) {
+      // Filter: only return projects the user owns (or legacy null-owner projects).
+      if (p && (!p.ownerId || p.ownerId === userId)) {
         result.projects.push(p);
         result.lyrics[pid] = await serverStorage.getLyrics(pid);
         result.audioTracks[pid] = await serverStorage.getAudioTrackMeta(pid);
@@ -337,8 +373,9 @@ export async function registerRoutes(
     res.json(result);
   });
 
-  app.get("/api/sync/pull-all", requireAuth, async (_req: Request, res: Response) => {
-    const allProjects = await serverStorage.getAllProjects();
+  app.get("/api/sync/pull-all", requireAuth, async (req: Request, res: Response) => {
+    const userId = req.session.userId!;
+    const allProjects = await serverStorage.getProjectsForUser(userId);
     const result: { projects: any[]; lyrics: Record<string, any[]>; audioTracks: Record<string, any[]>; markers: Record<string, any[]> } = {
       projects: allProjects,
       lyrics: {},
@@ -353,7 +390,24 @@ export async function registerRoutes(
     res.json(result);
   });
 
-  const exportSessions = new Map<string, { dir: string; frameCount: number; createdAt: number; audioPath?: string; encodeStatus?: string; encodeError?: string | null; outputPath?: string; isProRes?: boolean }>();
+  const exportSessions = new Map<string, {
+    dir: string;
+    frameCount: number;
+    createdAt: number;
+    audioPath?: string;
+    encodeStatus?: string;
+    encodeError?: string | null;
+    outputPath?: string;
+    isProRes?: boolean;
+    // Progress fields populated while ffmpeg is encoding
+    encodeProgress?: {
+      currentFrame: number;
+      totalFrames: number;
+      percent: number;
+      fps: number;
+      startedAt: number;
+    };
+  }>();
 
   setInterval(() => {
     const now = Date.now();
@@ -518,6 +572,15 @@ export async function registerRoutes(
 
     console.log(`[FFmpeg] Starting encode (${FFMPEG_BIN}):`, ffmpegArgs.join(" "));
 
+    const totalFrames = session.frameCount;
+    session.encodeProgress = {
+      currentFrame: 0,
+      totalFrames,
+      percent: 0,
+      fps: 0,
+      startedAt: Date.now(),
+    };
+
     const runEncode = () => new Promise<void>((resolve, reject) => {
       const proc = spawn(FFMPEG_BIN, ffmpegArgs, { stdio: ["ignore", "pipe", "pipe"] });
       let stderr = "";
@@ -525,6 +588,17 @@ export async function registerRoutes(
         const chunk = data.toString();
         stderr += chunk;
         if (stderr.length > 10000) stderr = stderr.slice(-5000);
+        // Parse FFmpeg progress: "frame= 1234 fps= 45 q=..."
+        const frameMatch = chunk.match(/frame=\s*(\d+)/);
+        const fpsMatch = chunk.match(/fps=\s*([\d.]+)/);
+        if (frameMatch && session.encodeProgress) {
+          const cur = parseInt(frameMatch[1], 10);
+          session.encodeProgress.currentFrame = cur;
+          session.encodeProgress.percent = totalFrames > 0
+            ? Math.min(100, Math.round((cur / totalFrames) * 100))
+            : 0;
+          if (fpsMatch) session.encodeProgress.fps = parseFloat(fpsMatch[1]);
+        }
       });
       proc.stdout.on("data", () => {});
       proc.on("close", (code) => {
@@ -602,7 +676,7 @@ export async function registerRoutes(
     }
     res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
     res.setHeader("Pragma", "no-cache");
-    res.json({ status, error, fileSize });
+    res.json({ status, error, fileSize, progress: session.encodeProgress || null });
   });
 
   app.get("/api/export/:sessionId/download", (req, res) => {

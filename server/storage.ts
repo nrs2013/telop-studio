@@ -1,7 +1,7 @@
 import { db } from "./db";
 import { users, projects, lyricLines, audioTrackMeta, checkMarkers } from "@shared/schema";
 import type { SelectUser, ServerProject, ServerLyric, ServerAudioTrackMeta, ServerCheckMarker } from "@shared/schema";
-import { eq } from "drizzle-orm";
+import { eq, or, isNull } from "drizzle-orm";
 import crypto from "crypto";
 import bcrypt from "bcryptjs";
 
@@ -65,6 +65,11 @@ export const serverStorage = {
 
   async getAllProjects(): Promise<ServerProject[]> {
     return db.select().from(projects);
+  },
+
+  // Returns projects owned by the user, plus legacy projects with no owner.
+  async getProjectsForUser(userId: string): Promise<ServerProject[]> {
+    return db.select().from(projects).where(or(eq(projects.ownerId, userId), isNull(projects.ownerId)));
   },
 
   async getProject(id: string): Promise<ServerProject | undefined> {

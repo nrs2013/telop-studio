@@ -172,6 +172,8 @@ export const syncService = {
 
     const data = await res.json();
     if (!res.ok) {
+      // Version conflict: rebase local version to server's, then retry once. If the retry
+      // also conflicts, surface the error to the user instead of looping forever.
       if (res.status === 409 && data.serverVersion) {
         await storage.updateProject(projectId, { version: data.serverVersion } as any);
         const retryProject = await storage.getProject(projectId);
@@ -201,11 +203,19 @@ export const syncService = {
             method: "POST",
             body: JSON.stringify(retryBody),
           });
-          const retryData = await retryRes.json();
-          if (retryRes.ok && retryData.version) {
-            await storage.updateProject(projectId, { version: retryData.version } as any);
-            return { success: true, version: retryData.version };
+          if (retryRes.ok) {
+            const retryData = await retryRes.json();
+            if (retryData.version) {
+              await storage.updateProject(projectId, { version: retryData.version } as any);
+              return { success: true, version: retryData.version };
+            }
           }
+          // Retry also failed (likely another concurrent editor). Stop retrying.
+          const retryData = await retryRes.json().catch(() => ({}));
+          return {
+            success: false,
+            message: retryData?.message || "他の人が同時に編集しています。少し待ってから再度保存してください。",
+          };
         }
       }
       return { success: false, message: data.message };

@@ -262,13 +262,18 @@ function autocorrelationBPM(onset: Float32Array, framesPerSec: number): BPMCandi
   for (let lag = minLag; lag <= maxLag; lag++) {
     let sum = 0;
     const n = onset.length - lag;
+    if (n <= 0) {
+      acf[lag] = 0;
+      continue;
+    }
     for (let i = 0; i < n; i++) {
       sum += onset[i] * onset[i + lag];
     }
-    acf[lag] = sum / n;
+    const value = sum / n;
+    acf[lag] = Number.isFinite(value) ? value : 0;
     if (acf[lag] > acfMax) acfMax = acf[lag];
   }
-  if (acfMax === 0) return [];
+  if (acfMax === 0 || !Number.isFinite(acfMax)) return [];
 
   const candidates: BPMCandidate[] = [];
   for (let lag = minLag + 1; lag < maxLag; lag++) {
@@ -390,6 +395,8 @@ function onsetIntervalBPM(onset: Float32Array, framesPerSec: number): BPMCandida
 }
 
 function parabolicInterp(a: number, b: number, c: number): number {
+  // Guard against NaN inputs (would propagate through the calculation).
+  if (!Number.isFinite(a) || !Number.isFinite(b) || !Number.isFinite(c)) return 0;
   const denom = 2 * (2 * b - a - c);
   if (Math.abs(denom) < 1e-10) return 0;
   return (a - c) / denom;
@@ -500,11 +507,19 @@ function resolveOctaveErrors(candidates: BPMCandidate[]): number {
   }
 
   groupEntries.sort((a, b) => b.score - a.score);
-  if (groupEntries.length === 0) return Math.round(normalized[0].bpm);
+  const FALLBACK_BPM = 120;
+  if (groupEntries.length === 0) {
+    if (normalized.length === 0) return FALLBACK_BPM;
+    const fallback = normalized[0].bpm;
+    return Number.isFinite(fallback) ? Math.round(fallback) : FALLBACK_BPM;
+  }
 
   let finalBpm = groupEntries[0].bpm;
+  // Defensive: handle NaN/Infinity that might bubble through earlier math.
+  if (!Number.isFinite(finalBpm) || finalBpm <= 0) return FALLBACK_BPM;
   while (finalBpm < 70) finalBpm *= 2;
   while (finalBpm > 200) finalBpm /= 2;
+  if (!Number.isFinite(finalBpm)) return FALLBACK_BPM;
 
   return Math.round(finalBpm);
 }

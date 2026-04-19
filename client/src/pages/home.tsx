@@ -81,7 +81,10 @@ function getJapaneseReading(name: string): string {
 }
 
 function katakanaToGroup(reading: string): string {
-  const first = reading.charAt(0);
+  // Normalize to NFC so combining marks (U+3099 dakuten / U+309A handakuten) are
+  // composed with their base character before we inspect the first codepoint.
+  const normalized = reading.normalize("NFC");
+  const first = normalized.charAt(0);
   if (!first) return "#";
   const cp = first.codePointAt(0)!;
 

@@ -1,4 +1,4 @@
-import { pgTable, varchar, text, integer, real, timestamp, doublePrecision } from "drizzle-orm/pg-core";
+import { pgTable, varchar, text, integer, real, timestamp, doublePrecision, index } from "drizzle-orm/pg-core";
   import { createInsertSchema } from "drizzle-zod";
   import { z } from "zod";
 
@@ -57,7 +57,9 @@ import { pgTable, varchar, text, integer, real, timestamp, doublePrecision } fro
     version: integer("version").notNull().default(1),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
-  });
+  }, (table) => ({
+    ownerIdx: index("projects_owner_id_idx").on(table.ownerId),
+  }));
 
   export const lyricLines = pgTable("lyric_lines", {
     id: varchar("id", { length: 64 }).primaryKey(),
@@ -70,7 +72,9 @@ import { pgTable, varchar, text, integer, real, timestamp, doublePrecision } fro
     fadeOut: real("fade_out").notNull().default(0),
     fontSize: integer("font_size"),
     blankBefore: integer("blank_before").notNull().default(0),
-  });
+  }, (table) => ({
+    projectIdx: index("lyric_lines_project_id_idx").on(table.projectId),
+  }));
 
   export const audioTrackMeta = pgTable("audio_track_meta", {
     id: varchar("id", { length: 64 }).primaryKey(),
@@ -80,7 +84,9 @@ import { pgTable, varchar, text, integer, real, timestamp, doublePrecision } fro
     mimeType: varchar("mime_type", { length: 100 }).notNull().default("audio/mpeg"),
     dropboxPath: varchar("dropbox_path", { length: 1000 }),
     createdAt: timestamp("created_at").defaultNow().notNull(),
-  });
+  }, (table) => ({
+    projectIdx: index("audio_track_meta_project_id_idx").on(table.projectId),
+  }));
 
   export const insertUserSchema = createInsertSchema(users).omit({ createdAt: true });
   export type InsertUser = z.infer<typeof insertUserSchema>;
@@ -98,7 +104,9 @@ import { pgTable, varchar, text, integer, real, timestamp, doublePrecision } fro
     id: varchar("id", { length: 64 }).primaryKey(),
     projectId: varchar("project_id", { length: 64 }).notNull(),
     time: real("time").notNull(),
-  });
+  }, (table) => ({
+    projectIdx: index("check_markers_project_id_idx").on(table.projectId),
+  }));
 
   export const insertAudioTrackMetaSchema = createInsertSchema(audioTrackMeta).omit({ createdAt: true });
   export type InsertAudioTrackMeta = z.infer<typeof insertAudioTrackMetaSchema>;
