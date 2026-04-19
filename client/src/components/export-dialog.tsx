@@ -665,17 +665,21 @@ export function ExportDialog({
       const ctx = canvas.getContext("2d", { alpha: true })!;
       const epsilon = 0.001;
 
+      // VP9 requires even-numbered dimensions; round down so we don't sample
+      // pixels outside the source.
+      const safeEncWidth = encWidth & ~1;
+      const safeEncHeight = encHeight & ~1;
       const cropCanvas = cropActive ? document.createElement("canvas") : null;
       if (cropCanvas) {
-        cropCanvas.width = encWidth;
-        cropCanvas.height = encHeight;
+        cropCanvas.width = safeEncWidth;
+        cropCanvas.height = safeEncHeight;
       }
       const cropCtx = cropCanvas ? cropCanvas.getContext("2d", { alpha: true })! : null;
 
       const getCroppedSource = (): HTMLCanvasElement => {
         if (cropActive && cropCanvas && cropCtx) {
-          cropCtx.clearRect(0, 0, encWidth, encHeight);
-          cropCtx.drawImage(canvas, 0, cropY, encWidth, encHeight, 0, 0, encWidth, encHeight);
+          cropCtx.clearRect(0, 0, safeEncWidth, safeEncHeight);
+          cropCtx.drawImage(canvas, 0, cropY, safeEncWidth, safeEncHeight, 0, 0, safeEncWidth, safeEncHeight);
           return cropCanvas;
         }
         return canvas;
@@ -685,7 +689,21 @@ export function ExportDialog({
       // This replaces the previous server-side FFmpeg pipeline so the app
       // can run on free static hosting without a backend video processor.
 
-      const support = await checkWebMEncoderSupport(encWidth, encHeight);
+      // Bitrate fields are UI-friendly strings like "4M" / "800K" / "64k".
+      // Parse to bits-per-second for WebCodecs.
+      const parseBitrate = (s: string): number => {
+        const m = s.trim().match(/^(\d+(?:\.\d+)?)\s*([KkMm]?)$/);
+        if (!m) return 4_000_000;
+        const n = parseFloat(m[1]);
+        const unit = m[2].toUpperCase();
+        if (unit === "M") return Math.round(n * 1_000_000);
+        if (unit === "K") return Math.round(n * 1_000);
+        return Math.round(n);
+      };
+      const videoBitrateNum = parseBitrate(videoBitrate);
+      const audioBitrateNum = parseBitrate(audioBitrate);
+
+      const support = await checkWebMEncoderSupport(safeEncWidth, safeEncHeight);
       if (!support.supported) {
         throw new Error(support.reason ?? "ブラウザがWebCodecsエンコードに対応していません");
       }
@@ -713,11 +731,11 @@ export function ExportDialog({
       setProgress(5);
 
       const encodeResult = await encodeWebMAlpha({
-        width: encWidth,
-        height: encHeight,
+        width: safeEncWidth,
+        height: safeEncHeight,
         fps: fpsNum,
-        videoBitrate,
-        audioBitrate,
+        videoBitrate: videoBitrateNum,
+        audioBitrate: audioBitrateNum,
         audioBlob,
         frameCount: segs.length,
         getFrame: (i) => {
