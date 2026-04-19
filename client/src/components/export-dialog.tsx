@@ -1101,8 +1101,7 @@ export function ExportDialog({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="server">WebM VP9 Alpha (推奨・最速)</SelectItem>
-                    <SelectItem value="prores">ProRes 4444 MOV (Arena用・アルファ確実)</SelectItem>
+                    <SelectItem value="server">WebM VP9 Alpha (推奨・ブラウザ内で書き出し)</SelectItem>
                     <SelectItem value="zip">フレームパック ZIP (オフライン変換用)</SelectItem>
                   </SelectContent>
                 </Select>
@@ -1112,25 +1111,11 @@ export function ExportDialog({
                 <div className="bg-blue-500/10 border border-blue-500/30 rounded-md p-3 space-y-2 text-sm">
                   <p className="font-medium flex items-center gap-1.5">
                     <Zap className="w-4 h-4 text-blue-400" />
-                    サーバーエンコード (最速)
+                    ブラウザ内エンコード (WebCodecs)
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    ネイティブFFmpegでマルチスレッド高速エンコード。
-                    VFR最適化でフレーム数を最小限に抑え、サーバーに送信して処理します。
-                  </p>
-                </div>
-              )}
-
-              {exportMode === "prores" && (
-                <div className="bg-green-500/10 border border-green-500/30 rounded-md p-3 space-y-2 text-sm">
-                  <p className="font-medium flex items-center gap-1.5">
-                    <Film className="w-4 h-4 text-green-400" />
-                    ProRes 4444 MOV (Arena用)
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    テキスト描画エリアを自動検出 → クロップ → ProRes 4444 (yuva444p10le) で高速エンコード。
-                    FFmpeg 7.0 互換コンテナで Apple Silicon でも確実にアルファ透過。
-                    Y座標はファイル名に埋め込み、Arenaで手動配置。
+                    お使いのChrome / Edgeで直接 VP9 Alpha + Opus をエンコードします。
+                    サーバー処理不要。アップロードもないので大容量プロジェクトでも快適。
                   </p>
                 </div>
               )}
@@ -1296,17 +1281,15 @@ export function ExportDialog({
                 {!exporting ? (
                   <>
                     {exportMode === "server" ? (
-                      <>
-                        <Button
-                          onClick={() => handleExport()}
-                          disabled={timedLyrics.length === 0}
-                          className="flex-1 bg-blue-600 hover:bg-blue-700"
-                          data-testid="button-start-export"
-                        >
-                          <Film className="w-4 h-4 mr-2" />
-                          WebM (VP9+Alpha) 書き出し
-                        </Button>
-                      </>
+                      <Button
+                        onClick={() => handleExport()}
+                        disabled={timedLyrics.length === 0}
+                        className="flex-1 bg-blue-600 hover:bg-blue-700"
+                        data-testid="button-start-export"
+                      >
+                        <Film className="w-4 h-4 mr-2" />
+                        WebM (VP9+Alpha) 書き出し
+                      </Button>
                     ) : (
                       <Button
                         onClick={() => handleExport()}
@@ -1314,17 +1297,8 @@ export function ExportDialog({
                         className="flex-1"
                         data-testid="button-start-export"
                       >
-                        {exportMode === "zip" ? (
-                          <>
-                            <FolderArchive className="w-4 h-4 mr-2" />
-                            フレームパック (ZIP) ダウンロード
-                          </>
-                        ) : (
-                          <>
-                            <Film className="w-4 h-4 mr-2" />
-                            ProRes 4444 MOV をダウンロード
-                          </>
-                        )}
+                        <FolderArchive className="w-4 h-4 mr-2" />
+                        フレームパック (ZIP) ダウンロード
                       </Button>
                     )}
                   </>
