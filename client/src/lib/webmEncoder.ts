@@ -150,31 +150,18 @@ export async function encodeWebMAlpha(opts: EncodeOptions): Promise<EncodeResult
   if (opts.frameCount === 0) throw new Error("フレームが0枚です");
   const { width, height, fps, videoBitrate, frameCount, getFrame, audioBlob, audioBitrate = 192_000, onProgress, isCancelled } = opts;
 
-  // Re-probe to find a working codec string (same logic as checkWebMEncoderSupport).
+  // isConfigSupported is conservative on many Chrome builds — it can return
+  // supported=false for VP9 alpha even when encoder.configure() actually works.
+  // Strategy: try configuring each codec and use the first one that succeeds.
   const codecCandidates = [
-    "vp09.00.10.08",
+    "vp09.00.61.08",
+    "vp09.00.60.08",
+    "vp09.00.52.08",
+    "vp09.02.61.10",
     "vp09.00.51.08",
-    "vp09.00.41.08",
-    "vp09.00.31.08",
-    "vp09.00.10.08.01.01.01.01.00",
+    "vp09.00.10.08",
     "vp9",
   ];
-  let workingCodec: string | null = null;
-  let lastProbe: any = null;
-  for (const codec of codecCandidates) {
-    try {
-      const v = await VideoEncoder.isConfigSupported({
-        codec, width, height,
-        bitrate: videoBitrate, framerate: fps,
-        alpha: "keep",
-      });
-      lastProbe = v;
-      if (v.supported) { workingCodec = codec; break; }
-    } catch { /* try next */ }
-  }
-  if (!workingCodec) {
-    throw new Error(`ブラウザが VP9 Alpha エンコードを受け付けませんでした (${width}x${height} @ ${fps}fps, bitrate=${videoBitrate}). 出力サイズやFPSを変更してお試しください。`);
-  }
 
   const muxer = new Muxer({
     target: new ArrayBufferTarget(),
@@ -192,23 +179,46 @@ export async function encodeWebMAlpha(opts: EncodeOptions): Promise<EncodeResult
   });
 
   // ── Video encoder ────────────────────────────────────────────────────────
+  // Try each codec by actually configuring the encoder (isConfigSupported
+  // lies on some Chrome versions for VP9 alpha).
   let videoChunkCount = 0;
-  const videoEncoder = new VideoEncoder({
-    output: (chunk, meta) => {
-      muxer.addVideoChunk(chunk, meta);
-      videoChunkCount++;
-    },
-    error: (e) => { throw e; },
-  });
-  videoEncoder.configure({
-    codec: workingCodec,
-    width, height,
-    bitrate: videoBitrate,
-    framerate: fps,
-    alpha: "keep",
-    latencyMode: "quality",
-  });
-  console.log(`[WebMEncoder] Using codec=${workingCodec} at ${width}x${height}@${fps}fps, bitrate=${videoBitrate}`);
+  let videoEncoder: VideoEncoder | null = null;
+  let workingCodec: string | null = null;
+  const configureErrors: string[] = [];
+  for (const codec of codecCandidates) {
+    try {
+      const enc = new VideoEncoder({
+        output: (chunk, meta) => {
+          muxer.addVideoChunk(chunk, meta);
+          videoChunkCount++;
+        },
+        error: (e) => { throw e; },
+      });
+      enc.configure({
+        codec,
+        width, height,
+        bitrate: videoBitrate,
+        framerate: fps,
+        alpha: "keep",
+        latencyMode: "quality",
+      });
+      videoEncoder = enc;
+      workingCodec = codec;
+      console.log(`[WebMEncoder] ✓ codec=${codec} configured successfully at ${width}x${height}@${fps}fps`);
+      break;
+    } catch (e: any) {
+      const msg = e?.message || String(e);
+      configureErrors.push(`${codec}: ${msg}`);
+      console.log(`[WebMEncoder] ✗ codec=${codec} failed to configure: ${msg}`);
+    }
+  }
+  if (!videoEncoder || !workingCodec) {
+    throw new Error(
+      `ブラウザがVP9 Alphaエンコーダーを初期化できませんでした。` +
+      `試行コーデック ${codecCandidates.length}個、すべて失敗。\n` +
+      configureErrors.slice(0, 3).map(e => "・" + e).join("\n")
+    );
+  }
 
   // We compose our own timestamps because each frame can have arbitrary
   // duration. timestamps must be monotonic & in microseconds.

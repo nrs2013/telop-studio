@@ -708,9 +708,12 @@ export function ExportDialog({
       const videoBitrateNum = parseBitrate(videoBitrate);
       const audioBitrateNum = parseBitrate(audioBitrate);
 
-      const support = await checkWebMEncoderSupport(safeEncWidth, safeEncHeight);
-      if (!support.supported) {
-        throw new Error(support.reason ?? "ブラウザがWebCodecsエンコードに対応していません");
+      // Skip the isConfigSupported pre-check: many Chrome builds return
+      // supported=false for VP9 alpha even though the actual encoder works.
+      // The encodeWebMAlpha below tries each codec by configuring and will
+      // throw a concrete error if none succeed.
+      if (typeof VideoEncoder === "undefined" || typeof AudioEncoder === "undefined") {
+        throw new Error("このブラウザは WebCodecs に対応していません。Chrome / Edge の最新版をお使いください。");
       }
 
       // Load audio first (we need the Blob in memory for the encoder).
