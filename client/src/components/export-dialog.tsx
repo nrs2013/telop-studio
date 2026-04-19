@@ -644,11 +644,15 @@ export function ExportDialog({
         globalMinY = 0;
         globalMaxY = outputHeight - 1;
       }
+      // Chrome's WebCodecs VP9 encoder has empirical minimum dimensions and
+      // aspect-ratio constraints that aren't fully documented. Safe reference
+      // points from the PoC: 640x360, 1280x720, 1920x1080 all work. Sizes like
+      // 1920x160 fail silently (isConfigSupported returns supported=false).
+      // We use 360 as the minimum encoded height — it's the smallest we've
+      // verified in a real browser. VP9 alpha compresses the extra transparent
+      // rows very efficiently so the file-size hit is minimal.
       const CROP_PAD = 30;
-      // VP9 in WebCodecs requires a minimum height. The spec's Level 1.0 says
-      // 144px is the floor; we use 160 as a small safety margin. If the detected
-      // text band is shorter, pad symmetrically (above + below) to reach it.
-      const MIN_ENC_HEIGHT = 160;
+      const MIN_ENC_HEIGHT = 360;
       let rawTop = Math.max(0, globalMinY - CROP_PAD);
       let rawBottom = Math.min(outputHeight - 1, globalMaxY + CROP_PAD);
       let rawHeight = rawBottom - rawTop + 1;
@@ -658,7 +662,6 @@ export function ExportDialog({
         const addBot = need - addTop;
         rawTop = Math.max(0, rawTop - addTop);
         rawBottom = Math.min(outputHeight - 1, rawBottom + addBot);
-        // If we hit the canvas edge and still short, expand the other side.
         const newHeight = rawBottom - rawTop + 1;
         if (newHeight < MIN_ENC_HEIGHT) {
           if (rawTop === 0) rawBottom = Math.min(outputHeight - 1, rawTop + MIN_ENC_HEIGHT - 1);
@@ -671,6 +674,7 @@ export function ExportDialog({
       const cropY = cropActive ? cropTop : 0;
       const encWidth = outputWidth;
       const encHeight = cropActive ? (cropBottom - cropTop + 1) : outputHeight;
+      console.log(`[WebM Export] Text band: Y=${globalMinY}..${globalMaxY}, encoding crop: ${encWidth}x${encHeight} @ Y=${cropY}`);
 
       if (cropActive) {
         console.log(`[WebM Export] Auto-crop: Y=${cropY} H=${encHeight} (原寸: ${outputWidth}x${outputHeight})`);
