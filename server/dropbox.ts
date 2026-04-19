@@ -610,11 +610,34 @@ export async function browseDropboxFolder(
       // 共有フォルダ配下: namespace + 相対パス
       rawEntries = await fetchEntries(ns.relativePath, ns.nsId);
     } else {
-      // ホーム名前空間
-      rawEntries = await fetchEntries(folderPath || '');
+      const isRoot = !folderPath || folderPath === '/' || folderPath === '';
+      let usedTeamSpace = false;
 
-      // ルート表示時: 共有フォルダ一覧を追加
-      if (!folderPath || folderPath === '/' || folderPath === '') {
+      // ルート表示時: チーム空間 (root_namespace) を優先的に使う
+      if (isRoot) {
+        try {
+          const acct = await new Dropbox({ accessToken }).usersGetCurrentAccount();
+          const rootInfo = (acct.result as any)?.root_info;
+          const rootNsId = rootInfo?.root_namespace_id;
+          const homeNsId = rootInfo?.home_namespace_id;
+          // root_namespace_id != home_namespace_id ならチームアカウント
+          if (rootNsId && rootNsId !== homeNsId) {
+            console.log(`[Dropbox] Team account detected, using team space ns=${rootNsId}`);
+            rawEntries = await fetchEntries('', rootNsId);
+            usedTeamSpace = true;
+          }
+        } catch (err: any) {
+          console.warn('[Dropbox] Team space lookup failed, falling back to home:', err.message);
+        }
+      }
+
+      if (!usedTeamSpace) {
+        // ホーム名前空間
+        rawEntries = await fetchEntries(folderPath || '');
+      }
+
+      // ルート表示時: 共有フォルダ一覧を追加(重複は除外)
+      if (isRoot) {
         const sharedFolders = await fetchSharedFolders(accessToken);
         const existingNames = new Set(rawEntries.map((e: any) => (e.name || '').toLowerCase()));
         for (const sf of sharedFolders) {
@@ -672,6 +695,9 @@ export function getDropboxAuthUrl(redirectUri: string, state: string): string {
       'files.metadata.read',
       'files.metadata.write',
       'account_info.read',
+      'sharing.read',
+      'team_data.member',
+      'team_data.team_space',
     ].join(' '),
   });
   return `https://www.dropbox.com/oauth2/authorize?${params}`;
