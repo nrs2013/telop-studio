@@ -57,10 +57,10 @@ export interface EncodeResult {
  */
 export async function checkWebMEncoderSupport(width: number, height: number): Promise<{
   supported: boolean;
-  details: { videoEncoder: boolean; audioEncoder: boolean; vp9Alpha: boolean; opus: boolean };
+  details: { videoEncoder: boolean; audioEncoder: boolean; vp9Alpha: boolean; opus: boolean; triedCodec?: string; probeError?: string };
   reason?: string;
 }> {
-  const details = {
+  const details: any = {
     videoEncoder: typeof VideoEncoder !== "undefined",
     audioEncoder: typeof AudioEncoder !== "undefined",
     vp9Alpha: false,
@@ -72,15 +72,35 @@ export async function checkWebMEncoderSupport(width: number, height: number): Pr
   if (!details.audioEncoder) {
     return { supported: false, details, reason: "このブラウザは AudioEncoder に対応していません。Chrome / Edge の最新版をお使いください。" };
   }
-  try {
-    const v = await VideoEncoder.isConfigSupported({
-      codec: "vp09.00.10.08",
-      width, height,
-      bitrate: 5_000_000, framerate: 30,
-      alpha: "keep",
-    });
-    details.vp9Alpha = !!v.supported;
-  } catch { /* ignore */ }
+  // Try a sequence of VP9 codec strings. Different Chrome versions accept
+  // different profile combinations for alpha; we pick the first that works.
+  const candidates = [
+    "vp09.00.10.08", // Profile 0, Level 1.0, 8-bit, Color Depth 8
+    "vp09.00.51.08", // Profile 0, Level 5.1, 8-bit (allows up to 4K)
+    "vp09.00.41.08", // Profile 0, Level 4.1
+    "vp09.00.31.08", // Profile 0, Level 3.1
+    "vp09.00.10.08.01.01.01.01.00", // fully qualified
+    "vp9",            // generic
+  ];
+  let lastErr: string | undefined;
+  for (const codec of candidates) {
+    try {
+      const v = await VideoEncoder.isConfigSupported({
+        codec,
+        width, height,
+        bitrate: 4_000_000, framerate: 30,
+        alpha: "keep",
+      });
+      if (v.supported) {
+        details.vp9Alpha = true;
+        details.triedCodec = codec;
+        break;
+      }
+    } catch (e: any) {
+      lastErr = e?.message || String(e);
+    }
+  }
+  if (!details.vp9Alpha && lastErr) details.probeError = lastErr;
   try {
     const a = await AudioEncoder.isConfigSupported({
       codec: "opus", sampleRate: 48000, numberOfChannels: 2, bitrate: 128_000,
@@ -88,7 +108,8 @@ export async function checkWebMEncoderSupport(width: number, height: number): Pr
     details.opus = !!a.supported;
   } catch { /* ignore */ }
   if (!details.vp9Alpha) {
-    return { supported: false, details, reason: "VP9 (alpha) エンコードがブラウザでサポートされていません。" };
+    const diag = `(${width}x${height}, probe=${details.probeError || "no error"})`;
+    return { supported: false, details, reason: `VP9 (alpha) エンコードがブラウザでサポートされていません。 ${diag}` };
   }
   if (!details.opus) {
     return { supported: false, details, reason: "Opus 音声エンコードがブラウザでサポートされていません。" };
@@ -106,6 +127,32 @@ export async function checkWebMEncoderSupport(width: number, height: number): Pr
 export async function encodeWebMAlpha(opts: EncodeOptions): Promise<EncodeResult> {
   if (opts.frameCount === 0) throw new Error("フレームが0枚です");
   const { width, height, fps, videoBitrate, frameCount, getFrame, audioBlob, audioBitrate = 192_000, onProgress, isCancelled } = opts;
+
+  // Re-probe to find a working codec string (same logic as checkWebMEncoderSupport).
+  const codecCandidates = [
+    "vp09.00.10.08",
+    "vp09.00.51.08",
+    "vp09.00.41.08",
+    "vp09.00.31.08",
+    "vp09.00.10.08.01.01.01.01.00",
+    "vp9",
+  ];
+  let workingCodec: string | null = null;
+  let lastProbe: any = null;
+  for (const codec of codecCandidates) {
+    try {
+      const v = await VideoEncoder.isConfigSupported({
+        codec, width, height,
+        bitrate: videoBitrate, framerate: fps,
+        alpha: "keep",
+      });
+      lastProbe = v;
+      if (v.supported) { workingCodec = codec; break; }
+    } catch { /* try next */ }
+  }
+  if (!workingCodec) {
+    throw new Error(`ブラウザが VP9 Alpha エンコードを受け付けませんでした (${width}x${height} @ ${fps}fps, bitrate=${videoBitrate}). 出力サイズやFPSを変更してお試しください。`);
+  }
 
   const muxer = new Muxer({
     target: new ArrayBufferTarget(),
@@ -132,13 +179,14 @@ export async function encodeWebMAlpha(opts: EncodeOptions): Promise<EncodeResult
     error: (e) => { throw e; },
   });
   videoEncoder.configure({
-    codec: "vp09.00.10.08",
+    codec: workingCodec,
     width, height,
     bitrate: videoBitrate,
     framerate: fps,
     alpha: "keep",
     latencyMode: "quality",
   });
+  console.log(`[WebMEncoder] Using codec=${workingCodec} at ${width}x${height}@${fps}fps, bitrate=${videoBitrate}`);
 
   // We compose our own timestamps because each frame can have arbitrary
   // duration. timestamps must be monotonic & in microseconds.
