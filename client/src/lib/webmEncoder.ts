@@ -74,13 +74,18 @@ export async function checkWebMEncoderSupport(width: number, height: number): Pr
   }
   // Try a sequence of VP9 codec strings. Different Chrome versions accept
   // different profile combinations for alpha; we pick the first that works.
+  // VP9 codec strings: vp09.<profile>.<level>.<bitDepth>
+  // Level encodes the max resolution the codec is willing to accept:
+  //   5.2 (52) = 1920x1080, 6.0 (60) = 4096x2304, 6.1 (61) = 4096x2304 @ higher fps
+  // Try high-level forms first so 1920-wide content always finds a match.
   const candidates = [
-    "vp09.00.10.08", // Profile 0, Level 1.0, 8-bit, Color Depth 8
-    "vp09.00.51.08", // Profile 0, Level 5.1, 8-bit (allows up to 4K)
-    "vp09.00.41.08", // Profile 0, Level 4.1
-    "vp09.00.31.08", // Profile 0, Level 3.1
-    "vp09.00.10.08.01.01.01.01.00", // fully qualified
-    "vp9",            // generic
+    "vp09.00.61.08", // Profile 0, Level 6.1, 8-bit (most permissive)
+    "vp09.00.60.08", // Profile 0, Level 6.0
+    "vp09.00.52.08", // Profile 0, Level 5.2 (1920x1080 cap)
+    "vp09.02.61.10", // Profile 2 (10-bit), Level 6.1 — sometimes preferred for alpha
+    "vp09.00.51.08", // Profile 0, Level 5.1 (1664x912 cap)
+    "vp09.00.10.08", // Profile 0, Level 1.0 (some Chrome builds ignore the level)
+    "vp9",            // generic fallback
   ];
   let lastErr: string | undefined;
   for (const codec of candidates) {
