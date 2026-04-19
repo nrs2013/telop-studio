@@ -3,25 +3,54 @@ import { users, projects, lyricLines, audioTrackMeta, checkMarkers } from "@shar
 import type { SelectUser, ServerProject, ServerLyric, ServerAudioTrackMeta, ServerCheckMarker } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import crypto from "crypto";
+import bcrypt from "bcryptjs";
 
-function hashPassword(password: string): string {
+const BCRYPT_ROUNDS = 10;
+
+// Legacy SHA256 hashing — kept for backward compatibility with existing user records.
+// All new passwords use bcrypt.
+function legacySha256Hash(password: string): string {
   return crypto.createHash("sha256").update(password).digest("hex");
 }
 
-export function verifyPassword(password: string, hash: string): boolean {
-  return hashPassword(password) === hash;
+async function hashPassword(password: string): Promise<string> {
+  return bcrypt.hash(password, BCRYPT_ROUNDS);
+}
+
+export async function verifyPassword(password: string, storedHash: string): Promise<boolean> {
+  if (!storedHash) return false;
+  // bcrypt hashes start with $2a$/$2b$/$2y$ and are ~60 chars
+  if (storedHash.startsWith("$2")) {
+    return bcrypt.compare(password, storedHash);
+  }
+  // Legacy: 64-char hex SHA256 hash
+  if (storedHash.length === 64 && /^[a-f0-9]+$/i.test(storedHash)) {
+    return legacySha256Hash(password) === storedHash;
+  }
+  return false;
+}
+
+// Returns new bcrypt hash if the stored hash needs upgrading from sha256, otherwise null.
+export async function upgradePasswordIfNeeded(password: string, storedHash: string): Promise<string | null> {
+  if (storedHash && storedHash.startsWith("$2")) return null;
+  return hashPassword(password);
 }
 
 export const serverStorage = {
   async createUser(username: string, password: string, displayName?: string): Promise<SelectUser> {
     const id = crypto.randomUUID();
+    const hashed = await hashPassword(password);
     const [user] = await db.insert(users).values({
       id,
       username,
-      password: hashPassword(password),
+      password: hashed,
       displayName: displayName || username,
     }).returning();
     return user;
+  },
+
+  async updateUserPassword(userId: string, newHash: string): Promise<void> {
+    await db.update(users).set({ password: newHash }).where(eq(users.id, userId));
   },
 
   async getUserByUsername(username: string): Promise<SelectUser | undefined> {

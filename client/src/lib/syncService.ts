@@ -49,14 +49,12 @@ export const syncService = {
     }
   },
 
+  // Previously this attempted automatic login with a hardcoded team password (insecure).
+  // Now it only returns the existing session, if any. Users must explicitly log in.
   async autoLogin(): Promise<AuthUser | null> {
     try {
       const existing = await this.checkAuth();
-      if (existing) return existing;
-      const res = await apiFetch("/api/auth/auto-login", { method: "POST" });
-      if (!res.ok) return null;
-      const data = await res.json();
-      return data || null;
+      return existing || null;
     } catch {
       return null;
     }

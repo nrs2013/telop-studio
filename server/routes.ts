@@ -12,7 +12,7 @@ const FFMPEG_BIN = fs.existsSync(FFMPEG7_PATH) ? FFMPEG7_PATH : "ffmpeg";
 if (FFMPEG_BIN === "ffmpeg") {
   console.warn("[FFmpeg] WARNING: bin/ffmpeg7 not found, falling back to system ffmpeg. VP9 alpha encoding may produce all-opaque output due to FFmpeg 6.x bug.");
 }
-import { serverStorage, verifyPassword } from "./storage";
+import { serverStorage, verifyPassword, upgradePasswordIfNeeded } from "./storage";
 import session from "express-session";
 import { uploadToDropbox, downloadFromDropbox, listDropboxFiles, searchDropboxFiles, checkDropboxConnection, checkDropboxFileExists, deleteFromDropbox, renameInDropbox, getUncachableDropboxClient, getTeamDropboxClient, getDropboxAuthUrl, exchangeDropboxCode, disconnectDropboxCustom, getDropboxOAuthStatus, browseDropboxFolder, diagnoseDrpboxStructure } from "./dropbox";
 import kuromoji from "kuromoji";
@@ -84,12 +84,24 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
+  const isProduction = process.env.NODE_ENV === "production";
+  if (isProduction && (!process.env.SESSION_SECRET || process.env.SESSION_SECRET === "telop-studio-secret")) {
+    console.warn("[security] SESSION_SECRET is not set to a secure value in production. Please set a strong SESSION_SECRET env var.");
+  }
   app.use(session({
     secret: process.env.SESSION_SECRET || "telop-studio-secret",
     resave: false,
     saveUninitialized: false,
-    cookie: { maxAge: 30 * 24 * 60 * 60 * 1000 },
+    cookie: {
+      maxAge: 30 * 24 * 60 * 60 * 1000,
+      httpOnly: true,
+      secure: isProduction,
+      sameSite: "lax",
+    },
   }));
+  if (isProduction) {
+    app.set("trust proxy", 1); // trust Railway's proxy so `secure: true` cookies work
+  }
 
   app.post("/api/auth/register", async (req: Request, res: Response) => {
     const { username, password, displayName } = req.body;
@@ -106,8 +118,17 @@ export async function registerRoutes(
     const { username, password } = req.body;
     if (!username || !password) return res.status(400).json({ message: "ユーザー名とパスワードが必要です" });
     const user = await serverStorage.getUserByUsername(username);
-    if (!user || !verifyPassword(password, user.password)) {
+    if (!user || !(await verifyPassword(password, user.password))) {
       return res.status(401).json({ message: "ユーザー名またはパスワードが違います" });
+    }
+    // Transparent password upgrade: if the stored hash is the old SHA256 format, rehash with bcrypt now.
+    try {
+      const upgraded = await upgradePasswordIfNeeded(password, user.password);
+      if (upgraded) {
+        await serverStorage.updateUserPassword(user.id, upgraded);
+      }
+    } catch (err) {
+      console.warn("[auth] password upgrade failed:", (err as any)?.message);
     }
     req.session.userId = user.id;
     req.session.username = user.username;
@@ -137,19 +158,12 @@ export async function registerRoutes(
     res.json({ readings });
   });
 
-  app.post("/api/auth/auto-login", async (req: Request, res: Response) => {
-    if (req.session?.userId) {
-      return res.json({ id: req.session.userId, username: req.session.username });
-    }
-    const autoUsername = "team";
-    const autoPassword = "telop-team-2024";
-    let user = await serverStorage.getUserByUsername(autoUsername);
-    if (!user) {
-      user = await serverStorage.createUser(autoUsername, autoPassword, "チーム共有");
-    }
-    req.session.userId = user.id;
-    req.session.username = user.username;
-    res.json({ id: user.id, username: user.username, displayName: user.displayName });
+  // Auto-login removed for security. Previously this endpoint logged users in with a hardcoded
+  // password, which is unsafe when source code is public. Use /api/auth/login or /api/auth/register.
+  app.post("/api/auth/auto-login", (_req: Request, res: Response) => {
+    res.status(410).json({
+      message: "自動ログイン機能は廃止されました。ユーザー名とパスワードでログインしてください。",
+    });
   });
 
   app.post("/api/editing/heartbeat", requireAuth, async (req: Request, res: Response) => {
