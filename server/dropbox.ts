@@ -168,22 +168,35 @@ async function fetchSharedFolders(accessToken: string): Promise<SharedFolderInfo
   return results;
 }
 
-// パスの先頭フォルダ名に対応する namespace_id を返す
-// 例: "/nrs チーム フォルダ/NEW TELOP/..." → { nsId: "12345", relativePath: "/NEW TELOP/..." }
+// パスの各階層のフォルダ名を順番に共有フォルダ一覧と照合し、
+// マッチした階層を基点とする namespace_id + 相対パスを返す。
+// 例1: "/nrs チーム フォルダ/NEW TELOP/Telop音源/..." → "NEW TELOP" がshared folder
+//       → { nsId: <NEW TELOPのns>, relativePath: "/Telop音源/..." }
+// 例2: "/NEW TELOP/Telop音源/..." も同様に解決できる
+//
+// 注: Dropbox Business の team space に置かれている「チームフォルダ」は
+// sharing/list_folders では拾えないため、ユーザーが join している共有フォルダ
+// （team spaceの下の NEW TELOP など）をヒットさせて基点にする。
 async function resolvePathNamespace(
   dropboxPath: string,
   accessToken: string
 ): Promise<{ nsId: string; relativePath: string } | null> {
   const parts = dropboxPath.replace(/^\//, '').split('/');
   if (parts.length < 2) return null; // トップレベルファイルは namespace 不要
-  const topFolder = parts[0].toLowerCase();
-  const relative = '/' + parts.slice(1).join('/');
 
   const folders = await fetchSharedFolders(accessToken);
-  const match = folders.find(f => f.lowerName === topFolder);
-  if (match) {
-    console.log(`[Dropbox] Resolved "${parts[0]}" → namespace ${match.nsId}, relative: "${relative}"`);
-    return { nsId: match.nsId, relativePath: relative };
+
+  // 深いレベルから順に照合して、一番近い共有フォルダを基点にする
+  // （浅い階層 "nrs チーム フォルダ" は team space で sharing にはないため
+  //   深い "NEW TELOP" を基点にしたい）
+  for (let i = Math.min(parts.length - 2, 3); i >= 0; i--) {
+    const candidate = parts[i].toLowerCase();
+    const match = folders.find(f => f.lowerName === candidate);
+    if (match) {
+      const relative = '/' + parts.slice(i + 1).join('/');
+      console.log(`[Dropbox] Resolved "${parts[i]}" (level ${i}) → namespace ${match.nsId}, relative: "${relative}"`);
+      return { nsId: match.nsId, relativePath: relative };
+    }
   }
   return null;
 }
