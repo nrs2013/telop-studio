@@ -10,9 +10,22 @@
 # The multi-stage build keeps the final image slim: we build with dev deps,
 # then copy only the production output into a smaller runtime image that
 # still has ffmpeg.
+#
+# VP9+alpha note (April 2026):
+#   Previously this Dockerfile used BtbN's static ffmpeg 7 build, under the
+#   hypothesis that Debian's apt-shipped ffmpeg was too old to encode VP9+
+#   alpha. That static build produced WebM files where the alpha plane was
+#   silently dropped despite correct -pix_fmt yuva420p flags — diagnosed
+#   down to the libvpx library that BtbN bundles.
+#
+#   Switching to Debian trixie's apt-packaged ffmpeg (7.1.x + libvpx 1.14.x,
+#   both with known-good VP9 alpha support) removes BtbN's libvpx from the
+#   equation entirely. If alpha still fails after this change, the cause is
+#   upstream of libvpx and we will pivot to a two-stream muxing approach
+#   (separate color + alpha VP9 streams, combined via libwebm's sample_muxer).
 
 # -------- Stage 1: build --------
-FROM node:22-slim AS builder
+FROM node:22-trixie-slim AS builder
 
 WORKDIR /app
 
@@ -31,27 +44,22 @@ RUN npm run build
 RUN npm prune --omit=dev
 
 # -------- Stage 2: runtime --------
-FROM node:22-slim
+FROM node:22-trixie-slim
 
 WORKDIR /app
 
-# FFmpeg 7 is required for VP9+Alpha (transparent) encoding. Debian's apt
-# only ships ffmpeg 5.x/6.x, both of which have known bugs producing
-# all-opaque output for VP9 alpha. We pull BtbN's static build of the
-# latest ffmpeg 7 instead, which is a single self-contained binary.
+# FFmpeg 7 from Debian trixie's apt repository. Trixie ships ffmpeg 7.1.x
+# with libvpx 1.14.x, which has reliable VP9+alpha encoding support.
+#
+# We deliberately do NOT use BtbN's static builds here. Earlier revisions
+# of this Dockerfile pulled ffmpeg-master-latest from BtbN to get ffmpeg 7,
+# but that build's bundled libvpx silently stripped alpha planes from VP9
+# WebM output. Debian's libvpx build does not exhibit that bug.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl xz-utils ca-certificates \
-    && curl -fsSL -o /tmp/ffmpeg.tar.xz https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz \
-    && mkdir -p /tmp/ffmpeg \
-    && tar -xJf /tmp/ffmpeg.tar.xz -C /tmp/ffmpeg --strip-components=1 \
-    && mv /tmp/ffmpeg/bin/ffmpeg /usr/local/bin/ffmpeg \
-    && mv /tmp/ffmpeg/bin/ffprobe /usr/local/bin/ffprobe \
-    && chmod +x /usr/local/bin/ffmpeg /usr/local/bin/ffprobe \
-    && rm -rf /tmp/ffmpeg /tmp/ffmpeg.tar.xz \
-    && apt-get purge -y curl xz-utils \
-    && apt-get autoremove -y \
+    && apt-get install -y --no-install-recommends ffmpeg ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
-    && ffmpeg -version | head -n 1
+    && ffmpeg -version | head -n 1 \
+    && ffmpeg -hide_banner -encoders 2>/dev/null | grep -E "libvpx(-vp9)?" || true
 
 ENV NODE_ENV=production
 ENV PORT=3000
