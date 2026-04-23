@@ -419,6 +419,28 @@ export async function registerRoutes(
     }
   }, 60_000);
 
+  // Export sessions live in a Map in RAM, which is wiped when Railway
+  // rolls out a new container. If the client started an export on the
+  // old container and then tried to upload frames after a deploy, every
+  // subsequent POST would 404 with "Session not found" and the whole
+  // export would fail. Here we rebuild the session on demand from the
+  // on-disk directory so mid-flight exports survive a redeploy.
+  function getOrRevive(sessionId: string) {
+    let session = exportSessions.get(sessionId);
+    if (session) return session;
+    const dir = path.join(uploadDir, "export_sessions", sessionId);
+    if (!fs.existsSync(dir)) return undefined;
+    const existingFrames = fs.readdirSync(dir).filter(f => /^frame_\d{6}\.(png|tga)$/.test(f));
+    session = {
+      dir,
+      frameCount: existingFrames.length,
+      createdAt: Date.now(),
+    };
+    exportSessions.set(sessionId, session);
+    console.log(`[Export] Revived session ${sessionId} from disk (${existingFrames.length} frames).`);
+    return session;
+  }
+
   app.post("/api/export/session", async (_req, res) => {
     const sessionId = `export_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const dir = path.join(uploadDir, "export_sessions", sessionId);
@@ -431,7 +453,7 @@ export async function registerRoutes(
     "/api/export/:sessionId/frames",
     frameUpload.array("frames", 500),
     async (req, res) => {
-      const session = exportSessions.get(req.params.sessionId);
+      const session = getOrRevive(req.params.sessionId);
       if (!session) return res.status(404).json({ message: "Session not found" });
 
       const files = req.files as Express.Multer.File[];
@@ -455,7 +477,7 @@ export async function registerRoutes(
     "/api/export/:sessionId/audio",
     audioUpload.single("audio"),
     async (req, res) => {
-      const session = exportSessions.get(req.params.sessionId);
+      const session = getOrRevive(req.params.sessionId);
       if (!session) return res.status(404).json({ message: "Session not found" });
       if (!req.file) return res.status(400).json({ message: "No audio file" });
       session.audioPath = req.file.path;
@@ -464,7 +486,7 @@ export async function registerRoutes(
   );
 
   app.post("/api/export/:sessionId/encode", async (req, res) => {
-    const session = exportSessions.get(req.params.sessionId);
+    const session = getOrRevive(req.params.sessionId);
     if (!session) return res.status(404).json({ message: "Session not found" });
 
     const { fps = 30, audioBitrate = 64000, videoBitrate = "800K", segments, codec = "vp9", async: asyncMode } = req.body;
@@ -567,6 +589,12 @@ export async function registerRoutes(
         "-cpu-used", "8",
         "-threads", "2",
         "-max_muxing_queue_size", "1024",
+        // Tag the output video stream with alpha_mode=1 so WebM-aware players
+        // (Resolume, Chrome, After Effects, etc.) render the alpha channel.
+        // Without this metadata ffmpeg still encodes yuva420p internally but
+        // the container reads back as yuv420p and the alpha is silently lost
+        // — which is exactly what `ffprobe` surfaced on the first test export.
+        "-metadata:s:v:0", "alpha_mode=1",
       );
       if (audioPath && fs.existsSync(audioPath)) {
         ffmpegArgs.push(
@@ -675,7 +703,7 @@ export async function registerRoutes(
   });
 
   app.get("/api/export/:sessionId/status", (req, res) => {
-    const session = exportSessions.get(req.params.sessionId);
+    const session = getOrRevive(req.params.sessionId);
     if (!session) return res.status(404).json({ message: "Session not found" });
     const status = session.encodeStatus || "idle";
     const error = session.encodeError || null;
@@ -689,7 +717,7 @@ export async function registerRoutes(
   });
 
   app.get("/api/export/:sessionId/download", (req, res) => {
-    const session = exportSessions.get(req.params.sessionId);
+    const session = getOrRevive(req.params.sessionId);
     if (!session) return res.status(404).json({ message: "Session not found" });
     if (session.encodeStatus !== "done" || !session.outputPath || !fs.existsSync(session.outputPath)) {
       return res.status(400).json({ message: "File not ready" });
@@ -1180,7 +1208,7 @@ export async function registerRoutes(
 
   app.post("/api/export/:sessionId/upload-to-dropbox", async (req, res) => {
     try {
-      const session = exportSessions.get(req.params.sessionId);
+      const session = getOrRevive(req.params.sessionId);
       if (!session) return res.status(404).json({ message: "Session not found" });
       if (session.encodeStatus !== "done" || !session.outputPath || !fs.existsSync(session.outputPath)) {
         return res.status(400).json({ message: "File not ready" });
