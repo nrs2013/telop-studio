@@ -547,6 +547,16 @@ export async function registerRoutes(
         );
       }
     } else {
+      // VP9 alpha encoding on Railway. Previously used `-threads 0` (auto) plus
+      // `-tile-columns 2` and `-row-mt 1`, which on Railway's multi-core hosts
+      // spawned up to a dozen worker threads each holding its own frame buffers.
+      // That pushed the process past the container memory limit after ~1 second,
+      // and the OOM killer terminated ffmpeg with no exit code (`code: null`).
+      //
+      // Pinning threads to 2 keeps memory footprint predictable while still
+      // encoding faster than real-time on 1920x1080 subtitle layers. We drop
+      // row-mt and tile-columns for the same reason — they multiply buffer
+      // allocation per thread. Quality is unchanged (same bitrate, same codec).
       ffmpegArgs.push(
         "-c:v", "libvpx-vp9",
         "-pix_fmt", "yuva420p",
@@ -555,9 +565,8 @@ export async function registerRoutes(
         "-r", String(fpsNum),
         "-deadline", "realtime",
         "-cpu-used", "8",
-        "-row-mt", "1",
-        "-tile-columns", "2",
-        "-threads", "0",
+        "-threads", "2",
+        "-max_muxing_queue_size", "1024",
       );
       if (audioPath && fs.existsSync(audioPath)) {
         ffmpegArgs.push(
