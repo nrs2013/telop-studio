@@ -723,8 +723,13 @@ export function ExportDialog({
       setStatus("フレームをアップロード中...");
       setProgress(42);
 
-      const batchSize = 20;
-      const parallelUploads = 3;
+      // batchSize = how many frames per HTTP POST (multer accepts up to 500)
+      // parallelUploads = how many POSTs flying at the same time to Railway
+      // 30 × 5 = 150 frames in flight gives good throughput without stressing
+      // the server's frame-upload handler (bumped from 20 × 3 = 60 when the
+      // encoder was sped up server-side).
+      const batchSize = 30;
+      const parallelUploads = 5;
       let uploaded = 0;
       for (let i = 0; i < blobs.length; i += batchSize * parallelUploads) {
         if (cancelRef.current) break;
@@ -979,8 +984,10 @@ export function ExportDialog({
           cvs.toBlob((b) => { if (b) resolve(b); else reject(new Error("toBlob failed")); }, "image/png");
         });
 
-      const batchSize = 20;
-      const PARALLEL = 3;
+      // Match the bulk-upload settings above — 30 frames × 5 parallel POSTs
+      // keeps Railway's multer handler saturated without dropping requests.
+      const batchSize = 30;
+      const PARALLEL = 5;
       const allBatches: { blobs: Blob[]; names: string[] }[] = [];
       let currentBlobs: Blob[] = [];
       let currentNames: string[] = [];
