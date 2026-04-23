@@ -17,6 +17,7 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import { spawnSync } from "child_process";
+import { muxAlphaWebM, parseIvf } from "./alphaEncode";
 
 export type VariantResult = {
   name: string;
@@ -28,6 +29,8 @@ export type VariantResult = {
   outputPixFmt: string | null;
   outputAlphaMode: string | null;
   roundtripPixFmt: string | null;
+  /** Average value of the roundtripped alpha plane. 255 = all-opaque (encoder dropped alpha). */
+  roundtripAlphaAvg: string | null;
   worked: boolean;
   error: string | null;
 };
@@ -177,13 +180,17 @@ function probePixFmt(ffprobeBin: string, file: string): { pixFmt: string | null;
   return { pixFmt: pm, alphaMode: am };
 }
 
-function roundtripDecode(ffmpegBin: string, ffprobeBin: string, webm: string, pngOut: string): string | null {
+function roundtripDecode(ffmpegBin: string, ffprobeBin: string, webm: string, pngOut: string): { pixFmt: string | null; alphaAvg: string | null } {
+  // Force the libvpx-vp9 decoder explicitly: with it, ffmpeg reads the
+  // BlockAdditional alpha stream and composes yuva420p. Without it, ffmpeg
+  // falls back to the "vp9" generic decoder, which discards BlockAdditional
+  // and reports an all-opaque image even for correctly-encoded alpha WebMs.
   const enc = spawnSync(
     ffmpegBin,
-    ["-y", "-v", "error", "-i", webm, "-vframes", "1", pngOut],
+    ["-y", "-v", "error", "-c:v", "libvpx-vp9", "-i", webm, "-vframes", "1", "-pix_fmt", "rgba", pngOut],
     { encoding: "utf8", timeout: 10000 },
   );
-  if (enc.status !== 0 || !fs.existsSync(pngOut)) return null;
+  if (enc.status !== 0 || !fs.existsSync(pngOut)) return { pixFmt: null, alphaAvg: null };
   const pr = spawnSync(
     ffprobeBin,
     [
@@ -195,7 +202,22 @@ function roundtripDecode(ffmpegBin: string, ffprobeBin: string, webm: string, pn
     ],
     { encoding: "utf8" },
   );
-  return pr.stdout?.trim() || null;
+  const pixFmt = pr.stdout?.trim() || null;
+
+  // Measure the alpha plane. Even if the PNG was saved as RGBA, if the
+  // alpha values are all 255 the encoder silently dropped the alpha —
+  // which is the bug we're diagnosing in the first place.
+  let alphaAvg: string | null = null;
+  try {
+    const stats = spawnSync(
+      ffmpegBin,
+      ["-hide_banner", "-nostdin", "-i", pngOut, "-vf", "alphaextract,signalstats,metadata=print", "-f", "null", "-"],
+      { encoding: "utf8", timeout: 8000 },
+    );
+    const out = (stats.stderr || "") + (stats.stdout || "");
+    alphaAvg = out.match(/YAVG=([\d.]+)/)?.[1] || null;
+  } catch {}
+  return { pixFmt, alphaAvg };
 }
 
 function runVariant(
@@ -293,11 +315,14 @@ function runVariant(
     result.outputAlphaMode = probe.alphaMode;
 
     const rt = roundtripDecode(ffmpegBin, ffprobeBin, outPath, roundtripPng);
-    result.roundtripPixFmt = rt;
+    result.roundtripPixFmt = rt.pixFmt;
+    result.roundtripAlphaAvg = rt.alphaAvg;
 
-    // 定義: roundtrip した PNG が rgba / rgba64be / ya8 / yuva420p いずれかで
-    // alpha を保持していれば「透過成功」とみなす。
-    result.worked = !!rt && /^(rgba|rgba64|ya8|yuva[24]\d+p)/i.test(rt);
+    // 成功判定: PNG がアルファ付き形式で書き出され、かつアルファの平均値が
+    // 255 未満（= 完全不透明で塗り潰されていない）。
+    const hasAlphaFmt = !!rt.pixFmt && /^(rgba|rgba64|ya8|yuva[24]\d+p)/i.test(rt.pixFmt);
+    const alphaNotAllOpaque = rt.alphaAvg != null && parseFloat(rt.alphaAvg) < 254.5;
+    result.worked = hasAlphaFmt && alphaNotAllOpaque;
   } catch (e: any) {
     result.error = e?.message || String(e);
   }
@@ -315,6 +340,124 @@ export type AlphaSelfTestReport = {
   workingVariants: string[];
   elapsedMs: number;
 };
+
+function runTwoStreamVariant(
+  ffmpegBin: string,
+  ffprobeBin: string,
+  srcPattern: string,
+  workDir: string,
+): VariantResult {
+  const name = "two_stream_custom_mux";
+  const description = "色と透過を別々に VP9 エンコードし、自前で BlockAdditional 化 (推奨)";
+  const codec = "libvpx-vp9 x2";
+  const outPath = path.join(workDir, `out_${name}.webm`);
+  const roundtripPng = path.join(workDir, `rt_${name}.png`);
+  const subWorkDir = path.join(workDir, `two_stream_sub`);
+  const result: VariantResult = {
+    name,
+    description,
+    codec,
+    encodeExitCode: null,
+    outputExists: false,
+    outputBytes: 0,
+    outputPixFmt: null,
+    outputAlphaMode: null,
+    roundtripPixFmt: null,
+    roundtripAlphaAvg: null,
+    worked: false,
+    error: null,
+  };
+  // Synchronous wrapper around the async encoder — we run it with deasync-
+  // style blocking to keep the self-test loop flat. Node 18+ gives us
+  // Atomics.wait on SharedArrayBuffer for this, but spawning an awaited
+  // promise in a sync loop is simpler: we busy-wait on the promise's
+  // resolution by pumping via a helper. However, the easier path is to
+  // just execute the encoder steps inline with spawnSync calls — avoiding
+  // async altogether in the diagnostic path. So we inline it here.
+  try {
+    const colorIvf = path.join(subWorkDir, "color.ivf");
+    const alphaIvf = path.join(subWorkDir, "alpha.ivf");
+    fs.mkdirSync(subWorkDir, { recursive: true });
+
+    const colorEnc = spawnSync(
+      ffmpegBin,
+      [
+        "-y", "-hide_banner", "-nostdin", "-v", "error",
+        "-framerate", "10",
+        "-i", srcPattern,
+        "-map", "0:v",
+        "-vf", "format=yuv420p",
+        "-c:v", "libvpx-vp9",
+        "-auto-alt-ref", "0",
+        "-crf", "30", "-b:v", "0",
+        "-deadline", "good", "-cpu-used", "4", "-threads", "2",
+        "-f", "ivf",
+        colorIvf,
+      ],
+      { encoding: "utf8", timeout: 60000 },
+    );
+    if (colorEnc.status !== 0) {
+      result.error = `color encode exit ${colorEnc.status}: ${(colorEnc.stderr || "").split("\n").slice(-2).join(" ")}`;
+      return result;
+    }
+
+    const alphaEnc = spawnSync(
+      ffmpegBin,
+      [
+        "-y", "-hide_banner", "-nostdin", "-v", "error",
+        "-framerate", "10",
+        "-i", srcPattern,
+        "-map", "0:v",
+        "-vf", "alphaextract,format=yuv420p",
+        "-c:v", "libvpx-vp9",
+        "-auto-alt-ref", "0",
+        "-crf", "30", "-b:v", "0",
+        "-deadline", "good", "-cpu-used", "4", "-threads", "2",
+        "-f", "ivf",
+        alphaIvf,
+      ],
+      { encoding: "utf8", timeout: 60000 },
+    );
+    if (alphaEnc.status !== 0) {
+      result.error = `alpha encode exit ${alphaEnc.status}: ${(alphaEnc.stderr || "").split("\n").slice(-2).join(" ")}`;
+      return result;
+    }
+
+    // Parse IVFs and mux using alphaEncode.ts helpers.
+    const colorIvfFile = parseIvf(fs.readFileSync(colorIvf));
+    const alphaIvfFile = parseIvf(fs.readFileSync(alphaIvf));
+    if (colorIvfFile.frames.length !== alphaIvfFile.frames.length) {
+      result.error = `frame count mismatch: color=${colorIvfFile.frames.length} alpha=${alphaIvfFile.frames.length}`;
+      return result;
+    }
+    const webmBuf: Buffer = muxAlphaWebM({
+      width: colorIvfFile.width,
+      height: colorIvfFile.height,
+      fps: 10,
+      colorFrames: colorIvfFile.frames,
+      alphaFrames: alphaIvfFile.frames,
+    });
+    fs.writeFileSync(outPath, webmBuf);
+    result.encodeExitCode = 0;
+    result.outputExists = true;
+    result.outputBytes = webmBuf.length;
+
+    const probe = probePixFmt(ffprobeBin, outPath);
+    result.outputPixFmt = probe.pixFmt;
+    result.outputAlphaMode = probe.alphaMode;
+
+    const rt = roundtripDecode(ffmpegBin, ffprobeBin, outPath, roundtripPng);
+    result.roundtripPixFmt = rt.pixFmt;
+    result.roundtripAlphaAvg = rt.alphaAvg;
+
+    const hasAlphaFmt = !!rt.pixFmt && /^(rgba|rgba64|ya8|yuva[24]\d+p)/i.test(rt.pixFmt);
+    const alphaNotAllOpaque = rt.alphaAvg != null && parseFloat(rt.alphaAvg) < 254.5;
+    result.worked = hasAlphaFmt && alphaNotAllOpaque;
+  } catch (e: any) {
+    result.error = e?.message || String(e);
+  }
+  return result;
+}
 
 export function runAlphaSelfTest(ffmpegBin = "ffmpeg"): AlphaSelfTestReport {
   const ffprobeBin = ffprobeBinFor(ffmpegBin);
@@ -364,6 +507,10 @@ export function runAlphaSelfTest(ffmpegBin = "ffmpeg"): AlphaSelfTestReport {
       for (const v of VARIANTS) {
         results.push(runVariant(ffmpegBin, ffprobeBin, gen.pattern, workDir, v));
       }
+      // Two-stream variant: our custom encoder bypasses ffmpeg's broken
+      // libvpx alpha pipeline entirely. Encodes color and alpha as two
+      // independent VP9 streams, muxes via BlockAdditional.
+      results.push(runTwoStreamVariant(ffmpegBin, ffprobeBin, gen.pattern, workDir));
     }
   } finally {
     try {
@@ -408,15 +555,16 @@ export function formatReport(r: AlphaSelfTestReport): string {
   lines.push(`  source : pix_fmt=${r.sourcePixFmt || "?"}  alpha_avg=${r.sourceAlphaAvg ?? "?"}  ${srcAlphaValid ? "✓ has alpha" : "✗ NO ALPHA IN SOURCE!"}`);
 
   lines.push("");
-  lines.push("  Variant                    Codec         Output            Roundtrip       Result");
-  lines.push("  -----------------------------------------------------------------------------------");
+  lines.push("  Variant                    Codec         Output     Roundtrip  α_avg   Result");
+  lines.push("  ----------------------------------------------------------------------------------");
   for (const v of r.results) {
     const name = v.name.padEnd(25);
     const codec = v.codec.padEnd(13);
-    const out = (v.outputPixFmt || "-").padEnd(18);
-    const rt = (v.roundtripPixFmt || "-").padEnd(15);
+    const out = (v.outputPixFmt || "-").padEnd(10);
+    const rt = (v.roundtripPixFmt || "-").padEnd(10);
+    const aavg = (v.roundtripAlphaAvg ?? "-").toString().padEnd(7);
     const verdict = v.worked ? "✓ ALPHA OK" : v.error ? "✗ ERROR" : "✗ opaque";
-    lines.push(`  ${name}${codec} ${out}${rt} ${verdict}`);
+    lines.push(`  ${name}${codec} ${out}${rt} ${aavg} ${verdict}`);
     if (v.error) {
       lines.push(`    └ err: ${v.error.slice(0, 82)}`);
     }
@@ -428,6 +576,12 @@ export function formatReport(r: AlphaSelfTestReport): string {
   } else {
     lines.push(`  ✓  透過が通った recipe: ${r.workingVariants.join(", ")}`);
   }
+  lines.push("");
+  lines.push("  Notes:");
+  lines.push("    - Roundtrip は -c:v libvpx-vp9 で復号。デフォルトの vp9 デコーダは");
+  lines.push("      BlockAdditional alpha を読まないため「opaque」と誤判定してしまう。");
+  lines.push("    - two_stream_custom_mux が ✓ なら、ffmpeg 経由の encode が壊れてた場合でも");
+  lines.push("      routes.ts から encodeAlphaWebM() を直接呼べば本番で透過書き出しできる。");
   return lines.join("\n");
 }
 
