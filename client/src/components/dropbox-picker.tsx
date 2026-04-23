@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Cloud, Music, Loader2, FolderOpen, RefreshCw, Folder, ChevronLeft, FileText, Search, X } from "lucide-react";
+import { fetchDropbox } from "@/lib/dropbox-auto-reconnect";
 
 interface DropboxFile {
   name: string;
@@ -58,7 +59,7 @@ export function DropboxPicker({ open, onClose, onSelect, preset }: DropboxPicker
     setError(null);
     try {
       const query = folderPath ? `?path=${encodeURIComponent(folderPath)}` : "";
-      const res = await fetch(`/api/dropbox/browse${query}`);
+      const res = await fetchDropbox(`/api/dropbox/browse${query}`);
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.message || "フォルダの取得に失敗しました");
@@ -78,7 +79,7 @@ export function DropboxPicker({ open, onClose, onSelect, preset }: DropboxPicker
     if (!q.trim()) { setSearchResults(null); return; }
     setSearchLoading(true);
     try {
-      const res = await fetch(`/api/dropbox/search?q=${encodeURIComponent(q.trim())}`);
+      const res = await fetchDropbox(`/api/dropbox/search?q=${encodeURIComponent(q.trim())}`);
       if (!res.ok) throw new Error();
       const data = await res.json();
       setSearchResults(data.results || []);

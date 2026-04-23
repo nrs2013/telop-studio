@@ -124,6 +124,7 @@ function getPresets(): Record<string, PresetConfig> {
 
 import { storage } from "@/lib/storage";
 import { projectUndoManager, useUndo } from "@/lib/undoManager";
+import { fetchDropbox } from "@/lib/dropbox-auto-reconnect";
 import { useParams, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -2464,7 +2465,7 @@ export default function ProjectPage() {
             const url = needsConvert
               ? `/api/dropbox/download?path=${encodeURIComponent(downloadPath)}&convert=mp3`
               : `/api/dropbox/download?path=${encodeURIComponent(downloadPath)}`;
-            const res = await fetch(url);
+            const res = await fetchDropbox(url);
             if (audioLoadEpoch.current !== epoch) return { data: null, status: 0 };
             if (!res.ok) return { data: null, status: res.status };
             const data = await res.arrayBuffer();
@@ -2526,7 +2527,7 @@ export default function ProjectPage() {
                   // Remove extension if present for searching
                   searchName = searchName.replace(/\.(mp3|wav|m4a|aac|ogg|flac|wma|aiff)$/i, "");
                   try {
-                    const findRes = await fetch(`/api/dropbox/find?fileName=${encodeURIComponent(searchName)}`);
+                    const findRes = await fetchDropbox(`/api/dropbox/find?fileName=${encodeURIComponent(searchName)}`);
                     if (audioLoadEpoch.current !== epoch) return;
                     if (findRes.status === 401) {
                       lastStatus = 401;
