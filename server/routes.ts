@@ -607,21 +607,26 @@ export async function registerRoutes(
       // allocation per thread. Quality is unchanged (same bitrate, same codec).
       ffmpegArgs.push(
         "-c:v", "libvpx-vp9",
-        // format=yuva420p in the filter graph forces alpha to survive the
-        // concat/PNG-decode pipeline. Without this filter the concat demuxer
-        // silently drops alpha before libvpx-vp9 sees it, so despite
-        // -pix_fmt yuva420p the encoder ends up receiving RGB-only frames
-        // and the WebM comes out as yuv420p (verified via ffprobe).
+        // format=yuva420p ensures the filter graph keeps the alpha channel
+        // after PNG decode; without it the auto-inserted conversion to the
+        // encoder's preferred format drops the alpha plane on the floor.
         "-vf", "format=yuva420p",
         "-pix_fmt", "yuva420p",
         "-auto-alt-ref", "0",
         "-b:v", String(videoBitrate),
         "-r", String(fpsNum),
-        "-deadline", "realtime",
-        "-cpu-used", "8",
+        // `-deadline realtime` plus `-cpu-used 8` is libvpx-vp9's fastest
+        // path, but in that mode libvpx disables the two-pass rate control
+        // that VP9+alpha needs and silently emits the primary plane only —
+        // ffprobe then reports yuv420p and the WebM has no transparency.
+        // `-deadline good` with `-cpu-used 4` is the documented alpha-safe
+        // setting; it's roughly 2x slower but still encodes well under
+        // realtime on Railway and actually produces yuva420p output.
+        "-deadline", "good",
+        "-cpu-used", "4",
         "-threads", "2",
         "-max_muxing_queue_size", "1024",
-        // Also tag the output stream with alpha_mode=1 so WebM-aware players
+        // Tag the output stream with alpha_mode=1 so WebM-aware players
         // (Resolume, Chrome, After Effects, etc.) render the alpha channel.
         "-metadata:s:v:0", "alpha_mode=1",
       );
