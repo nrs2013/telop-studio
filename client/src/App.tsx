@@ -199,21 +199,47 @@ function App() {
   const [checking, setChecking] = useState(true);
 
   useEffect(() => {
-    syncService.checkAuth().then(user => {
+    // Robust auth check: retry a few times before giving up and showing the
+    // login screen. Transient network blips or a cold server can otherwise
+    // briefly flash the login UI at people who ARE actually logged in.
+    let cancelled = false;
+    const attempt = async (remaining: number): Promise<AuthUser | null> => {
+      try {
+        const user = await syncService.checkAuth();
+        if (user) return user;
+      } catch {
+        // fall through to retry
+      }
+      if (remaining > 0) {
+        await new Promise(r => setTimeout(r, 600));
+        return attempt(remaining - 1);
+      }
+      return null;
+    };
+    attempt(2).then(user => {
+      if (cancelled) return;
       setAuthUser(user);
       setChecking(false);
-    }).catch(() => {
-      setChecking(false);
     });
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
+    // When a stale client chunk can't be fetched (e.g. after a redeploy), we
+    // used to hard-reload unconditionally. That bounces the user to the login
+    // screen during the reload flash. Reload at most once per session, and
+    // only when really necessary.
+    const KEY = "telop-reloaded-once";
     const handler = (e: PromiseRejectionEvent) => {
       const msg = String(e.reason?.message || e.reason || "");
-      if (msg.includes("Failed to fetch dynamically imported module") || msg.includes("Importing a module script failed")) {
-        e.preventDefault();
-        window.location.reload();
-      }
+      const isChunkErr =
+        msg.includes("Failed to fetch dynamically imported module") ||
+        msg.includes("Importing a module script failed");
+      if (!isChunkErr) return;
+      e.preventDefault();
+      if (sessionStorage.getItem(KEY)) return; // already reloaded this session
+      sessionStorage.setItem(KEY, "1");
+      window.location.reload();
     };
     window.addEventListener("unhandledrejection", handler);
     return () => window.removeEventListener("unhandledrejection", handler);

@@ -142,6 +142,14 @@ export async function registerRoutes(
     console.warn("[session] DATABASE_URL not set; falling back to in-memory session store (sessions lost on restart).");
   }
 
+  // IMPORTANT: trust proxy must be set BEFORE session middleware so that
+  // `secure: "auto"` correctly detects HTTPS via the X-Forwarded-Proto header
+  // that Railway's edge proxy sets. Without this, secure cookies are never
+  // issued in production and users silently lose their session.
+  if (isProduction) {
+    app.set("trust proxy", 1);
+  }
+
   app.use(session({
     store: sessionStore,
     secret: process.env.SESSION_SECRET || "telop-studio-secret",
@@ -150,13 +158,13 @@ export async function registerRoutes(
     cookie: {
       maxAge: 30 * 24 * 60 * 60 * 1000,
       httpOnly: true,
-      secure: isProduction,
+      // "auto" = secure iff the connection is HTTPS (respects trust proxy).
+      // This avoids the footgun where `secure: true` silently blocks cookies
+      // on any accidental HTTP request during the proxy handshake.
+      secure: isProduction ? "auto" : false,
       sameSite: "lax",
     },
   }));
-  if (isProduction) {
-    app.set("trust proxy", 1); // trust Railway's proxy so `secure: true` cookies work
-  }
 
   app.post("/api/auth/register", async (req: Request, res: Response) => {
     const { username, password, displayName } = req.body;
