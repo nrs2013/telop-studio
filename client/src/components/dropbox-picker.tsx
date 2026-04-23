@@ -23,26 +23,29 @@ interface DropboxPickerProps {
   preset?: string;
 }
 
-// Note: チームメンバー(管理者ではない)は /nrs チーム フォルダ を直接見れない仕様なので、
-// シェアフォルダ "NEW TELOP" を起点とする(これはチームメンバーでも見える)
-const TEAM_ROOT = "";
-const NEW_TELOP_ROOT = `/NEW TELOP`;
+// 初期表示は nrs チーム フォルダ(現場作業フォルダ)。その下に NEW TELOP / 歌詞テロップ
+// など現在進行中の案件フォルダが並ぶ。team space ルートには過去アーカイブが大量に
+// あるので、そこには戻るボタンで明示的に降りる方式。
+const TEAM_SPACE_ROOT = "";
+const NRS_TEAM_FOLDER = "/nrs チーム フォルダ";
+const NEW_TELOP_ROOT = `${NRS_TEAM_FOLDER}/NEW TELOP`;
 const TELOP_ROOT = `${NEW_TELOP_ROOT}/Telop音源`;
 
 const shortcuts = [
-  { key: "teamRoot", label: "チーム", path: TEAM_ROOT },
+  { key: "nrsTeam", label: "nrs チーム", path: NRS_TEAM_FOLDER },
   { key: "newTelop", label: "NEW TELOP", path: NEW_TELOP_ROOT },
   { key: "telop", label: "Telop音源", path: TELOP_ROOT },
   { key: "sakurazaka", label: "SAKURAZAKA", path: `${TELOP_ROOT}/SAKURAZAKA` },
   { key: "hinatazaka", label: "HINATAZAKA", path: `${TELOP_ROOT}/HINATAZAKA` },
   { key: "other", label: "OTHER", path: `${TELOP_ROOT}/OTHER` },
+  { key: "teamSpaceRoot", label: "全体(アーカイブ含)", path: TEAM_SPACE_ROOT },
 ];
 
 export function DropboxPicker({ open, onClose, onSelect, preset }: DropboxPickerProps) {
   const [entries, setEntries] = useState<BrowseEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [currentPath, setCurrentPath] = useState(TEAM_ROOT);
+  const [currentPath, setCurrentPath] = useState(NRS_TEAM_FOLDER);
   const [pathHistory, setPathHistory] = useState<string[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<{ name: string; path: string; size: number }[] | null>(null);
@@ -102,13 +105,13 @@ export function DropboxPicker({ open, onClose, onSelect, preset }: DropboxPicker
 
   useEffect(() => {
     if (open) {
-      // 初期パス: チームフォルダ全体のルート (空文字 = チーム空間 or Dropbox ルート)
-      // NEW TELOP や Telop音源 にはショートカットから1クリックでジャンプ可
+      // 初期パス: /nrs チーム フォルダ(現場作業フォルダ)
+      // 「全体(アーカイブ含)」ショートカットで team space ルートに降りられる
       setPathHistory([]);
-      setCurrentPath(TEAM_ROOT);
+      setCurrentPath(NRS_TEAM_FOLDER);
       setSearchQuery("");
       setSearchResults(null);
-      browse(TEAM_ROOT);
+      browse(NRS_TEAM_FOLDER);
     }
   }, [open, browse]);
 
@@ -125,12 +128,16 @@ export function DropboxPicker({ open, onClose, onSelect, preset }: DropboxPicker
   };
 
   const jumpToShortcut = (path: string) => {
-    setPathHistory([TEAM_ROOT]);
+    setPathHistory([NRS_TEAM_FOLDER]);
     browse(path);
   };
 
   const activeShortcut = shortcuts.find(s => s.path === currentPath)?.key || null;
-  const displayPath = currentPath === TEAM_ROOT ? "/" : currentPath.replace(TEAM_ROOT, "") || "/";
+  const displayPath = !currentPath
+    ? "/"
+    : currentPath.startsWith(NRS_TEAM_FOLDER)
+      ? (currentPath === NRS_TEAM_FOLDER ? "/" : currentPath.slice(NRS_TEAM_FOLDER.length))
+      : currentPath;
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>

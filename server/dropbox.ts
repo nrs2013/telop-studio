@@ -189,11 +189,14 @@ async function resolvePathNamespace(
   // 深いレベルから順に照合して、一番近い共有フォルダを基点にする
   // （浅い階層 "nrs チーム フォルダ" は team space で sharing にはないため
   //   深い "NEW TELOP" を基点にしたい）
-  for (let i = Math.min(parts.length - 2, 3); i >= 0; i--) {
+  for (let i = Math.min(parts.length - 1, 3); i >= 0; i--) {
     const candidate = parts[i].toLowerCase();
     const match = folders.find(f => f.lowerName === candidate);
     if (match) {
-      const relative = '/' + parts.slice(i + 1).join('/');
+      // 末尾まで一致した場合(相対パスが空)は Dropbox の list_folder に空文字を渡す必要があるので
+      // "" にする。それ以外は "/<sub>/<sub>..." の形。
+      const rest = parts.slice(i + 1).join('/');
+      const relative = rest ? '/' + rest : '';
       console.log(`[Dropbox] Resolved "${parts[i]}" (level ${i}) → namespace ${match.nsId}, relative: "${relative}"`);
       return { nsId: match.nsId, relativePath: relative };
     }
@@ -600,8 +603,31 @@ export async function browseDropboxFolder(
       }
 
       if (!usedTeamSpace) {
-        // ホーム名前空間
-        rawEntries = await fetchEntries(folderPath || '');
+        // 非ルートで ns 解決できなかった場合: まずホーム名前空間を試す
+        // ダメなら Business アカウントの team space 名前空間も試す
+        // (例: /nrs チーム フォルダ/... のように team space 直下のフォルダを参照する場合)
+        try {
+          rawEntries = await fetchEntries(folderPath || '');
+        } catch (homeErr: any) {
+          if (!isRoot && folderPath) {
+            try {
+              const acct = await new Dropbox({ accessToken }).usersGetCurrentAccount();
+              const rootInfo = (acct.result as any)?.root_info;
+              const rootNsId = rootInfo?.root_namespace_id;
+              const homeNsId = rootInfo?.home_namespace_id;
+              if (rootNsId && rootNsId !== homeNsId) {
+                console.log(`[Dropbox] Home namespace failed for "${folderPath}", retrying in team space ns=${rootNsId}`);
+                rawEntries = await fetchEntries(folderPath, rootNsId);
+              } else {
+                throw homeErr;
+              }
+            } catch {
+              throw homeErr;
+            }
+          } else {
+            throw homeErr;
+          }
+        }
       }
 
       // ルート表示時: 共有フォルダ一覧を追加(重複は除外)
