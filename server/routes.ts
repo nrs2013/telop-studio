@@ -514,27 +514,53 @@ export async function registerRoutes(
     const reqFullHeight = parseInt(String(req.body.fullHeight || "0")) || 0;
 
     if (segments && Array.isArray(segments) && segments.length > 0) {
-      const concatFile = path.join(session.dir, "concat.txt");
-      const lines: string[] = [];
+      // We used to feed these segments to ffmpeg's concat demuxer, but the
+      // concat demuxer silently strips the alpha channel from PNG inputs,
+      // which leaves VP9 to encode an RGB-only stream and loses transparency
+      // even with -pix_fmt yuva420p / -vf format=yuva420p / alpha_mode=1.
+      //
+      // The fix: expand the VFR segments into a CFR symlink sequence on disk
+      // (no extra bytes copied — just link entries) and feed that through
+      // the image2 demuxer, which preserves PNG alpha end-to-end.
+      const cfrDir = path.join(session.dir, "cfr");
+      if (!fs.existsSync(cfrDir)) fs.mkdirSync(cfrDir, { recursive: true });
+      // Start from a clean slate in case of a retry on the same session.
+      for (const entry of fs.readdirSync(cfrDir)) {
+        try { fs.unlinkSync(path.join(cfrDir, entry)); } catch {}
+      }
+
+      let cfrIdx = 0;
+      let cfrExt = "png";
       for (const seg of segments as { frame: number; duration: number }[]) {
         const framePng = `frame_${String(seg.frame).padStart(6, "0")}.png`;
         const frameTga = `frame_${String(seg.frame).padStart(6, "0")}.tga`;
         const useFile = fs.existsSync(path.join(session.dir, frameTga)) ? frameTga : framePng;
-        lines.push(`file '${useFile}'`);
-        lines.push(`duration ${seg.duration.toFixed(6)}`);
+        cfrExt = useFile.endsWith(".tga") ? "tga" : "png";
+        const srcAbs = path.join(session.dir, useFile);
+        const dupCount = Math.max(1, Math.round(seg.duration * fpsNum));
+        for (let d = 0; d < dupCount; d++) {
+          const linkName = `cfr_${String(cfrIdx).padStart(6, "0")}.${cfrExt}`;
+          const linkPath = path.join(cfrDir, linkName);
+          const relTarget = path.relative(cfrDir, srcAbs);
+          try {
+            fs.symlinkSync(relTarget, linkPath);
+          } catch (err: any) {
+            // Fall back to a hard link if symlinks are not allowed on this FS.
+            if (err.code === "EPERM" || err.code === "ENOSYS" || err.code === "EEXIST") {
+              try { fs.linkSync(srcAbs, linkPath); } catch {}
+            } else {
+              throw err;
+            }
+          }
+          cfrIdx++;
+        }
       }
-      const lastSeg = segments[segments.length - 1] as { frame: number };
-      const lastPng = `frame_${String(lastSeg.frame).padStart(6, "0")}.png`;
-      const lastTga = `frame_${String(lastSeg.frame).padStart(6, "0")}.tga`;
-      const lastFile = fs.existsSync(path.join(session.dir, lastTga)) ? lastTga : lastPng;
-      lines.push(`file '${lastFile}'`);
-      fs.writeFileSync(concatFile, lines.join("\n"));
+      console.log(`[Export] Expanded ${segments.length} segments -> ${cfrIdx} CFR frames via symlinks`);
 
       ffmpegArgs = [
         "-y",
-        "-f", "concat",
-        "-safe", "0",
-        "-i", concatFile,
+        "-framerate", String(fpsNum),
+        "-i", path.join(cfrDir, `cfr_%06d.${cfrExt}`),
       ];
     } else {
       ffmpegArgs = [
