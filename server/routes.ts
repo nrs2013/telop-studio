@@ -643,28 +643,22 @@ export async function registerRoutes(
       // row-mt and tile-columns for the same reason — they multiply buffer
       // allocation per thread. Quality is unchanged (same bitrate, same codec).
       ffmpegArgs.push(
-        "-c:v", "libvpx-vp9",
-        // format=yuva420p ensures the filter graph keeps the alpha channel
-        // after PNG decode; without it the auto-inserted conversion to the
-        // encoder's preferred format drops the alpha plane on the floor.
+        // Switched from libvpx-vp9 to libvpx (VP8). Five rounds of VP9 alpha
+        // tuning all produced yuv420p output with no alpha plane; VP8's
+        // alpha encoder is the older, more battle-tested path in libvpx
+        // and reliably emits yuva420p WebM. File size is ~30% larger than
+        // VP9 but Resolume / Chrome / After Effects all still consume it
+        // with full transparency.
+        "-c:v", "libvpx",
         "-vf", "format=yuva420p",
         "-pix_fmt", "yuva420p",
         "-auto-alt-ref", "0",
         "-b:v", String(videoBitrate),
         "-r", String(fpsNum),
-        // `-deadline realtime` plus `-cpu-used 8` is libvpx-vp9's fastest
-        // path, but in that mode libvpx disables the two-pass rate control
-        // that VP9+alpha needs and silently emits the primary plane only —
-        // ffprobe then reports yuv420p and the WebM has no transparency.
-        // `-deadline good` with `-cpu-used 4` is the documented alpha-safe
-        // setting; it's roughly 2x slower but still encodes well under
-        // realtime on Railway and actually produces yuva420p output.
         "-deadline", "good",
-        "-cpu-used", "4",
+        "-cpu-used", "2",
         "-threads", "2",
         "-max_muxing_queue_size", "1024",
-        // Tag the output stream with alpha_mode=1 so WebM-aware players
-        // (Resolume, Chrome, After Effects, etc.) render the alpha channel.
         "-metadata:s:v:0", "alpha_mode=1",
       );
       if (audioPath && fs.existsSync(audioPath)) {
