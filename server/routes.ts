@@ -504,6 +504,43 @@ export async function registerRoutes(
       if (!hasAlpha && !isProRes) {
         console.warn("[FFmpeg] WARNING: PNG frames do not have alpha channel! WebM output will have no transparency.");
       }
+      // Diagnostic: actually count distinct alpha values across the first frame
+      // so we can tell "has alpha plane" (colorType=6) apart from "alpha plane
+      // is uniformly 0xFF" — the latter looks like alpha on paper but gets
+      // optimized away by any sane encoder.
+      try {
+        const ffprobeBin = FFMPEG_BIN.replace(/ffmpeg(7)?$/, "ffprobe");
+        const probe = spawnSync(ffprobeBin, [
+          "-v", "error",
+          "-select_streams", "v:0",
+          "-show_entries", "stream=pix_fmt,codec_name,width,height",
+          "-of", "default=nw=1",
+          firstFramePath,
+        ], { encoding: "utf8" });
+        console.log(`[FFmpeg] Input PNG ffprobe:\n${probe.stdout?.trim() || "(empty)"}`);
+      } catch (err: any) {
+        console.warn(`[FFmpeg] ffprobe on input PNG failed: ${err.message}`);
+      }
+      // Also sample the alpha plane values of the first frame via an ffmpeg
+      // pass that isolates the alpha channel and prints its min/max/avg. This
+      // tells us definitively whether the canvas rendered meaningful
+      // transparency or an opaque-everywhere layer.
+      try {
+        const ffmpegBin = FFMPEG_BIN;
+        const alphaStats = spawnSync(ffmpegBin, [
+          "-v", "error",
+          "-i", firstFramePath,
+          "-vf", "alphaextract,signalstats,metadata=print",
+          "-f", "null", "-",
+        ], { encoding: "utf8" });
+        const statsOut = alphaStats.stderr || alphaStats.stdout || "";
+        const alphaMin = statsOut.match(/YMIN=(\d+)/)?.[1];
+        const alphaMax = statsOut.match(/YMAX=(\d+)/)?.[1];
+        const alphaAvg = statsOut.match(/YAVG=([\d.]+)/)?.[1];
+        console.log(`[FFmpeg] First frame alpha stats: min=${alphaMin ?? "?"} max=${alphaMax ?? "?"} avg=${alphaAvg ?? "?"}`);
+      } catch (err: any) {
+        console.warn(`[FFmpeg] alpha stats probe failed: ${err.message}`);
+      }
     }
 
     const outputExt = isProRes ? "mov" : "webm";
@@ -699,6 +736,22 @@ export async function registerRoutes(
         if (fs.existsSync(outputPath)) {
           session.encodeStatus = "done";
           console.log("[FFmpeg] Async encode complete:", outputPath, "size:", fs.statSync(outputPath).size);
+          // Post-encode verification: ask ffprobe what's actually in the file.
+          // This shortcuts the "download and check" loop — if the server can
+          // see the output as yuva420p, alpha made it through; if yuv420p,
+          // libvpx-vp9 dropped it regardless of our input flags.
+          try {
+            const ffprobeBin = FFMPEG_BIN.replace(/ffmpeg(7)?$/, "ffprobe");
+            const probe = spawnSync(ffprobeBin, [
+              "-v", "error",
+              "-show_entries", "stream=index,codec_name,pix_fmt,width,height:stream_tags=alpha_mode",
+              "-of", "default=nw=1",
+              outputPath,
+            ], { encoding: "utf8" });
+            console.log(`[FFmpeg] Output WebM ffprobe:\n${probe.stdout?.trim() || "(empty)"}`);
+          } catch (err: any) {
+            console.warn(`[FFmpeg] ffprobe on output failed: ${err.message}`);
+          }
         } else {
           session.encodeStatus = "error";
           session.encodeError = "Output file not created";
