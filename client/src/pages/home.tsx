@@ -160,6 +160,8 @@ export default function Home() {
   const [isLoading, setIsLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const telopInputRef = useRef<HTMLInputElement>(null);
+  const columnTelopInputRef = useRef<HTMLInputElement>(null);
+  const columnImportTargetRef = useRef<string | null>(null);
   const { toast } = useToast();
   const { undo, redo, canUndo, canRedo, push: pushUndo, undoDescription, redoDescription } = useUndo(homeUndoManager);
 
@@ -434,6 +436,151 @@ export default function Home() {
       setImporting(false);
     }
   }, [navigate, toast]);
+
+  // Bulk import: drop / select many .telop files at once for a target column.
+  // Non-.telop files are skipped silently. Files whose preset does not match the
+  // target are confirmed once as a batch (not per-file), to keep the UX snappy.
+  const importTelopFiles = useCallback(async (files: File[] | FileList, targetPreset?: string) => {
+    const all = Array.from(files);
+    const telops = all.filter(f => f.name.toLowerCase().endsWith(".telop"));
+    if (telops.length === 0) {
+      toast({ title: ".telopファイルのみインポートできます", variant: "destructive" });
+      return;
+    }
+
+    // If a target column is specified, check whether any file needs a preset-change confirmation.
+    // If so, ask ONCE for the whole batch.
+    let forceTarget = false;
+    if (targetPreset) {
+      const mismatchedFiles: File[] = [];
+      for (const f of telops) {
+        try {
+          const text = await f.text();
+          const data = JSON.parse(text);
+          const filePreset = data?.project?.preset ?? "other";
+          if (filePreset !== targetPreset) mismatchedFiles.push(f);
+        } catch {
+          // malformed file — will be caught individually below
+        }
+      }
+      if (mismatchedFiles.length > 0) {
+        const targetLabel = PRESET_LABELS[targetPreset] || targetPreset;
+        const ok = window.confirm(
+          `${mismatchedFiles.length}件のファイルは別プリセットのプロジェクトですが、\nすべて「${targetLabel}」として読み込みますか？`
+        );
+        if (!ok) return;
+        forceTarget = true;
+      }
+    }
+
+    setImporting(true);
+    let imported = 0;
+    let failed = 0;
+    try {
+      for (const f of telops) {
+        try {
+          const text = await f.text();
+          const telopData = JSON.parse(text);
+          if (!telopData?.project || !telopData?.lyrics) throw new Error("Invalid .telop file");
+
+          const filePreset = telopData.project.preset ?? "other";
+          const usePreset = targetPreset || filePreset;
+          const applyDefaults = !!targetPreset && filePreset !== targetPreset && forceTarget;
+          const defaults = applyDefaults ? (PRESET_DEFAULTS[usePreset] || {}) : {};
+
+          const projectData: Partial<Project> & { name: string } = {
+            name: telopData.project.name || "Imported Project",
+            fontSize: defaults.fontSize ?? telopData.project.fontSize,
+            fontFamily: defaults.fontFamily ?? telopData.project.fontFamily,
+            fontColor: defaults.fontColor ?? telopData.project.fontColor,
+            strokeColor: defaults.strokeColor ?? telopData.project.strokeColor,
+            strokeWidth: defaults.strokeWidth ?? telopData.project.strokeWidth,
+            strokeBlur: defaults.strokeBlur ?? telopData.project.strokeBlur ?? 0,
+            textAlign: defaults.textAlign ?? telopData.project.textAlign,
+            textX: defaults.textX ?? telopData.project.textX,
+            textY: defaults.textY ?? telopData.project.textY,
+            outputWidth: telopData.project.outputWidth,
+            outputHeight: telopData.project.outputHeight,
+            songTitle: telopData.project.songTitle,
+            lyricsCredit: telopData.project.lyricsCredit,
+            musicCredit: telopData.project.musicCredit,
+            arrangementCredit: telopData.project.arrangementCredit,
+            motifColor: telopData.project.motifColor,
+            audioDuration: telopData.project.audioDuration,
+            audioTrimStart: telopData.project.audioTrimStart ?? 0,
+            detectedBpm: telopData.project.detectedBpm ?? null,
+            bpmGridOffset: telopData.project.bpmGridOffset ?? 0,
+            creditInTime: telopData.project.creditInTime ?? null,
+            creditOutTime: telopData.project.creditOutTime ?? null,
+            creditAnimDuration: telopData.project.creditAnimDuration ?? null,
+            creditTitleFontSize: telopData.project.creditTitleFontSize ?? 80,
+            creditLyricsFontSize: telopData.project.creditLyricsFontSize ?? 36,
+            creditMusicFontSize: telopData.project.creditMusicFontSize ?? 36,
+            creditArrangementFontSize: telopData.project.creditArrangementFontSize ?? 36,
+            creditMembersFontSize: telopData.project.creditMembersFontSize ?? 36,
+            creditRightTitleFontSize: telopData.project.creditRightTitleFontSize ?? 56,
+            creditWipeStartMs: telopData.project.creditWipeStartMs ?? null,
+            creditRightTitle: telopData.project.creditRightTitle ?? null,
+            creditLineY: defaults.creditLineY ?? telopData.project.creditLineY,
+            preset: usePreset,
+          };
+
+          const newProject = await storage.createProject(projectData);
+
+          if (telopData.audio) {
+            const binaryStr = atob(telopData.audio);
+            const bytes = new Uint8Array(binaryStr.length);
+            for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
+            const blob = new Blob([bytes], { type: "audio/mpeg" });
+            const track = await storage.saveAudioTrack(newProject.id, blob, "imported_audio.mp3", "Imported", "audio/mpeg");
+            await storage.updateProject(newProject.id, { audioFileName: "imported_audio.mp3", activeAudioTrackId: track.id });
+          }
+
+          if (telopData.lyrics && telopData.lyrics.length > 0) {
+            const sortedLyrics = [...telopData.lyrics].sort(
+              (a: any, b: any) => (a.lineIndex ?? 0) - (b.lineIndex ?? 0)
+            );
+            const linesForInsert = sortedLyrics.map((l: any, i: number) => ({
+              text: String(l.text || ""),
+              lineIndex: i,
+            }));
+            const savedLines = await storage.setLyricLines(newProject.id, linesForInsert);
+
+            const timingUpdates: { id: string; startTime: number | null; endTime: number | null }[] = [];
+            for (let i = 0; i < sortedLyrics.length; i++) {
+              const src = sortedLyrics[i];
+              if (src.startTime != null || src.endTime != null) {
+                const saved = savedLines[i];
+                if (saved) {
+                  timingUpdates.push({
+                    id: saved.id,
+                    startTime: typeof src.startTime === "number" ? src.startTime : null,
+                    endTime: typeof src.endTime === "number" ? src.endTime : null,
+                  });
+                }
+              }
+            }
+            if (timingUpdates.length > 0) {
+              await storage.updateLyricTimings(timingUpdates);
+            }
+          }
+          imported++;
+        } catch {
+          failed++;
+        }
+      }
+      if (imported > 0 && failed === 0) {
+        toast({ title: `${imported}件のプロジェクトを読み込みました` });
+      } else if (imported > 0 && failed > 0) {
+        toast({ title: `${imported}件読み込み完了・${failed}件失敗`, variant: "destructive" });
+      } else {
+        toast({ title: ".telopファイルの読み込みに失敗しました", variant: "destructive" });
+      }
+      await loadProjects();
+    } finally {
+      setImporting(false);
+    }
+  }, [loadProjects, toast]);
 
   const createProject = useCallback(async (name: string, preset: string) => {
     setCreating(true);
@@ -873,13 +1020,29 @@ export default function Home() {
             ref={telopInputRef}
             type="file"
             accept=".telop"
+            multiple
             className="hidden"
             onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) importTelopFile(file);
+              const files = e.target.files;
+              if (files && files.length > 0) importTelopFiles(files);
               e.target.value = "";
             }}
             data-testid="input-telop-file"
+          />
+          <input
+            ref={columnTelopInputRef}
+            type="file"
+            accept=".telop"
+            multiple
+            className="hidden"
+            onChange={(e) => {
+              const files = e.target.files;
+              const target = columnImportTargetRef.current || undefined;
+              if (files && files.length > 0) importTelopFiles(files, target);
+              columnImportTargetRef.current = null;
+              e.target.value = "";
+            }}
+            data-testid="input-column-telop-file"
           />
           <div className="flex items-center gap-2 flex-wrap">
             <div className="flex items-center gap-0.5 mr-2">
@@ -1100,7 +1263,7 @@ export default function Home() {
           {groupedProjects.map((col) => (
             <div
               key={col.key}
-              className="flex flex-col rounded-lg transition-colors lg:min-h-0 lg:overflow-hidden"
+              className="relative flex flex-col rounded-lg transition-colors lg:min-h-0 lg:overflow-hidden"
               style={{
                 border: columnDragOver === col.key ? `2px dashed ${col.color}` : "2px dashed transparent",
                 backgroundColor: columnDragOver === col.key ? `color-mix(in srgb, ${col.color} 8%, transparent)` : "transparent",
@@ -1131,16 +1294,29 @@ export default function Home() {
                 setColumnDragOver(null);
                 const files = e.dataTransfer.files;
                 if (files.length === 0) return;
-                const file = files[0];
-                const ext = file.name.split(".").pop()?.toLowerCase();
-                if (ext === "telop") {
-                  importTelopFile(file, col.key);
-                } else {
-                  toast({ title: ".telopファイルのみドロップできます", variant: "destructive" });
-                }
+                importTelopFiles(files, col.key);
               }}
               data-testid={`column-drop-${col.key}`}
             >
+              {columnDragOver === col.key && (
+                <div
+                  className="absolute inset-1 z-20 flex items-center justify-center rounded pointer-events-none"
+                  style={{
+                    backgroundColor: `color-mix(in srgb, ${col.color} 18%, hsl(0 0% 10% / 0.75))`,
+                    backdropFilter: "blur(2px)",
+                  }}
+                >
+                  <div className="flex flex-col items-center gap-2">
+                    <Upload className="w-8 h-8" style={{ color: col.color }} />
+                    <div className="text-sm font-bold tracking-wider" style={{ color: col.color }}>
+                      {col.label} にインポート
+                    </div>
+                    <div className="text-[10px]" style={{ color: `color-mix(in srgb, ${col.color} 80%, hsl(0 0% 80%))` }}>
+                      ここで離す（複数OK）
+                    </div>
+                  </div>
+                </div>
+              )}
               <div className="mb-3 px-2 shrink-0">
                 <div className="flex items-center justify-between mb-1 gap-2">
                   <h2 className="text-base sm:text-lg font-bold tracking-[0.12em] truncate min-w-0" style={{ color: col.color }}>
@@ -1183,6 +1359,20 @@ export default function Home() {
                     size="sm"
                     variant="outline"
                     className="text-[11px] tracking-wider h-7"
+                    title={`.telopファイルを${col.label}にインポート`}
+                    style={{ borderColor: `color-mix(in srgb, ${col.color} 40%, transparent)`, color: `color-mix(in srgb, ${col.color} 70%, hsl(0 0% 70%))`, backgroundColor: `color-mix(in srgb, ${col.color} 6%, transparent)` }}
+                    onClick={() => {
+                      columnImportTargetRef.current = col.key;
+                      columnTelopInputRef.current?.click();
+                    }}
+                    data-testid={`button-import-telop-${col.key}`}
+                  >
+                    <Upload className="w-3 h-3" />
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="text-[11px] tracking-wider h-7"
                     style={{ borderColor: `color-mix(in srgb, ${col.color} 40%, transparent)`, color: `color-mix(in srgb, ${col.color} 70%, hsl(0 0% 70%))`, backgroundColor: `color-mix(in srgb, ${col.color} 6%, transparent)` }}
                     onClick={() => setFolderDialogPreset(col.key)}
                     data-testid={`button-new-folder-${col.key}`}
@@ -1190,6 +1380,9 @@ export default function Home() {
                     <FolderPlus className="w-3 h-3" />
                   </Button>
                 </div>
+                <p className="text-[9px] mt-1.5 text-center tracking-wider" style={{ color: `color-mix(in srgb, ${col.color} 45%, hsl(0 0% 40%))` }}>
+                  .telopをドロップ / <Upload className="w-2.5 h-2.5 inline" />でインポート
+                </p>
               </div>
 
               {col.folders.length > 0 && (
