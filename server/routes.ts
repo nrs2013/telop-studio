@@ -33,6 +33,7 @@ if (FFMPEG_BIN === "ffmpeg") {
 } else {
   console.log(`[FFmpeg] Using bundled binary: ${FFMPEG7_PATH}`);
 }
+import { runAlphaSelfTest, formatReport } from "./alphaDiag";
 import { serverStorage, verifyPassword, upgradePasswordIfNeeded } from "./storage";
 import session from "express-session";
 import connectPgSimple from "connect-pg-simple";
@@ -390,6 +391,53 @@ export async function registerRoutes(
     res.json(result);
   });
 
+  // Verify an encoded output WebM preserved its alpha plane. Logs a
+  // clearly-tagged summary line so the check is easy to find in Railway's
+  // Deploy Logs. The definitive test is the "roundtrip": decode the first
+  // frame of the WebM back to PNG and ask ffprobe whether that PNG is
+  // rgba (alpha survived) or rgb24 (alpha lost).
+  function verifyOutputAlpha(webmPath: string): void {
+    try {
+      const ffprobeBin = FFMPEG_BIN.replace(/ffmpeg(7)?$/, "ffprobe");
+      const probe = spawnSync(ffprobeBin, [
+        "-v", "error",
+        "-show_entries", "stream=index,codec_name,pix_fmt,width,height:stream_tags=alpha_mode",
+        "-of", "default=nw=1",
+        webmPath,
+      ], { encoding: "utf8" });
+      console.log(`[FFmpeg] Output WebM ffprobe:\n${probe.stdout?.trim() || "(empty)"}`);
+
+      // Roundtrip: decode first frame → probe the PNG's pix_fmt.
+      const rtPng = webmPath + ".roundtrip.png";
+      try {
+        const rt = spawnSync(FFMPEG_BIN, [
+          "-y", "-v", "error",
+          "-i", webmPath,
+          "-vframes", "1",
+          rtPng,
+        ], { encoding: "utf8", timeout: 10000 });
+        if (rt.status === 0 && fs.existsSync(rtPng)) {
+          const rtProbe = spawnSync(ffprobeBin, [
+            "-v", "error",
+            "-select_streams", "v:0",
+            "-show_entries", "stream=pix_fmt",
+            "-of", "default=nw=1:nk=1",
+            rtPng,
+          ], { encoding: "utf8" });
+          const rtPixFmt = rtProbe.stdout?.trim() || "(unknown)";
+          const alphaOk = /^(rgba|rgba64|ya8|yuva)/i.test(rtPixFmt);
+          console.log(`[FFmpeg] Roundtrip decode → PNG pix_fmt=${rtPixFmt}  ${alphaOk ? "✓ ALPHA PRESERVED" : "✗ ALPHA LOST"}`);
+        } else {
+          console.warn(`[FFmpeg] Roundtrip decode failed: ${rt.stderr?.slice(-200) || "(no stderr)"}`);
+        }
+      } finally {
+        try { if (fs.existsSync(rtPng)) fs.unlinkSync(rtPng); } catch {}
+      }
+    } catch (err: any) {
+      console.warn(`[FFmpeg] verifyOutputAlpha crashed: ${err.message}`);
+    }
+  }
+
   const exportSessions = new Map<string, {
     dir: string;
     frameCount: number;
@@ -440,6 +488,24 @@ export async function registerRoutes(
     console.log(`[Export] Revived session ${sessionId} from disk (${existingFrames.length} frames).`);
     return session;
   }
+
+  // On-demand alpha self-test. Hits the same code path the server runs at
+  // startup, so you can re-run it without a redeploy. JSON output is meant
+  // for Claude / automation; ?format=text returns the same ASCII table that
+  // gets dumped to Railway's Deploy Logs on boot.
+  app.get("/api/diag/alpha-selftest", (req, res) => {
+    try {
+      const report = runAlphaSelfTest(FFMPEG_BIN);
+      if (req.query.format === "text") {
+        res.setHeader("Content-Type", "text/plain; charset=utf-8");
+        res.send(formatReport(report));
+        return;
+      }
+      res.json(report);
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || String(e) });
+    }
+  });
 
   app.post("/api/export/session", async (_req, res) => {
     const sessionId = `export_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -737,22 +803,7 @@ export async function registerRoutes(
         if (fs.existsSync(outputPath)) {
           session.encodeStatus = "done";
           console.log("[FFmpeg] Async encode complete:", outputPath, "size:", fs.statSync(outputPath).size);
-          // Post-encode verification: ask ffprobe what's actually in the file.
-          // This shortcuts the "download and check" loop — if the server can
-          // see the output as yuva420p, alpha made it through; if yuv420p,
-          // libvpx-vp9 dropped it regardless of our input flags.
-          try {
-            const ffprobeBin = FFMPEG_BIN.replace(/ffmpeg(7)?$/, "ffprobe");
-            const probe = spawnSync(ffprobeBin, [
-              "-v", "error",
-              "-show_entries", "stream=index,codec_name,pix_fmt,width,height:stream_tags=alpha_mode",
-              "-of", "default=nw=1",
-              outputPath,
-            ], { encoding: "utf8" });
-            console.log(`[FFmpeg] Output WebM ffprobe:\n${probe.stdout?.trim() || "(empty)"}`);
-          } catch (err: any) {
-            console.warn(`[FFmpeg] ffprobe on output failed: ${err.message}`);
-          }
+          verifyOutputAlpha(outputPath);
         } else {
           session.encodeStatus = "error";
           session.encodeError = "Output file not created";
@@ -774,6 +825,9 @@ export async function registerRoutes(
     if (!fs.existsSync(outputPath)) {
       return res.status(500).json({ message: "Output file not created" });
     }
+
+    // Post-encode verification for synchronous path too.
+    if (!isProRes) verifyOutputAlpha(outputPath);
 
     const stat = fs.statSync(outputPath);
     const contentType = isProRes ? "video/quicktime" : "video/webm";

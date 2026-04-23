@@ -3,6 +3,7 @@ import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
+import { logAlphaSelfTest } from "./alphaDiag";
 
 const app = express();
 const httpServer = createServer(app);
@@ -99,6 +100,19 @@ app.use((req, res, next) => {
     },
     () => {
       log(`serving on http://localhost:${port}`);
+      // Alpha encode self-test — runs ~7 ffmpeg recipes against a known RGBA
+      // source to map out which ones actually preserve the alpha plane on
+      // this container build. Runs asynchronously so server startup is not
+      // blocked; disable with ALPHA_SELFTEST=0.
+      if (process.env.ALPHA_SELFTEST !== "0") {
+        setImmediate(() => {
+          try {
+            logAlphaSelfTest();
+          } catch (e: any) {
+            console.error("[AlphaDiag] crashed:", e?.message || e);
+          }
+        });
+      }
     },
   );
 })();
