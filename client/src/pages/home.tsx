@@ -430,6 +430,8 @@ export default function Home() {
 
       toast({ title: `「${newProject.name}」を読み込みました` });
       await loadProjects();
+      // Make sure the imported project is pushed to the server right away.
+      syncService.immediatePush(newProject.id);
     } catch {
       toast({ title: ".telopファイルの読み込みに失敗しました", variant: "destructive" });
     } finally {
@@ -476,6 +478,7 @@ export default function Home() {
     setImporting(true);
     let imported = 0;
     let failed = 0;
+    const importedIds: string[] = [];
     try {
       for (const f of telops) {
         try {
@@ -564,6 +567,7 @@ export default function Home() {
               await storage.updateLyricTimings(timingUpdates);
             }
           }
+          importedIds.push(newProject.id);
           imported++;
         } catch {
           failed++;
@@ -577,6 +581,10 @@ export default function Home() {
         toast({ title: ".telopファイルの読み込みに失敗しました", variant: "destructive" });
       }
       await loadProjects();
+      // Push every imported project to the server so teammates can see them.
+      for (const pid of importedIds) {
+        syncService.immediatePush(pid);
+      }
     } finally {
       setImporting(false);
     }
@@ -593,6 +601,9 @@ export default function Home() {
       setNewName("");
       setNewPreset("other");
       await loadProjects();
+      // Push the new project to the server immediately so teammates can see it
+      // without having to open the editor first.
+      syncService.immediatePush(project.id);
       if (snapshot) {
         pushUndo({
           description: `作成: ${name}`,
@@ -713,6 +724,8 @@ export default function Home() {
       const dupSnapshot = await storage.getFullProjectSnapshot(newProject.id);
       setProjects((prev) => [...prev, newProject]);
       toast({ title: `「${newProject.name}」を作成しました` });
+      // Push the duplicated project so teammates can see it.
+      syncService.immediatePush(newProject.id);
       if (dupSnapshot) {
         pushUndo({
           description: `複製: ${newProject.name}`,

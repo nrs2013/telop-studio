@@ -500,10 +500,42 @@ export const syncService = {
       if (!user) return;
       const result = await this.pullAndMergeToLocal();
       console.log("[AutoSync] Initial pull:", result);
+      // Retroactive fix: push any projects that exist only in this browser's
+      // IndexedDB but never made it to the server. Prior to this fix, creating
+      // or importing a project on the home page did not trigger a server push
+      // until the user opened the editor.
+      await this.pushLocalOnlyProjects().catch(err => {
+        console.warn("[AutoSync] local-only push failed:", err.message);
+      });
       if (onResult) onResult(result);
     } catch (err: any) {
       console.warn("[AutoSync] Initial pull failed:", err.message);
     }
+  },
+
+  async pushLocalOnlyProjects(): Promise<number> {
+    const user = await this.checkAuth();
+    if (!user || !navigator.onLine) return 0;
+    let pushed = 0;
+    try {
+      const serverData = await this.pullAll();
+      const serverIds = new Set(serverData.projects.map((p: any) => p.id));
+      const localProjects = await storage.getProjects();
+      for (const lp of localProjects) {
+        if (!serverIds.has(lp.id)) {
+          try {
+            await this.pushProject(lp.id);
+            pushed++;
+            console.log("[AutoSync] Pushed local-only project:", lp.id, lp.name);
+          } catch (err: any) {
+            console.warn("[AutoSync] Failed to push local-only project:", lp.id, err.message);
+          }
+        }
+      }
+    } catch (err: any) {
+      console.warn("[AutoSync] pushLocalOnlyProjects failed:", err.message);
+    }
+    return pushed;
   },
 
   isOnline(): boolean {
