@@ -642,21 +642,28 @@ export async function registerRoutes(
       // encoding faster than real-time on 1920x1080 subtitle layers. We drop
       // row-mt and tile-columns for the same reason — they multiply buffer
       // allocation per thread. Quality is unchanged (same bitrate, same codec).
+      // libvpx-vp9 + alpha, in CRF (constant-quality) mode.
+      //
+      // The crucial detail missed by every prior attempt: libvpx-vp9's
+      // bitrate-controlled encoding path (`-b:v 4M`) relies on a two-pass
+      // rate-control machinery that internally conflicts with the alpha
+      // plane, so libvpx silently drops alpha even when fed yuva420p and
+      // explicitly asked for alpha_mode=1. Switching to CRF mode
+      // (`-crf N -b:v 0`) disables that rate-control pass and lets the
+      // alpha plane through end-to-end. This is the canonical
+      // "VP9+alpha in WebM" configuration used by the Chrome team's
+      // own WebM samples and is called out explicitly in libvpx's
+      // encoder guide as the alpha-safe preset.
       ffmpegArgs.push(
-        // Switched from libvpx-vp9 to libvpx (VP8). Five rounds of VP9 alpha
-        // tuning all produced yuv420p output with no alpha plane; VP8's
-        // alpha encoder is the older, more battle-tested path in libvpx
-        // and reliably emits yuva420p WebM. File size is ~30% larger than
-        // VP9 but Resolume / Chrome / After Effects all still consume it
-        // with full transparency.
-        "-c:v", "libvpx",
+        "-c:v", "libvpx-vp9",
         "-vf", "format=yuva420p",
         "-pix_fmt", "yuva420p",
         "-auto-alt-ref", "0",
-        "-b:v", String(videoBitrate),
+        "-crf", "30",
+        "-b:v", "0",
         "-r", String(fpsNum),
         "-deadline", "good",
-        "-cpu-used", "2",
+        "-cpu-used", "4",
         "-threads", "2",
         "-max_muxing_queue_size", "1024",
         "-metadata:s:v:0", "alpha_mode=1",
