@@ -30,6 +30,8 @@ const NEW_TELOP_ROOT = `/NEW TELOP`;
 const TELOP_ROOT = `${NEW_TELOP_ROOT}/Telop音源`;
 
 const shortcuts = [
+  { key: "teamRoot", label: "チーム", path: TEAM_ROOT },
+  { key: "newTelop", label: "NEW TELOP", path: NEW_TELOP_ROOT },
   { key: "telop", label: "Telop音源", path: TELOP_ROOT },
   { key: "sakurazaka", label: "SAKURAZAKA", path: `${TELOP_ROOT}/SAKURAZAKA` },
   { key: "hinatazaka", label: "HINATAZAKA", path: `${TELOP_ROOT}/HINATAZAKA` },
@@ -100,14 +102,13 @@ export function DropboxPicker({ open, onClose, onSelect, preset }: DropboxPicker
 
   useEffect(() => {
     if (open) {
+      // 初期パス: チームフォルダ全体のルート (空文字 = チーム空間 or Dropbox ルート)
+      // NEW TELOP や Telop音源 にはショートカットから1クリックでジャンプ可
       setPathHistory([]);
-      // 初期パス: NEW TELOP に直接ジャンプ(よく使う場所なので)
-      // ルートに戻りたい時は「戻る」ボタンで戻れる
-      setPathHistory([TEAM_ROOT]);
-      setCurrentPath(NEW_TELOP_ROOT);
+      setCurrentPath(TEAM_ROOT);
       setSearchQuery("");
       setSearchResults(null);
-      browse(NEW_TELOP_ROOT);
+      browse(TEAM_ROOT);
     }
   }, [open, browse]);
 
