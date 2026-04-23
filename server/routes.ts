@@ -552,7 +552,7 @@ export async function registerRoutes(
         "-pix_fmt", "yuva420p",
         "-auto-alt-ref", "0",
         "-b:v", String(videoBitrate),
-        "-r", "30",
+        "-r", String(fpsNum),
         "-deadline", "realtime",
         "-cpu-used", "8",
         "-row-mt", "1",

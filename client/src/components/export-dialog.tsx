@@ -644,10 +644,14 @@ export function ExportDialog({
       const CROP_PAD = 30;
       const cropTop = Math.max(0, globalMinY - CROP_PAD);
       const cropBottom = Math.min(outputHeight - 1, globalMaxY + CROP_PAD);
-      const cropActive = cropBottom > cropTop && (cropBottom - cropTop + 1) < outputHeight * 0.85;
+      const rawCropHeight = cropBottom - cropTop + 1;
+      const cropActive = cropBottom > cropTop && rawCropHeight < outputHeight * 0.85;
       const cropY = cropActive ? cropTop : 0;
       const encWidth = outputWidth;
-      const encHeight = cropActive ? (cropBottom - cropTop + 1) : outputHeight;
+      // VP9 (yuva420p) / ProRes どちらも width/height が偶数必須。奇数だとエンコード失敗。
+      // 下端を1px削って偶数に揃える(表示範囲内なので安全)。
+      const rawEncHeight = cropActive ? rawCropHeight : outputHeight;
+      const encHeight = rawEncHeight % 2 === 0 ? rawEncHeight : rawEncHeight - 1;
 
       if (cropActive) {
         console.log(`[WebM Export] Auto-crop: Y=${cropY} H=${encHeight} (原寸: ${outputWidth}x${outputHeight})`);
@@ -925,10 +929,14 @@ export function ExportDialog({
       const CROP_PAD = 30;
       const cropTop = Math.max(0, globalMinY - CROP_PAD);
       const cropBottom = Math.min(outputHeight - 1, globalMaxY + CROP_PAD);
-      const cropActive = cropBottom > cropTop && (cropBottom - cropTop + 1) < outputHeight * 0.85;
+      const rawCropHeight = cropBottom - cropTop + 1;
+      const cropActive = cropBottom > cropTop && rawCropHeight < outputHeight * 0.85;
       const cropY = cropActive ? cropTop : 0;
       const encWidth = outputWidth;
-      const encHeight = cropActive ? (cropBottom - cropTop + 1) : outputHeight;
+      // VP9 (yuva420p) / ProRes どちらも width/height が偶数必須。奇数だとエンコード失敗。
+      // 下端を1px削って偶数に揃える(表示範囲内なので安全)。
+      const rawEncHeight = cropActive ? rawCropHeight : outputHeight;
+      const encHeight = rawEncHeight % 2 === 0 ? rawEncHeight : rawEncHeight - 1;
 
       if (cropActive) {
         console.log(`[ProRes Export] Auto-crop: Y=${cropY} H=${encHeight} (原寸: ${outputWidth}x${outputHeight})`);

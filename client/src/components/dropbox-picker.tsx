@@ -237,7 +237,7 @@ export function DropboxPicker({ open, onClose, onSelect, preset }: DropboxPicker
                     <Music className="w-3.5 h-3.5 shrink-0" style={{ color: "hsl(210 70% 60%)" }} />
                     <div className="min-w-0 flex-1">
                       <span className="text-[13px] block truncate" style={{ color: "hsl(0 0% 82%)" }}>{file.name}</span>
-                      <span className="text-[9px] block truncate" style={{ color: "hsl(0 0% 35%)" }}>{file.path.replace(TEAM_ROOT, "")}</span>
+                      <span className="text-[9px] block truncate" style={{ color: "hsl(0 0% 35%)" }}>{file.path.replace(NRS_TEAM_FOLDER, "")}</span>
                     </div>
                   </button>
                 ))}
