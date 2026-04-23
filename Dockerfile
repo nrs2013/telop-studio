@@ -35,11 +35,23 @@ FROM node:22-slim
 
 WORKDIR /app
 
-# FFmpeg is required for video export. Install from Debian's repo so it's
-# guaranteed to exist on PATH — no fragile nix/railpack resolution step.
+# FFmpeg 7 is required for VP9+Alpha (transparent) encoding. Debian's apt
+# only ships ffmpeg 5.x/6.x, both of which have known bugs producing
+# all-opaque output for VP9 alpha. We pull BtbN's static build of the
+# latest ffmpeg 7 instead, which is a single self-contained binary.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+    && apt-get install -y --no-install-recommends curl xz-utils ca-certificates \
+    && curl -fsSL -o /tmp/ffmpeg.tar.xz https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz \
+    && mkdir -p /tmp/ffmpeg \
+    && tar -xJf /tmp/ffmpeg.tar.xz -C /tmp/ffmpeg --strip-components=1 \
+    && mv /tmp/ffmpeg/bin/ffmpeg /usr/local/bin/ffmpeg \
+    && mv /tmp/ffmpeg/bin/ffprobe /usr/local/bin/ffprobe \
+    && chmod +x /usr/local/bin/ffmpeg /usr/local/bin/ffprobe \
+    && rm -rf /tmp/ffmpeg /tmp/ffmpeg.tar.xz \
+    && apt-get purge -y curl xz-utils \
+    && apt-get autoremove -y \
+    && rm -rf /var/lib/apt/lists/* \
+    && ffmpeg -version | head -n 1
 
 ENV NODE_ENV=production
 ENV PORT=3000
