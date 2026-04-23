@@ -103,18 +103,13 @@ function requireAuth(req: Request, res: Response, next: NextFunction) {
   next();
 }
 
-// Ownership check for project-scoped routes.
-// Legacy projects (ownerId = null) remain accessible to any authenticated user for
-// backward compatibility; new projects are always tagged with the creating user.
+// TEAM SHARING: any authenticated user can access any project.
+// ownerId remains on each project as audit metadata but does NOT gate access.
 async function requireProjectAccess(req: Request, res: Response, next: NextFunction) {
   const projectId = req.params.id;
   if (!projectId) return res.status(400).json({ message: "projectId が必要です" });
   const project = await serverStorage.getProject(projectId);
   if (!project) return res.status(404).json({ message: "プロジェクトが見つかりません" });
-  const userId = req.session.userId!;
-  if (project.ownerId && project.ownerId !== userId) {
-    return res.status(403).json({ message: "このプロジェクトへのアクセス権がありません" });
-  }
   // Attach so downstream handlers can skip re-fetching.
   (req as any).project = project;
   next();
@@ -267,7 +262,7 @@ export async function registerRoutes(
     res.json(result);
   });
 
-  // List only the current user's projects (+ legacy null-owner projects).
+  // TEAM SHARING: returns ALL projects to any authenticated user.
   app.get("/api/sync/projects", requireAuth, async (req: Request, res: Response) => {
     const userId = req.session.userId!;
     const all = await serverStorage.getProjectsForUser(userId);
@@ -281,7 +276,7 @@ export async function registerRoutes(
   app.put("/api/sync/projects/:id", requireAuth, requireProjectAccess, async (req: Request, res: Response) => {
     const data = req.body;
     data.id = req.params.id;
-    // Preserve ownerId from existing project; if legacy-null, claim for current user.
+    // Preserve original creator ownerId as audit metadata; if legacy-null, tag current user.
     const existing = (req as any).project;
     data.ownerId = existing.ownerId ?? req.session.userId!;
     const result = await serverStorage.upsertProject(data);
@@ -321,10 +316,7 @@ export async function registerRoutes(
     const userId = req.session.userId!;
 
     const serverProject = await serverStorage.getProject(project.id);
-    // Authorization: reject pushes from non-owners on existing projects.
-    if (serverProject && serverProject.ownerId && serverProject.ownerId !== userId) {
-      return res.status(403).json({ message: "このプロジェクトへのアクセス権がありません" });
-    }
+    // TEAM SHARING: any authenticated user can push. ownerId is preserved as audit metadata only.
     if (serverProject && serverProject.version > (project.version || 0)) {
       return res.status(409).json({
         message: "サーバーに新しいバージョンがあります",
@@ -361,8 +353,8 @@ export async function registerRoutes(
 
     for (const pid of projectIds) {
       const p = await serverStorage.getProject(pid);
-      // Filter: only return projects the user owns (or legacy null-owner projects).
-      if (p && (!p.ownerId || p.ownerId === userId)) {
+      // TEAM SHARING: return any existing project to any authenticated user.
+      if (p) {
         result.projects.push(p);
         result.lyrics[pid] = await serverStorage.getLyrics(pid);
         result.audioTracks[pid] = await serverStorage.getAudioTrackMeta(pid);

@@ -1,7 +1,7 @@
 import { db } from "./db";
 import { users, projects, lyricLines, audioTrackMeta, checkMarkers } from "@shared/schema";
 import type { SelectUser, ServerProject, ServerLyric, ServerAudioTrackMeta, ServerCheckMarker } from "@shared/schema";
-import { eq, or, isNull } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import crypto from "crypto";
 import bcrypt from "bcryptjs";
 
@@ -67,9 +67,10 @@ export const serverStorage = {
     return db.select().from(projects);
   },
 
-  // Returns projects owned by the user, plus legacy projects with no owner.
-  async getProjectsForUser(userId: string): Promise<ServerProject[]> {
-    return db.select().from(projects).where(or(eq(projects.ownerId, userId), isNull(projects.ownerId)));
+  // TEAM SHARING: Returns ALL projects so every logged-in user sees the same list.
+  // ownerId is retained on each row as audit metadata but no longer filters access.
+  async getProjectsForUser(_userId: string): Promise<ServerProject[]> {
+    return db.select().from(projects);
   },
 
   async getProject(id: string): Promise<ServerProject | undefined> {
