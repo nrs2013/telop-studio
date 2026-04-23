@@ -581,6 +581,12 @@ export async function registerRoutes(
       // allocation per thread. Quality is unchanged (same bitrate, same codec).
       ffmpegArgs.push(
         "-c:v", "libvpx-vp9",
+        // format=yuva420p in the filter graph forces alpha to survive the
+        // concat/PNG-decode pipeline. Without this filter the concat demuxer
+        // silently drops alpha before libvpx-vp9 sees it, so despite
+        // -pix_fmt yuva420p the encoder ends up receiving RGB-only frames
+        // and the WebM comes out as yuv420p (verified via ffprobe).
+        "-vf", "format=yuva420p",
         "-pix_fmt", "yuva420p",
         "-auto-alt-ref", "0",
         "-b:v", String(videoBitrate),
@@ -589,11 +595,8 @@ export async function registerRoutes(
         "-cpu-used", "8",
         "-threads", "2",
         "-max_muxing_queue_size", "1024",
-        // Tag the output video stream with alpha_mode=1 so WebM-aware players
+        // Also tag the output stream with alpha_mode=1 so WebM-aware players
         // (Resolume, Chrome, After Effects, etc.) render the alpha channel.
-        // Without this metadata ffmpeg still encodes yuva420p internally but
-        // the container reads back as yuv420p and the alpha is silently lost
-        // — which is exactly what `ffprobe` surfaced on the first test export.
         "-metadata:s:v:0", "alpha_mode=1",
       );
       if (audioPath && fs.existsSync(audioPath)) {
