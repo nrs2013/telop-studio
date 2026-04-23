@@ -603,30 +603,31 @@ export async function browseDropboxFolder(
       }
 
       if (!usedTeamSpace) {
-        // 非ルートで ns 解決できなかった場合: まずホーム名前空間を試す
-        // ダメなら Business アカウントの team space 名前空間も試す
-        // (例: /nrs チーム フォルダ/... のように team space 直下のフォルダを参照する場合)
-        try {
-          rawEntries = await fetchEntries(folderPath || '');
-        } catch (homeErr: any) {
-          if (!isRoot && folderPath) {
-            try {
-              const acct = await new Dropbox({ accessToken }).usersGetCurrentAccount();
-              const rootInfo = (acct.result as any)?.root_info;
-              const rootNsId = rootInfo?.root_namespace_id;
-              const homeNsId = rootInfo?.home_namespace_id;
-              if (rootNsId && rootNsId !== homeNsId) {
-                console.log(`[Dropbox] Home namespace failed for "${folderPath}", retrying in team space ns=${rootNsId}`);
-                rawEntries = await fetchEntries(folderPath, rootNsId);
-              } else {
-                throw homeErr;
-              }
-            } catch {
-              throw homeErr;
+        // Business アカウントの場合、Dropbox Web UI は team space を既定で使う。
+        // ホーム名前空間では team folder の直接の子は共有済みフォルダしか見えないため、
+        // (例: /nrs チーム フォルダ 直下で NEW TELOP だけしか返らない)
+        // 非ルートパスは team space 名前空間を先に試す。
+        let teamSpaceAttempted = false;
+        if (!isRoot && folderPath) {
+          try {
+            const acct = await new Dropbox({ accessToken }).usersGetCurrentAccount();
+            const rootInfo = (acct.result as any)?.root_info;
+            const rootNsId = rootInfo?.root_namespace_id;
+            const homeNsId = rootInfo?.home_namespace_id;
+            if (rootNsId && rootNsId !== homeNsId) {
+              teamSpaceAttempted = true;
+              console.log(`[Dropbox] Non-root business path, using team space ns=${rootNsId}: "${folderPath}"`);
+              rawEntries = await fetchEntries(folderPath, rootNsId);
             }
-          } else {
-            throw homeErr;
+          } catch (teamErr: any) {
+            console.warn(`[Dropbox] Team space attempt failed for "${folderPath}":`, teamErr.message);
+            teamSpaceAttempted = false;
           }
+        }
+
+        if (!teamSpaceAttempted || !rawEntries) {
+          // ルートもしくは team space 未試行/失敗: ホーム名前空間で取得
+          rawEntries = await fetchEntries(folderPath || '');
         }
       }
 
