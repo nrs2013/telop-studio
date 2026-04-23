@@ -4166,11 +4166,12 @@ export default function ProjectPage() {
       const telopFileName = `${project.name || "project"}.telop`;
 
       // ── ローカル保存 (場所をユーザーが選べる) ───────────────────────
-      // 最新ブラウザは File System Access API で保存先ダイアログを出せる。
-      // 非対応ブラウザ (Safari など) はブラウザ既定のダウンロードフォルダへ。
+      // showSaveFilePicker: Chrome/Edge などで使える保存先ダイアログ API。
+      // キャンセルされた場合は何もせず終了 (ユーザーの意思)。
+      // API 非対応ブラウザ (Safari 等) はブラウザ既定フォルダへの従来ダウンロードにフォールバック。
       const blobForLocal = new Blob([json], { type: "application/json" });
-      let localSaveStatus: "saved" | "cancelled" | "fallback" = "fallback";
       const anyWindow = window as unknown as { showSaveFilePicker?: (opts: unknown) => Promise<FileSystemFileHandle> };
+
       if (typeof anyWindow.showSaveFilePicker === "function") {
         try {
           const handle = await anyWindow.showSaveFilePicker({
@@ -4185,19 +4186,24 @@ export default function ProjectPage() {
           const writable = await (handle as any).createWritable();
           await writable.write(blobForLocal);
           await writable.close();
-          localSaveStatus = "saved";
         } catch (pickerErr: any) {
           if (pickerErr?.name === "AbortError") {
-            // ユーザーがキャンセル
-            localSaveStatus = "cancelled";
-          } else {
-            console.warn("[Telop Export] showSaveFilePicker failed, falling back to download:", pickerErr);
-            localSaveStatus = "fallback";
+            // ユーザーがキャンセル。何も通知せず静かに終了。
+            return;
           }
+          // 想定外エラーはフォールバックダウンロードで救済
+          console.warn("[Telop Export] showSaveFilePicker failed, falling back:", pickerErr);
+          const url = URL.createObjectURL(blobForLocal);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = telopFileName;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
         }
-      }
-      if (localSaveStatus === "fallback") {
-        // 従来の <a download> フォールバック (保存先はブラウザ既定)
+      } else {
+        // showSaveFilePicker 非対応: ブラウザ既定ダウンロード
         const url = URL.createObjectURL(blobForLocal);
         const a = document.createElement("a");
         a.href = url;
@@ -4206,12 +4212,9 @@ export default function ProjectPage() {
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
-        localSaveStatus = "saved";
       }
 
-      // ── Dropbox へ team sync バックアップ ───────────────────────
-      // ローカル保存がキャンセルされた場合でも、Dropbox への保存は行う
-      // (チーム同期・災害対策として必要)
+      // ── Dropbox へ team sync バックアップ (ローカル保存成功時のみ) ─────
       const encoder = new TextEncoder();
       const uint8 = encoder.encode(json);
       let binary = "";
@@ -4226,38 +4229,13 @@ export default function ProjectPage() {
           preset: project.preset || "other",
         }),
       });
-      let dropboxOk = false;
-      let dropboxPath = "";
-      if (uploadRes.ok) {
-        dropboxOk = true;
-        const dropboxData = await uploadRes.json().catch(() => null);
-        dropboxPath = dropboxData?.dropboxPath || "";
-      }
+      const dropboxData = uploadRes.ok ? await uploadRes.json().catch(() => null) : null;
+      const dropboxPath = dropboxData?.dropboxPath || "";
 
-      // ── 結果を toast でまとめる ───────────────────────────────
-      if (localSaveStatus === "saved" && dropboxOk) {
-        toast({
-          title: "✅ 保存完了（ローカル＋Dropbox）",
-          description: dropboxPath || telopFileName,
-        });
-      } else if (localSaveStatus === "saved" && !dropboxOk) {
-        toast({
-          title: "✅ ローカル保存OK（Dropboxは失敗）",
-          description: "ローカルは保存済み。Dropboxバックアップは後で再実行してください。",
-        });
-      } else if (localSaveStatus === "cancelled" && dropboxOk) {
-        toast({
-          title: "✅ Dropboxに保存（ローカルはキャンセル）",
-          description: dropboxPath || telopFileName,
-        });
-      } else {
-        // 両方失敗 (localSaveStatus === cancelled && !dropboxOk、等)
-        toast({
-          title: "⚠️ 保存されませんでした",
-          description: "ローカル保存をキャンセル、Dropboxもエラー。再度お試しください。",
-          variant: "destructive",
-        });
-      }
+      toast({
+        title: "✅ 保存しました",
+        description: dropboxPath || telopFileName,
+      });
     } catch (err: any) {
       toast({ title: "❌ エクスポートに失敗しました", description: err?.message || "", variant: "destructive" });
     } finally {
