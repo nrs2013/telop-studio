@@ -165,7 +165,7 @@ export default function Home() {
 
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [dropboxDialogOpen, setDropboxDialogOpen] = useState(false);
-  const [dropboxStatus, setDropboxStatus] = useState<{ customConfigured: boolean; customConnected: boolean; replitFallback: boolean } | null>(null);
+  const [dropboxStatus, setDropboxStatus] = useState<{ customConfigured: boolean; customConnected: boolean } | null>(null);
   const [dropboxConnecting, setDropboxConnecting] = useState(false);
   const [editingStatus, setEditingStatus] = useState<Record<string, { editors: string[] }>>({});
   const [renamingId, setRenamingId] = useState<string | null>(null);

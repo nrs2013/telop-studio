@@ -1170,7 +1170,7 @@ export default function ProjectPage() {
     trackId: string;
   } | null>(null);
   const [dropboxOAuthDialogOpen, setDropboxOAuthDialogOpen] = useState(false);
-  const [dropboxOAuthStatus, setDropboxOAuthStatus] = useState<{ customConfigured: boolean; customConnected: boolean; replitFallback: boolean } | null>(null);
+  const [dropboxOAuthStatus, setDropboxOAuthStatus] = useState<{ customConfigured: boolean; customConnected: boolean } | null>(null);
   const [dropboxOAuthConnecting, setDropboxOAuthConnecting] = useState(false);
   const [audioRetryKey, setAudioRetryKey] = useState(0);
 

@@ -78,8 +78,7 @@ async function getAccessTokenCustom(): Promise<string> {
 }
 
 // ── Unified access token getter ────────────────────────────────────────────────
-// Replit connector fallback was removed; we now require the custom OAuth flow
-// (DROPBOX_APP_KEY + DROPBOX_APP_SECRET + stored refresh token).
+// カスタム OAuth フロー (DROPBOX_APP_KEY + DROPBOX_APP_SECRET + DB 永続化した refresh token) 必須。
 async function getAccessToken(): Promise<string> {
   if (!useCustomOAuth()) {
     throw new Error(
@@ -750,7 +749,6 @@ export async function disconnectDropboxCustom(): Promise<void> {
 export async function getDropboxOAuthStatus(): Promise<{
   customConfigured: boolean;
   customConnected: boolean;
-  replitFallback: boolean; // kept in response for frontend backwards compatibility; always false now
 }> {
   const customConfigured = useCustomOAuth();
   let customConnected = false;
@@ -763,6 +761,5 @@ export async function getDropboxOAuthStatus(): Promise<{
   return {
     customConfigured,
     customConnected,
-    replitFallback: false,
   };
 }
