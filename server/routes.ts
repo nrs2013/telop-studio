@@ -40,6 +40,7 @@ import connectPgSimple from "connect-pg-simple";
 import pg from "pg";
 import { uploadToDropbox, downloadFromDropbox, downloadFromDropboxStream, listDropboxFiles, searchDropboxFiles, checkDropboxConnection, checkDropboxFileExists, deleteFromDropbox, renameInDropbox, getUncachableDropboxClient, getTeamDropboxClient, getDropboxAuthUrl, exchangeDropboxCode, disconnectDropboxCustom, getDropboxOAuthStatus, browseDropboxFolder, diagnoseDrpboxStructure } from "./dropbox";
 import { Readable } from "stream";
+import { findExactMatches, type DropboxEntry } from "./dropboxMatch";
 import kuromoji from "kuromoji";
 
 let kuromojiTokenizer: kuromoji.Tokenizer<kuromoji.IpadicFeatures> | null = null;
@@ -1215,53 +1216,95 @@ export async function registerRoutes(
     }
   });
 
+  // Strict Dropbox filename lookup for auto-linking audio tracks back to
+  // their Dropbox source. Historical bug (April 2026): the previous
+  // implementation fell back to .includes() substring matching, silently
+  // linking the wrong song whenever the query was a substring of another
+  // filename (e.g. "OPENING" matched "DXTEEN_OPENING_MIX.wav"). Users lost
+  // clips without any warning.
+  //
+  // Policy now:
+  //   - Normalize both sides via dropboxMatch.normalizeAudioName (NFC,
+  //     trim, strip audio extension, locale-aware lowercase). See
+  //     server/dropboxMatch.ts for the exact rules and server/dropboxMatch
+  //     .test.ts for the test cases that lock it down.
+  //   - Pull candidates from TWO sources (curated Telop音源 listing + the
+  //     global Dropbox search API) and union them by path.
+  //   - Classify the result via findExactMatches into none / unique / ambiguous.
+  //   - Only `unique` returns `found:true` + `path`. That is the single
+  //     contract the client is allowed to auto-link on.
+  //   - `ambiguous` surfaces the full candidate list so the UI can ask the
+  //     user to choose. `none` returns empty candidates.
+  //   - NEVER silently pick one of multiple matches. NEVER fall back to
+  //     substring matching. That is the whole point of this rewrite.
   app.get("/api/dropbox/find", async (req, res) => {
     try {
       const fileName = req.query.fileName as string;
       if (!fileName) return res.status(400).json({ message: "fileName is required" });
-      const baseName = fileName.replace(/\.(mp3|wav|m4a|aac|ogg|flac|wma|aiff)$/i, "");
-      const searchNameLower = baseName.toLowerCase();
+      const audioExts = ["mp3", "wav", "m4a", "aac", "ogg", "flac", "wma", "aiff", "aif", "opus"];
 
-      const allFiles = await listDropboxFiles();
-      console.log(`[Dropbox] listDropboxFiles returned ${allFiles.length} files:`, allFiles.map(f => f.path));
+      // Collect candidates from both sources. Failures are tolerated
+      // per-source — a flaky global search shouldn't prevent the curated
+      // listing from being consulted, and vice versa.
+      const entries: DropboxEntry[] = [];
 
-      const exact = allFiles.find(f => {
-        const fBase = f.name.replace(/\.(mp3|wav|m4a|aac|ogg|flac|wma|aiff)$/i, "").toLowerCase();
-        return fBase === searchNameLower;
-      });
-      if (exact) return res.json({ found: true, path: exact.path });
-
-      const partial = allFiles.find(f => {
-        const fBase = f.name.replace(/\.(mp3|wav|m4a|aac|ogg|flac|wma|aiff)$/i, "").toLowerCase();
-        return fBase.includes(searchNameLower);
-      });
-      if (partial) return res.json({ found: true, path: partial.path });
-
-      console.log(`[Dropbox] "${baseName}" not found in Telop音源 list, running global search...`);
-      const audioExts = ["mp3", "wav", "m4a", "aac", "ogg", "flac", "wma", "aiff"];
-      const searchResults = await searchDropboxFiles(baseName, audioExts);
-      if (searchResults.length > 0) {
-        const exactSearch = searchResults.find(f => {
-          const sBase = f.name.replace(/\.(mp3|wav|m4a|aac|ogg|flac|wma|aiff)$/i, "").toLowerCase();
-          return sBase === baseName.toLowerCase() || sBase.includes(baseName.toLowerCase());
-        });
-        if (exactSearch) {
-          console.log(`[Dropbox] Found via global search: ${exactSearch.path}`);
-          return res.json({ found: true, path: exactSearch.path });
+      try {
+        const listed = await listDropboxFiles();
+        for (const f of listed) {
+          entries.push({ name: f.name, path: f.path, size: (f as any).size ?? 0, source: "telop-ongen-list" });
         }
+        console.log(`[Dropbox] find "${fileName}": Telop音源 listing → ${listed.length} entries`);
+      } catch (e: any) {
+        console.warn(`[Dropbox] find "${fileName}": listing failed: ${e.message}`);
       }
 
-      console.log(`[Dropbox] "${baseName}" not found anywhere. Global search returned ${searchResults.length} results.`);
+      try {
+        // The global search endpoint uses a fuzzy index on Dropbox's side;
+        // we still filter to exact basename matches below, so fuzzy here
+        // is fine — it just widens the candidate pool.
+        const baseQuery = fileName.replace(/\.(mp3|wav|m4a|aac|ogg|flac|wma|aiff|aif|opus)$/i, "");
+        const searchResults = await searchDropboxFiles(baseQuery, audioExts);
+        for (const f of searchResults) {
+          entries.push({ name: f.name, path: f.path, size: f.size, source: "global-search" });
+        }
+        console.log(`[Dropbox] find "${fileName}": global search → ${searchResults.length} entries`);
+      } catch (e: any) {
+        console.warn(`[Dropbox] find "${fileName}": global search failed: ${e.message}`);
+      }
 
-      // 見つからない場合、フォルダ構造を自動診断してログ出力
+      const outcome = findExactMatches(fileName, entries);
+
+      if (outcome.kind === "unique") {
+        console.log(`[Dropbox] find "${fileName}" → UNIQUE match: ${outcome.match.path}`);
+        return res.json({
+          found: true,
+          path: outcome.match.path,
+          candidates: [outcome.match],
+          normalizedQuery: outcome.normalizedQuery,
+        });
+      }
+
+      if (outcome.kind === "ambiguous") {
+        console.warn(`[Dropbox] find "${fileName}" → AMBIGUOUS (${outcome.candidates.length} candidates), refusing to auto-link:`, outcome.candidates.map(c => c.path));
+        return res.json({
+          found: false,
+          ambiguous: true,
+          candidates: outcome.candidates,
+          normalizedQuery: outcome.normalizedQuery,
+        });
+      }
+
+      // No exact match anywhere. Do NOT fall back to substring matching —
+      // that was the original bug. Log diagnostic info so operators can see
+      // what was searched and what was available.
+      console.log(`[Dropbox] find "${fileName}" → NO MATCH (searched ${entries.length} entries total)`);
       try {
         const diag = await diagnoseDrpboxStructure();
-        console.log('[Dropbox] Auto-diagnostic (file not found):', JSON.stringify(diag, null, 2));
+        console.log("[Dropbox] Auto-diagnostic (file not found):", JSON.stringify(diag, null, 2));
       } catch (de: any) {
-        console.error('[Dropbox] Auto-diagnostic failed:', de.message);
+        console.error("[Dropbox] Auto-diagnostic failed:", de.message);
       }
-
-      res.json({ found: false });
+      res.json({ found: false, ambiguous: false, candidates: [], normalizedQuery: outcome.normalizedQuery });
     } catch (err: any) {
       console.error("[Dropbox] Find error:", err.message);
       res.status(500).json({ message: err.message });

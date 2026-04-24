@@ -2513,35 +2513,56 @@ export default function ProjectPage() {
                 }
               }
 
+              // Fallback: search Dropbox by name. This is the ONLY place in
+              // the client that auto-links a track to a Dropbox path that
+              // wasn't chosen directly by the user, so safety here is
+              // critical. Rules:
+              //   - Search candidate names in order of trustworthiness:
+              //     track.fileName is what was historically linked; project
+              //     titles/names are user-editable and less reliable.
+              //   - /api/dropbox/find returns found=true ONLY when the
+               //    server got a UNIQUE exact basename match. We trust
+              //     that and auto-link.
+              //   - If the server returns ambiguous (multiple same-name
+              //     files) or none (no match at all), we do NOT write
+              //     anything to storage. The user is prompted to pick
+              //     manually via the Dropbox picker.
+              let ambiguousHit: { candidates: any[]; attemptedName: string } | null = null;
               if (!ab && isPathNotFound) {
                 if (audioLoadEpoch.current !== epoch) return;
                 setAudioProcessPhase("Dropbox全体を検索中...");
-                const dropboxBaseName = resolvedDropboxPath ? resolvedDropboxPath.split("/").pop() || null : null;
                 const searchNames = [
+                  track.fileName,                              // most authoritative
                   projectRef.current?.songTitle || null,
-                  track.fileName,
                   projectRef.current?.name || null,
                 ].filter(Boolean) as string[];
+                // De-dup while preserving order so we don't hit the server
+                // twice with the same query.
+                const tried = new Set<string>();
                 for (let searchName of searchNames) {
                   if (ab) break;
-                  // Remove extension if present for searching
-                  searchName = searchName.replace(/\.(mp3|wav|m4a|aac|ogg|flac|wma|aiff)$/i, "");
+                  searchName = searchName.replace(/\.(mp3|wav|m4a|aac|ogg|flac|wma|aiff|aif|opus)$/i, "");
+                  const key = searchName.trim();
+                  if (!key || tried.has(key)) continue;
+                  tried.add(key);
                   try {
                     const findRes = await fetchDropbox(`/api/dropbox/find?fileName=${encodeURIComponent(searchName)}`);
                     if (audioLoadEpoch.current !== epoch) return;
-                    if (findRes.status === 401) {
-                      lastStatus = 401;
-                      break;
-                    }
-                    if (findRes.ok) {
-                      const findData = await findRes.json();
-                      if (findData.found && findData.path) {
-                        setAudioProcessPhase("Dropboxからダウンロード中...");
-                        finalPath = findData.path;
-                        const retryResult = await tryDownload(findData.path);
-                        ab = retryResult.data;
-                        lastStatus = retryResult.status;
-                      }
+                    if (findRes.status === 401) { lastStatus = 401; break; }
+                    if (!findRes.ok) continue;
+                    const findData = await findRes.json();
+                    if (findData.found && findData.path) {
+                      // Server guarantees unique match here. Safe to auto-link.
+                      setAudioProcessPhase("Dropboxからダウンロード中...");
+                      finalPath = findData.path;
+                      const retryResult = await tryDownload(findData.path);
+                      ab = retryResult.data;
+                      lastStatus = retryResult.status;
+                      if (ab) break;
+                    } else if (findData.ambiguous && Array.isArray(findData.candidates) && findData.candidates.length > 1) {
+                      // Ambiguous result. Record for later so we can show a
+                      // proper message; do NOT auto-link.
+                      ambiguousHit = { candidates: findData.candidates, attemptedName: searchName };
                     }
                   } catch (findErr) {
                     console.warn("Dropbox find fallback failed:", findErr);
@@ -2552,6 +2573,7 @@ export default function ProjectPage() {
               if (audioLoadEpoch.current !== epoch) return;
 
               if (ab && ab.byteLength > 0 && finalPath) {
+                // Unique auto-link successful.
                 await storage.updateAudioTrackBlob(trackId, ab);
                 await storage.updateAudioTrackDropboxPath(trackId, finalPath);
                 const blob = new Blob([ab], { type: "audio/mpeg" });
@@ -2562,6 +2584,16 @@ export default function ProjectPage() {
                 toast({
                   title: "Dropbox認証エラー",
                   description: "Dropboxの接続が切れています。管理者に連絡してください。",
+                  variant: "destructive",
+                });
+              } else if (ambiguousHit) {
+                // Multiple Dropbox files share this name. Refuse to pick one
+                // automatically — that was the source of the April 2026
+                // wrong-link incident. Prompt the user to disambiguate.
+                const preview = ambiguousHit.candidates.slice(0, 3).map((c: any) => c.path).join("\n");
+                toast({
+                  title: "同名の音源が複数あります",
+                  description: `「${ambiguousHit.attemptedName}」に一致するファイルが Dropbox に ${ambiguousHit.candidates.length} 件あります。自動でリンクはしません。ヘッダーの「Dropboxから選ぶ」から正しい曲を手動で選んでください。\n\n候補:\n${preview}${ambiguousHit.candidates.length > 3 ? "\n..." : ""}`,
                   variant: "destructive",
                 });
               } else {
