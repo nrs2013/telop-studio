@@ -2276,6 +2276,29 @@ export const TimelineEditor = memo(function TimelineEditor({
           {formatTime(currentTime)}
         </span>
 
+        {bpm && bpm > 0 && (
+          <>
+            <div className="w-px h-7" style={{ backgroundColor: "hsl(0 0% 22%)" }} />
+            <span
+              className="text-base font-mono font-bold tabular-nums px-2"
+              style={{ color: "hsl(0 0% 82%)" }}
+              title="小節.拍"
+              data-testid="text-timeline-bar-beat"
+            >
+              {(() => {
+                const secPerBeat = 60 / bpm;
+                const elapsed = currentTime - (gridOffset || 0);
+                const totalBeats = elapsed / secPerBeat;
+                if (totalBeats < 0) return "1.1";
+                const bar = Math.floor(totalBeats / 4) + 1;
+                const beat = Math.floor(totalBeats % 4) + 1;
+                return bar + "." + beat;
+              })()}
+              <span className="text-xs font-semibold ml-1" style={{ color: "hsl(0 0% 45%)" }}>BAR</span>
+            </span>
+          </>
+        )}
+
         <div className="w-px h-7" style={{ backgroundColor: "hsl(0 0% 22%)" }} />
 
         <div className="flex items-center gap-1">
