@@ -4,8 +4,6 @@ import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { syncService, type AuthUser } from "@/lib/syncService";
 import Home from "@/pages/home";
@@ -53,6 +51,25 @@ function Router() {
   );
 }
 
+// Shared design tokens. This is the first surface of the app to get the
+// warm-gray PROMPTER STUDIO treatment; accent is TELOP's gold-yellow instead
+// of PROMPTER's beige. Inline here (rather than Tailwind classes) so this
+// file stays self-contained and we can match PROMPTER's existing HTML index
+// one-to-one. Future screens should reach for the same tokens.
+const TS_DESIGN = {
+  bg: "#262624",
+  bg2: "#1f1f1d",
+  surface: "#323230",
+  border: "#46463f",
+  text: "#ece6d8",
+  text2: "#a8a8a0",
+  text3: "#76766f",
+  accent: "#e5bf3d",        // TELOP テーマカラーのゴールドイエロー
+  accent2: "#f2d468",       // hover / lighter
+  accentGlow: "rgba(229,191,61,0.3)",
+  errorRed: "#e07a7a",
+};
+
 function LoginScreen({ onLogin }: { onLogin: (user: AuthUser) => void }) {
   const [mode, setMode] = useState<"login" | "register">("login");
   const [username, setUsername] = useState("");
@@ -84,111 +101,248 @@ function LoginScreen({ onLogin }: { onLogin: (user: AuthUser) => void }) {
     }
   }, [username, password, displayName, mode, onLogin, toast]);
 
+  const inputStyle: React.CSSProperties = {
+    width: "100%",
+    background: TS_DESIGN.surface,
+    border: `1px solid ${TS_DESIGN.border}`,
+    borderRadius: 8,
+    padding: "12px 14px",
+    color: TS_DESIGN.text,
+    fontFamily: "inherit",
+    fontSize: 14,
+  };
+  const labelStyle: React.CSSProperties = {
+    display: "block",
+    fontSize: 11,
+    color: TS_DESIGN.text3,
+    letterSpacing: "0.15em",
+    textTransform: "uppercase",
+    fontWeight: 700,
+    marginBottom: 8,
+    marginTop: 18,
+  };
+
   return (
-    <div className="min-h-screen flex items-center justify-center" style={{ background: "linear-gradient(180deg, hsl(0 0% 7%) 0%, hsl(0 0% 4%) 100%)" }}>
-      <div className="w-full max-w-sm px-6">
-        <div className="flex flex-col items-center mb-8">
-          <div className="w-14 h-14 rounded-lg flex items-center justify-center mb-4" style={{ background: "linear-gradient(135deg, hsl(48 100% 45%) 0%, hsl(48 100% 32%) 100%)" }}>
-            <span className="text-black font-bold text-2xl tracking-tight">T</span>
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "linear-gradient(135deg, #1e1e1c 0%, #2e2e2b 50%, #1a1a18 100%)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        fontFamily: '"Hiragino Sans", "Yu Gothic", "Noto Sans JP", sans-serif',
+        color: TS_DESIGN.text,
+      }}
+    >
+      <div
+        style={{
+          background: TS_DESIGN.bg2,
+          border: `1px solid ${TS_DESIGN.border}`,
+          borderRadius: 16,
+          padding: "48px 56px",
+          width: 440,
+          boxShadow: "0 20px 60px rgba(0,0,0,0.7)",
+        }}
+      >
+        {/* Brand block: ■ T + wordmark */}
+        <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 12 }}>
+          <div
+            style={{
+              width: 44,
+              height: 44,
+              background: TS_DESIGN.accent,
+              borderRadius: 8,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontFamily: '"Helvetica Neue", "Hiragino Sans", sans-serif',
+              fontWeight: 900,
+              fontSize: 28,
+              color: "#262624",
+              letterSpacing: "-0.02em",
+              boxShadow: `0 0 20px ${TS_DESIGN.accentGlow}`,
+            }}
+          >
+            T
           </div>
-          <h1 className="text-xl font-bold tracking-widest uppercase" style={{ color: "hsl(48 100% 50%)" }} data-testid="text-login-title">
-            Telop Studio
-          </h1>
-          <p className="text-[11px] tracking-wider uppercase mt-1" style={{ color: "hsl(0 0% 50%)" }}>
-            Lyric Subtitle Creator
-          </p>
+          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+            <div
+              style={{
+                fontFamily: '"Helvetica Neue", "Hiragino Sans", sans-serif',
+                fontWeight: 300,
+                letterSpacing: "0.03em",
+                fontSize: 26,
+                color: TS_DESIGN.text,
+                lineHeight: 1,
+              }}
+              data-testid="text-login-title"
+            >
+              <b style={{ fontWeight: 800, color: TS_DESIGN.accent }}>TELOP</b> STUDIO
+            </div>
+            <div
+              style={{
+                fontSize: 10,
+                color: TS_DESIGN.text3,
+                letterSpacing: "0.25em",
+                textTransform: "uppercase",
+                fontWeight: 700,
+              }}
+            >
+              Lyric Subtitle Creator
+            </div>
+          </div>
         </div>
 
-        <div className="rounded-lg p-6" style={{ backgroundColor: "hsl(0 0% 10%)", border: "1px solid hsl(0 0% 18%)" }}>
-          <div className="flex mb-5 rounded-md overflow-hidden" style={{ border: "1px solid hsl(0 0% 20%)" }}>
-            <button
-              type="button"
-              className="flex-1 py-2 text-xs font-bold tracking-wider uppercase transition-colors"
-              style={{
-                backgroundColor: mode === "login" ? "hsl(48 100% 45%)" : "transparent",
-                color: mode === "login" ? "hsl(0 0% 5%)" : "hsl(0 0% 50%)",
-              }}
-              onClick={() => { setMode("login"); setError(""); }}
-              data-testid="tab-login"
-            >
-              LOGIN
-            </button>
-            <button
-              type="button"
-              className="flex-1 py-2 text-xs font-bold tracking-wider uppercase transition-colors"
-              style={{
-                backgroundColor: mode === "register" ? "hsl(48 100% 45%)" : "transparent",
-                color: mode === "register" ? "hsl(0 0% 5%)" : "hsl(0 0% 50%)",
-              }}
-              onClick={() => { setMode("register"); setError(""); }}
-              data-testid="tab-register"
-            >
-              NEW ACCOUNT
-            </button>
-          </div>
-
-          <form onSubmit={handleSubmit} className="flex flex-col gap-3">
-            <div>
-              <label className="text-[10px] font-bold tracking-wider uppercase mb-1 block" style={{ color: "hsl(0 0% 45%)" }}>
-                USERNAME
-              </label>
-              <Input
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                placeholder="ユーザー名"
-                autoFocus
-                data-testid="input-login-username"
-                className="text-sm"
-                style={{ backgroundColor: "hsl(0 0% 14%)", border: "1px solid hsl(0 0% 22%)", color: "hsl(0 0% 90%)" }}
-              />
-            </div>
-            <div>
-              <label className="text-[10px] font-bold tracking-wider uppercase mb-1 block" style={{ color: "hsl(0 0% 45%)" }}>
-                PASSWORD
-              </label>
-              <Input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="パスワード"
-                data-testid="input-login-password"
-                className="text-sm"
-                style={{ backgroundColor: "hsl(0 0% 14%)", border: "1px solid hsl(0 0% 22%)", color: "hsl(0 0% 90%)" }}
-              />
-            </div>
-            {mode === "register" && (
-              <div>
-                <label className="text-[10px] font-bold tracking-wider uppercase mb-1 block" style={{ color: "hsl(0 0% 45%)" }}>
-                  DISPLAY NAME <span style={{ color: "hsl(0 0% 35%)" }}>(任意)</span>
-                </label>
-                <Input
-                  value={displayName}
-                  onChange={(e) => setDisplayName(e.target.value)}
-                  placeholder="表示名"
-                  data-testid="input-login-displayname"
-                  className="text-sm"
-                  style={{ backgroundColor: "hsl(0 0% 14%)", border: "1px solid hsl(0 0% 22%)", color: "hsl(0 0% 90%)" }}
-                />
-              </div>
-            )}
-            {error && (
-              <p className="text-xs" style={{ color: "hsl(0 70% 55%)" }} data-testid="text-login-error">{error}</p>
-            )}
-            <Button
-              type="submit"
-              disabled={loading || !username.trim() || !password.trim()}
-              className="mt-1 font-bold tracking-wider"
-              data-testid="button-login-submit"
-              style={{ backgroundColor: "hsl(48 100% 45%)", color: "hsl(0 0% 5%)" }}
-            >
-              {loading ? "..." : mode === "login" ? "LOGIN" : "CREATE ACCOUNT"}
-            </Button>
-          </form>
+        {/* Mode toggle (TELOP keeps this — PROMPTER doesn't have register mode) */}
+        <div
+          style={{
+            display: "flex",
+            marginTop: 32,
+            borderRadius: 8,
+            overflow: "hidden",
+            border: `1px solid ${TS_DESIGN.border}`,
+          }}
+        >
+          <button
+            type="button"
+            style={{
+              flex: 1,
+              padding: "10px 0",
+              fontSize: 11,
+              fontWeight: 700,
+              letterSpacing: "0.15em",
+              textTransform: "uppercase",
+              cursor: "pointer",
+              border: "none",
+              background: mode === "login" ? TS_DESIGN.accent : "transparent",
+              color: mode === "login" ? "#1a1a18" : TS_DESIGN.text3,
+              transition: "background 0.15s",
+              fontFamily: "inherit",
+            }}
+            onClick={() => { setMode("login"); setError(""); }}
+            data-testid="tab-login"
+          >
+            Login
+          </button>
+          <button
+            type="button"
+            style={{
+              flex: 1,
+              padding: "10px 0",
+              fontSize: 11,
+              fontWeight: 700,
+              letterSpacing: "0.15em",
+              textTransform: "uppercase",
+              cursor: "pointer",
+              border: "none",
+              background: mode === "register" ? TS_DESIGN.accent : "transparent",
+              color: mode === "register" ? "#1a1a18" : TS_DESIGN.text3,
+              transition: "background 0.15s",
+              fontFamily: "inherit",
+            }}
+            onClick={() => { setMode("register"); setError(""); }}
+            data-testid="tab-register"
+          >
+            New Account
+          </button>
         </div>
 
-        <p className="text-center text-[10px] mt-4" style={{ color: "hsl(0 0% 30%)" }}>
-          データはサーバーに自動保存されます
-        </p>
+        {/* Form body */}
+        <form onSubmit={handleSubmit} style={{ marginTop: 4 }}>
+          <label style={labelStyle}>Username</label>
+          <input
+            style={inputStyle}
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            placeholder="ユーザー名"
+            autoFocus
+            autoComplete="username"
+            data-testid="input-login-username"
+            onFocus={(e) => { e.currentTarget.style.borderColor = TS_DESIGN.accent; }}
+            onBlur={(e) => { e.currentTarget.style.borderColor = TS_DESIGN.border; }}
+          />
+
+          <label style={labelStyle}>Password</label>
+          <input
+            type="password"
+            style={inputStyle}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="••••••••"
+            autoComplete="current-password"
+            data-testid="input-login-password"
+            onFocus={(e) => { e.currentTarget.style.borderColor = TS_DESIGN.accent; }}
+            onBlur={(e) => { e.currentTarget.style.borderColor = TS_DESIGN.border; }}
+          />
+
+          {mode === "register" && (
+            <>
+              <label style={labelStyle}>
+                Display Name <span style={{ color: TS_DESIGN.text3, letterSpacing: 0, textTransform: "none", fontWeight: 400 }}>(任意)</span>
+              </label>
+              <input
+                style={inputStyle}
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+                placeholder="表示名"
+                data-testid="input-login-displayname"
+                onFocus={(e) => { e.currentTarget.style.borderColor = TS_DESIGN.accent; }}
+                onBlur={(e) => { e.currentTarget.style.borderColor = TS_DESIGN.border; }}
+              />
+            </>
+          )}
+
+          {error && (
+            <p
+              style={{ fontSize: 12, color: TS_DESIGN.errorRed, marginTop: 14 }}
+              data-testid="text-login-error"
+            >
+              {error}
+            </p>
+          )}
+
+          <button
+            type="submit"
+            disabled={loading || !username.trim() || !password.trim()}
+            data-testid="button-login-submit"
+            style={{
+              width: "100%",
+              marginTop: 28,
+              background: TS_DESIGN.accent,
+              border: "none",
+              color: "#1a1a18",
+              borderRadius: 8,
+              padding: 14,
+              fontFamily: "inherit",
+              fontSize: 14,
+              fontWeight: 700,
+              letterSpacing: "0.05em",
+              cursor: loading ? "not-allowed" : "pointer",
+              opacity: (loading || !username.trim() || !password.trim()) ? 0.5 : 1,
+              transition: "background 0.15s",
+            }}
+            onMouseEnter={(e) => {
+              if (!loading && username.trim() && password.trim()) e.currentTarget.style.background = TS_DESIGN.accent2;
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = TS_DESIGN.accent;
+            }}
+          >
+            {loading ? "..." : mode === "login" ? "Sign In" : "Create Account"}
+          </button>
+
+          <div
+            style={{
+              marginTop: 18,
+              textAlign: "center",
+              fontSize: 12,
+              color: TS_DESIGN.text3,
+            }}
+          >
+            データはサーバーに自動保存されます
+          </div>
+        </form>
       </div>
     </div>
   );
@@ -247,9 +401,34 @@ function App() {
 
   if (checking) {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ background: "hsl(0 0% 6%)" }}>
-        <div className="w-10 h-10 rounded-lg flex items-center justify-center" style={{ background: "linear-gradient(135deg, hsl(48 100% 45%) 0%, hsl(48 100% 32%) 100%)" }}>
-          <span className="text-black font-bold text-lg tracking-tight">T</span>
+      <div
+        style={{
+          position: "fixed",
+          inset: 0,
+          background: "linear-gradient(135deg, #1e1e1c 0%, #2e2e2b 50%, #1a1a18 100%)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <div
+          style={{
+            width: 44,
+            height: 44,
+            background: TS_DESIGN.accent,
+            borderRadius: 8,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            color: "#262624",
+            fontFamily: '"Helvetica Neue", "Hiragino Sans", sans-serif',
+            fontWeight: 900,
+            fontSize: 28,
+            letterSpacing: "-0.02em",
+            boxShadow: `0 0 20px ${TS_DESIGN.accentGlow}`,
+          }}
+        >
+          T
         </div>
       </div>
     );
