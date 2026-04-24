@@ -2520,22 +2520,32 @@ export default function ProjectPage() {
               //   - Search candidate names in order of trustworthiness:
               //     track.fileName is what was historically linked; project
               //     titles/names are user-editable and less reliable.
+              //   - Skip the "imported_audio" placeholder entirely — it was
+              //     assigned by old .telop importer code when the real file
+              //     name wasn't preserved, and no Dropbox file is ever
+              //     named that. Wasting a search on it just guarantees a
+              //     misleading "not found" toast.
               //   - /api/dropbox/find returns found=true ONLY when the
-               //    server got a UNIQUE exact basename match. We trust
+              //     server got a UNIQUE exact basename match. We trust
               //     that and auto-link.
               //   - If the server returns ambiguous (multiple same-name
               //     files) or none (no match at all), we do NOT write
               //     anything to storage. The user is prompted to pick
               //     manually via the Dropbox picker.
+              const PLACEHOLDER_NAME_RE = /^imported_audio(\.\w+)?$/i;
+              const isPlaceholderName = (n: string | null | undefined) =>
+                !n || PLACEHOLDER_NAME_RE.test(n.trim());
               let ambiguousHit: { candidates: any[]; attemptedName: string } | null = null;
               if (!ab && isPathNotFound) {
                 if (audioLoadEpoch.current !== epoch) return;
                 setAudioProcessPhase("Dropbox全体を検索中...");
-                const searchNames = [
-                  track.fileName,                              // most authoritative
+                const rawNames = [
+                  track.fileName,                              // most authoritative (if real)
                   projectRef.current?.songTitle || null,
                   projectRef.current?.name || null,
                 ].filter(Boolean) as string[];
+                // Strip the placeholder — there's no Dropbox file called that.
+                const searchNames = rawNames.filter(n => !isPlaceholderName(n));
                 // De-dup while preserving order so we don't hit the server
                 // twice with the same query.
                 const tried = new Set<string>();
@@ -2597,11 +2607,27 @@ export default function ProjectPage() {
                   variant: "destructive",
                 });
               } else {
-                toast({
-                  title: "音源が見つかりません",
-                  description: `Dropbox上に「${track.fileName}」が見つかりませんでした。ヘッダーの「Dropboxから選ぶ」から手動で選択してください。`,
-                  variant: "destructive",
-                });
+                // Decide which message to show. If the track still carries
+                // the legacy "imported_audio" placeholder, tell the user
+                // exactly that — searching for "imported_audio" was never
+                // going to find anything. Otherwise show the real name we
+                // looked for.
+                if (isPlaceholderName(track.fileName)) {
+                  const altName = projectRef.current?.songTitle || projectRef.current?.name || "";
+                  toast({
+                    title: "Dropboxリンクがまだ設定されていません",
+                    description: altName
+                      ? `この曲（${altName}）の音源ファイルは再生はできていますが、Dropboxへのリンクがありません。ヘッダーの「Dropboxから選ぶ」から紐づけてください。`
+                      : "この曲の音源ファイルはまだDropboxに紐づけられていません。ヘッダーの「Dropboxから選ぶ」から紐づけてください。",
+                    variant: "destructive",
+                  });
+                } else {
+                  toast({
+                    title: "音源が見つかりません",
+                    description: `Dropbox上に「${track.fileName}」が見つかりませんでした。ヘッダーの「Dropboxから選ぶ」から手動で選択してください。`,
+                    variant: "destructive",
+                  });
+                }
               }
             } finally {
               setUploadingAudio(false);
@@ -4140,11 +4166,26 @@ export default function ProjectPage() {
         }
       }
 
+      // Capture the audio filename from the project or the active track
+       // so the .telop carries enough information to restore the Dropbox
+      // link identity on reimport. Previously this was absent and importers
+      // had to fall back to song title guesses — which then mismatched in
+      // Dropbox search and stranded tracks with "imported_audio.mp3".
+      let exportedAudioFileName: string | undefined =
+        project.audioFileName || undefined;
+      if (!exportedAudioFileName && activeTrackId) {
+        const tr = await storage.getAudioTrack(activeTrackId);
+        if (tr?.fileName) exportedAudioFileName = tr.fileName;
+      }
+
       const telopData = {
         version: 1,
         exportedAt: new Date().toISOString(),
+        audioFileName: exportedAudioFileName,
+        audioMimeType,
         project: {
           name: project.name,
+          audioFileName: exportedAudioFileName,
           fontSize: project.fontSize,
           fontFamily: project.fontFamily,
           fontColor: project.fontColor,

@@ -395,8 +395,17 @@ export default function Home() {
         const bytes = new Uint8Array(binaryStr.length);
         for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
         const blob = new Blob([bytes], { type: "audio/mpeg" });
-        const track = await storage.saveAudioTrack(newProject.id, blob, "imported_audio.mp3", "Imported", "audio/mpeg");
-        await storage.updateProject(newProject.id, { audioFileName: "imported_audio.mp3", activeAudioTrackId: track.id });
+        // Match project.tsx:4330 — prefer the originally-exported audio file
+        // name, fall back to songTitle, then finally to a placeholder.
+        // DO NOT use "imported_audio.mp3" hard-coded: that placeholder name
+        // is what used to strand the Dropbox auto-link forever because the
+        // re-link search has nothing real to look for.
+        const importedAudioName =
+          (telopData.audioFileName || telopData.project?.audioFileName || telopData.project?.songTitle || telopData.project?.name || "imported_audio")
+            .replace(/\.[^.]+$/i, "") + ".mp3";
+        const trackLabel = importedAudioName.replace(/\.mp3$/i, "");
+        const track = await storage.saveAudioTrack(newProject.id, blob, importedAudioName, trackLabel, "audio/mpeg");
+        await storage.updateProject(newProject.id, { audioFileName: importedAudioName, activeAudioTrackId: track.id });
       }
 
       if (telopData.lyrics && telopData.lyrics.length > 0) {
@@ -536,8 +545,14 @@ export default function Home() {
             const bytes = new Uint8Array(binaryStr.length);
             for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
             const blob = new Blob([bytes], { type: "audio/mpeg" });
-            const track = await storage.saveAudioTrack(newProject.id, blob, "imported_audio.mp3", "Imported", "audio/mpeg");
-            await storage.updateProject(newProject.id, { audioFileName: "imported_audio.mp3", activeAudioTrackId: track.id });
+            // Same smart-naming as the single-file importer above and
+            // project.tsx:4330. Never use "imported_audio.mp3" hard-coded.
+            const importedAudioName =
+              (telopData.audioFileName || telopData.project?.audioFileName || telopData.project?.songTitle || telopData.project?.name || "imported_audio")
+                .replace(/\.[^.]+$/i, "") + ".mp3";
+            const trackLabel = importedAudioName.replace(/\.mp3$/i, "");
+            const track = await storage.saveAudioTrack(newProject.id, blob, importedAudioName, trackLabel, "audio/mpeg");
+            await storage.updateProject(newProject.id, { audioFileName: importedAudioName, activeAudioTrackId: track.id });
           }
 
           if (telopData.lyrics && telopData.lyrics.length > 0) {
