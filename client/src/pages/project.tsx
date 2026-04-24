@@ -5221,19 +5221,37 @@ export default function ProjectPage() {
             </div>
           </div>
 
-          {/* Preview wrapper. Background was previously pure black (#000000),
-              which made the aspect-ratio letterbox stand out as obvious empty
-              "余白" around the canvas. The canvas itself still draws its own
-              black checker / transparent background, so painting the wrapper
-              the editor's warm-gray (#262624 — same as the rest of the
-              chrome) hides the letterbox: the gap on the left/right (or
-              top/bottom) of the canvas now blends seamlessly into the
-              surrounding UI instead of looking like a frame. */}
-          <div ref={previewWrapperRef} className="flex-1 flex items-center justify-center overflow-hidden relative group/preview" style={{ backgroundColor: "#262624", minHeight: 0 }} onMouseDown={() => { const el = document.activeElement as HTMLElement; if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA")) el.blur(); }}>
+          {/* Two-layer preview area, designed so there is NO visible
+              "letterbox frame" around the canvas:
+
+              1. Outer centerer (previewWrapperRef, flex-1, transparent bg)
+                 — fills the column and centers its single child. The
+                 ResizeObserver below measures this element to compute the
+                 largest aspect-fit rectangle inside it (`previewSize`).
+                 Because the bg is transparent, any leftover space ends up
+                 the same color as the surrounding editor chrome rather
+                 than being a separately-tinted rectangle.
+              2. Inner wrapper — explicitly sized to previewSize.width ×
+                 previewSize.height. The wrapper itself equals the canvas
+                 bbox, so there is ZERO internal letterbox between wrapper
+                 edge and canvas. */}
+          <div
+            ref={previewWrapperRef}
+            className="flex-1 flex items-center justify-center overflow-hidden relative"
+            style={{ minHeight: 0 }}
+            onMouseDown={() => { const el = document.activeElement as HTMLElement; if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA")) el.blur(); }}
+          >
+          <div
+            className="relative group/preview"
+            style={
+              previewSize
+                ? { width: previewSize.width, height: previewSize.height }
+                : { width: "100%", maxWidth: "100%", maxHeight: "100%", aspectRatio: `${outputW} / ${outputH}` }
+            }
+          >
           <div
             ref={previewContainerRef}
-            className={`bg-black relative overflow-hidden rounded ${isDraggingText ? "cursor-grabbing" : "cursor-grab"}`}
-            style={previewSize ? { width: previewSize.width, height: previewSize.height } : { maxWidth: "100%", maxHeight: "100%", aspectRatio: `${outputW} / ${outputH}` }}
+            className={`bg-black absolute inset-0 overflow-hidden rounded ${isDraggingText ? "cursor-grabbing" : "cursor-grab"}`}
             onMouseDown={handlePreviewMouseDown}
             data-testid="preview-area"
           >
@@ -5292,6 +5310,7 @@ export default function ProjectPage() {
             >
               <Maximize className="w-3.5 h-3.5" />
             </button>
+          </div>
           </div>
           </div>
           </div>
