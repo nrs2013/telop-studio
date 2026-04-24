@@ -177,6 +177,7 @@ import { StyleSettings } from "@/components/style-settings";
 import { MetadataDialog } from "@/components/metadata-dialog";
 import { DropboxPicker } from "@/components/dropbox-picker";
 import { ColorPicker } from "@/components/color-picker";
+import { TS_DESIGN } from "@/lib/designTokens";
 import type { Project, LyricLine } from "@shared/schema";
 
 function FullscreenPreview({ sourceCanvasRef, onClose, isPlaying, audioRef, currentTime, duration, seekTo, styleProps, previewBgMode, onToggleBgMode }: {
@@ -4585,7 +4586,7 @@ export default function ProjectPage() {
   return (
     <div
       className="h-screen w-screen max-w-full flex flex-col overflow-hidden gap-[3px] relative"
-      style={{ padding: "6px 6px 8px 6px", backgroundColor: "hsl(0 0% 4%)" }}
+      style={{ padding: "6px 6px 8px 6px", backgroundColor: TS_DESIGN.bg }}
       onDragOver={(e) => {
         if (e.dataTransfer.types.includes("Files")) {
           e.preventDefault();
@@ -4783,7 +4784,7 @@ export default function ProjectPage() {
         data-testid="input-audio-file"
       />
 
-      <header className="flex items-center justify-between gap-4 px-3 py-1.5 shrink-0" style={{ backgroundColor: "hsl(0 0% 9%)", border: "1px solid hsl(0 0% 22%)" }}>
+      <header className="flex items-center justify-between gap-4 px-3 py-1.5 shrink-0" style={{ backgroundColor: TS_DESIGN.bg2, border: `1px solid ${TS_DESIGN.border}` }}>
         <div className="flex items-center gap-2.5 min-w-0 overflow-hidden" style={{ flex: "1 1 50%", maxWidth: "50%" }}>
           <Button tabIndex={-1} size="icon" variant="ghost" onClick={() => navigate("/")} data-testid="button-back" className="shrink-0">
             <ArrowLeft className="w-4 h-4" />
@@ -5002,7 +5003,7 @@ export default function ProjectPage() {
       <div className="flex-1 flex flex-col overflow-hidden gap-[3px]" style={{ minHeight: 0 }}>
         <div className="flex-1 flex overflow-hidden gap-[3px]" style={{ minHeight: 0 }}>
           <div className="flex-1 flex flex-col overflow-hidden min-w-0" style={{ border: "1px solid hsl(0 0% 22%)", overflow: "hidden", minHeight: 0 }}>
-          <div className="shrink-0 px-3 py-1.5 flex items-center gap-x-2.5 gap-y-1 flex-wrap" style={{ backgroundColor: "hsl(0 0% 9%)", borderBottom: "1px solid hsl(0 0% 22%)" }}>
+          <div className="shrink-0 px-3 py-1.5 flex items-center gap-x-2.5 gap-y-1 flex-wrap" style={{ backgroundColor: TS_DESIGN.bg2, borderBottom: `1px solid ${TS_DESIGN.border}` }}>
             <div className="flex items-center gap-1.5">
               <span className="text-[9px] font-bold tracking-wider uppercase shrink-0" style={{ color: "hsl(0 0% 50%)" }}>Font</span>
               <Select
@@ -5324,7 +5325,7 @@ export default function ProjectPage() {
             <div className="w-[3px] h-10 rounded-full group-hover:h-16 transition-all" style={{ backgroundColor: "hsl(0 0% 22%)" }} />
           </div>
 
-        <div className="shrink-0 flex flex-col overflow-hidden" style={{ width: `${rightPanelWidth}px`, border: "1px solid hsl(0 0% 22%)", backgroundColor: "hsl(0 0% 8%)" }}>
+        <div className="shrink-0 flex flex-col overflow-hidden" style={{ width: `${rightPanelWidth}px`, border: `1px solid ${TS_DESIGN.border}`, backgroundColor: TS_DESIGN.bg2 }}>
           {isRecording ? (
             <div className="px-3 py-2 border-b border-border/40 shrink-0 bg-red-950/20 flex items-center justify-between gap-2">
               <div className="flex items-center gap-2">
@@ -5988,9 +5989,9 @@ export default function ProjectPage() {
         </div>
       </div>
 
-      <footer className="flex items-center justify-between px-3 py-1 shrink-0" style={{ backgroundColor: "hsl(0 0% 9%)", border: "1px solid hsl(0 0% 22%)" }}>
-        <span className="text-[10px] tracking-wider" style={{ color: "hsl(0 0% 50%)" }}>Telop Studio</span>
-        <span className="text-[10px] tracking-wider" style={{ color: "hsl(0 0% 50%)" }}>1920 × 1080</span>
+      <footer className="flex items-center justify-between px-3 py-1 shrink-0" style={{ backgroundColor: TS_DESIGN.bg2, border: `1px solid ${TS_DESIGN.border}` }}>
+        <span className="text-[10px] tracking-wider" style={{ color: TS_DESIGN.text3 }}>Telop Studio</span>
+        <span className="text-[10px] tracking-wider" style={{ color: TS_DESIGN.text3 }}>1920 × 1080</span>
       </footer>
 
       {previewFullscreen && (
