@@ -5221,7 +5221,15 @@ export default function ProjectPage() {
             </div>
           </div>
 
-          <div ref={previewWrapperRef} className="flex-1 flex items-center justify-center p-1 overflow-hidden relative group/preview" style={{ backgroundColor: "#000000", minHeight: 0 }} onMouseDown={() => { const el = document.activeElement as HTMLElement; if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA")) el.blur(); }}>
+          {/* Preview wrapper. Background was previously pure black (#000000),
+              which made the aspect-ratio letterbox stand out as obvious empty
+              "余白" around the canvas. The canvas itself still draws its own
+              black checker / transparent background, so painting the wrapper
+              the editor's warm-gray (#262624 — same as the rest of the
+              chrome) hides the letterbox: the gap on the left/right (or
+              top/bottom) of the canvas now blends seamlessly into the
+              surrounding UI instead of looking like a frame. */}
+          <div ref={previewWrapperRef} className="flex-1 flex items-center justify-center overflow-hidden relative group/preview" style={{ backgroundColor: "#262624", minHeight: 0 }} onMouseDown={() => { const el = document.activeElement as HTMLElement; if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA")) el.blur(); }}>
           <div
             ref={previewContainerRef}
             className={`bg-black relative overflow-hidden rounded ${isDraggingText ? "cursor-grabbing" : "cursor-grab"}`}
