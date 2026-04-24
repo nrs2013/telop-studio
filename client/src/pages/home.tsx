@@ -10,6 +10,7 @@ import type { Project } from "@shared/schema";
 import { storage } from "@/lib/storage";
 import { syncService } from "@/lib/syncService";
 import { homeUndoManager, useUndo } from "@/lib/undoManager";
+import { TS_DESIGN } from "@/lib/designTokens";
 
 function formatDate(dateStr: string | null) {
   if (!dateStr) return "";
@@ -900,7 +901,7 @@ export default function Home() {
     <div
       key={project.id}
       className="flex items-center px-1 rounded hover-elevate cursor-pointer group transition-colors"
-      style={{ backgroundColor: "hsl(0 0% 10%)", borderLeft: `2px solid transparent`, height: 26 }}
+      style={{ backgroundColor: TS_DESIGN.surface, borderLeft: `2px solid transparent`, height: 26 }}
       draggable
       onDragStart={(e) => {
         e.dataTransfer.setData("text/plain", project.id);
@@ -918,7 +919,7 @@ export default function Home() {
           className="shrink-0 text-center rounded font-bold mr-1.5"
           style={{
             color: indexLabel ? `color-mix(in srgb, ${col.color} 70%, white)` : "transparent",
-            backgroundColor: indexLabel ? "hsl(0 0% 22%)" : "transparent",
+            backgroundColor: indexLabel ? TS_DESIGN.bg2 : "transparent",
             width: 18,
             fontSize: 9,
             lineHeight: "16px",
@@ -944,7 +945,7 @@ export default function Home() {
         ) : (
           <span
             className="font-medium text-[11px] truncate block leading-tight"
-            style={{ color: timingStatus[project.id] ? "hsl(0 0% 90%)" : "hsl(0 0% 45%)" }}
+            style={{ color: timingStatus[project.id] ? TS_DESIGN.text : TS_DESIGN.text2 }}
             data-testid={`text-project-name-${project.id}`}
           >
             {project.name}
@@ -963,7 +964,7 @@ export default function Home() {
             }}
             title="フォルダから外す"
           >
-            <FolderOpen className="w-2.5 h-2.5" style={{ color: "hsl(0 0% 55%)" }} />
+            <FolderOpen className="w-2.5 h-2.5" style={{ color: TS_DESIGN.text2 }} />
           </Button>
         )}
         <Button
@@ -974,7 +975,7 @@ export default function Home() {
           data-testid={`button-rename-project-${project.id}`}
           title="名前を変更"
         >
-          <Pencil className="w-2.5 h-2.5" style={{ color: "hsl(0 0% 55%)" }} />
+          <Pencil className="w-2.5 h-2.5" style={{ color: TS_DESIGN.text2 }} />
         </Button>
         <Button
           size="icon"
@@ -984,7 +985,7 @@ export default function Home() {
           data-testid={`button-copy-project-${project.id}`}
           title="コピーを作成"
         >
-          <Copy className="w-2.5 h-2.5" style={{ color: "hsl(0 0% 55%)" }} />
+          <Copy className="w-2.5 h-2.5" style={{ color: TS_DESIGN.text2 }} />
         </Button>
         <Button
           size="icon"
@@ -1002,29 +1003,73 @@ export default function Home() {
       </div>
       {editingStatus[project.id]?.editors?.length > 0 && (
         <span className="shrink-0 ml-1 flex items-center gap-0.5" data-testid={`text-editing-${project.id}`}>
-          <span className="text-[7px] font-bold tracking-wider animate-pulse" style={{ color: "hsl(48 100% 50%)" }}>EDIT</span>
-          <span className="text-[7px] font-medium truncate max-w-[60px]" style={{ color: "hsl(48 80% 65%)" }}>{editingStatus[project.id].editors.join(", ")}</span>
+          <span className="text-[7px] font-bold tracking-wider animate-pulse" style={{ color: TS_DESIGN.accent }}>EDIT</span>
+          <span className="text-[7px] font-medium truncate max-w-[60px]" style={{ color: TS_DESIGN.accent2 }}>{editingStatus[project.id].editors.join(", ")}</span>
         </span>
       )}
-      <span className="text-[8px] font-mono shrink-0 w-10 text-right ml-1 invisible group-hover:visible" style={{ color: "hsl(0 0% 40%)" }}>
+      <span className="text-[8px] font-mono shrink-0 w-10 text-right ml-1 invisible group-hover:visible" style={{ color: TS_DESIGN.text3 }}>
         {project.createdAt ? new Date(project.createdAt).toLocaleDateString("ja-JP", { month: "2-digit", day: "2-digit" }) : ""}
       </span>
     </div>
   );
 
   return (
-    <div className="h-screen flex flex-col" style={{ background: "linear-gradient(180deg, hsl(0 0% 7%) 0%, hsl(0 0% 5%) 100%)" }}>
+    <div
+      className="h-screen flex flex-col"
+      style={{
+        background: TS_DESIGN.heroRadial,
+        color: TS_DESIGN.text,
+        fontFamily: '"Hiragino Sans","Yu Gothic","Noto Sans JP",sans-serif',
+      }}
+    >
       <div className="max-w-[1400px] w-full mx-auto px-3 sm:px-6 pt-6 sm:pt-8 pb-2 shrink-0">
         <div className="flex items-center justify-between gap-4 flex-wrap mb-8">
+          {/* Brand block — same logo box + wordmark as the login screen */}
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-md flex items-center justify-center" style={{ background: "linear-gradient(135deg, hsl(48 100% 45%) 0%, hsl(48 100% 32%) 100%)" }}>
-              <span className="text-black font-bold text-sm tracking-tight">T</span>
+            <div
+              style={{
+                width: 38,
+                height: 38,
+                background: TS_DESIGN.accent,
+                borderRadius: 6,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontFamily: '"Helvetica Neue","Hiragino Sans",sans-serif',
+                fontWeight: 900,
+                fontSize: 22,
+                color: "#262624",
+                letterSpacing: "-0.02em",
+                boxShadow: `0 0 16px ${TS_DESIGN.accentGlow}`,
+              }}
+            >
+              T
             </div>
-            <div>
-              <h1 className="text-base font-bold tracking-widest uppercase" style={{ color: "hsl(48 100% 50%)" }} data-testid="text-app-title">
-                Telop Studio
+            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+              <h1
+                style={{
+                  fontFamily: '"Helvetica Neue","Hiragino Sans",sans-serif',
+                  fontWeight: 300,
+                  letterSpacing: "0.03em",
+                  fontSize: 18,
+                  color: TS_DESIGN.text,
+                  lineHeight: 1,
+                  margin: 0,
+                }}
+                data-testid="text-app-title"
+              >
+                <b style={{ fontWeight: 800, color: TS_DESIGN.accent }}>TELOP</b> STUDIO
               </h1>
-              <p className="text-[10px] tracking-wider uppercase" style={{ color: "hsl(0 0% 50%)" }}>
+              <p
+                style={{
+                  fontSize: 9,
+                  color: TS_DESIGN.text3,
+                  letterSpacing: "0.25em",
+                  textTransform: "uppercase",
+                  fontWeight: 700,
+                  margin: 0,
+                }}
+              >
                 Lyric Subtitle Creator
               </p>
             </div>
@@ -1083,11 +1128,11 @@ export default function Home() {
               </Button>
             </div>
             {isOnline ? (
-              <span className="text-[9px] font-mono flex items-center gap-1" style={{ color: "hsl(150 20% 50%)" }}>
+              <span className="text-[9px] font-mono flex items-center gap-1" style={{ color: TS_DESIGN.okGreen, letterSpacing: "0.15em" }}>
                 <Cloud className="w-3 h-3" /> ONLINE
               </span>
             ) : (
-              <span className="text-[9px] font-mono flex items-center gap-1" style={{ color: "hsl(0 25% 50%)" }}>
+              <span className="text-[9px] font-mono flex items-center gap-1" style={{ color: TS_DESIGN.errorRed, letterSpacing: "0.15em" }}>
                 <CloudOff className="w-3 h-3" /> OFFLINE
               </span>
             )}
@@ -1112,24 +1157,24 @@ export default function Home() {
           <DialogContent style={{ borderColor: "hsl(210 60% 35%)", borderWidth: "1px", maxWidth: "420px" }}>
             <DialogHeader>
               <DialogTitle style={{ color: "hsl(210 80% 70%)" }}>Dropbox 接続設定</DialogTitle>
-              <DialogDescription style={{ color: "hsl(0 0% 55%)" }}>
+              <DialogDescription style={{ color: TS_DESIGN.text2 }}>
                 永続接続（リフレッシュトークン方式）を使用すると、接続が切れません。
               </DialogDescription>
             </DialogHeader>
             <div className="flex flex-col gap-4 mt-2">
               {dropboxStatus?.customConfigured ? (
                 <>
-                  <div className="rounded-md p-3 text-sm" style={{ background: "hsl(0 0% 10%)", border: "1px solid hsl(0 0% 18%)" }}>
+                  <div className="rounded-md p-3 text-sm" style={{ background: TS_DESIGN.surface, border: `1px solid ${TS_DESIGN.border}` }}>
                     <div className="flex items-center gap-2 mb-1">
-                      <span className="font-mono text-[10px]" style={{ color: "hsl(0 0% 45%)" }}>接続方式</span>
+                      <span className="font-mono text-[10px]" style={{ color: TS_DESIGN.text3 }}>接続方式</span>
                       <span className="font-mono text-[10px] font-bold" style={{ color: "hsl(210 80% 65%)" }}>永続トークン (推奨)</span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className="font-mono text-[10px]" style={{ color: "hsl(0 0% 45%)" }}>状態</span>
+                      <span className="font-mono text-[10px]" style={{ color: TS_DESIGN.text3 }}>状態</span>
                       {dropboxStatus.customConnected ? (
-                        <span className="font-mono text-[10px] font-bold" style={{ color: "hsl(140 60% 50%)" }}>✓ 接続中 — 自動更新有効</span>
+                        <span className="font-mono text-[10px] font-bold" style={{ color: TS_DESIGN.okGreen }}>✓ 接続中 — 自動更新有効</span>
                       ) : (
-                        <span className="font-mono text-[10px] font-bold" style={{ color: "hsl(0 60% 55%)" }}>✗ 未接続 — 下のボタンで接続</span>
+                        <span className="font-mono text-[10px] font-bold" style={{ color: TS_DESIGN.errorRed }}>✗ 未接続 — 下のボタンで接続</span>
                       )}
                     </div>
                   </div>
@@ -1156,14 +1201,14 @@ export default function Home() {
                 </>
               ) : (
                 <>
-                  <div className="rounded-md p-3 text-sm" style={{ background: "hsl(0 0% 10%)", border: "1px solid hsl(40 60% 30%)" }}>
-                    <p className="text-[11px] mb-2" style={{ color: "hsl(40 80% 65%)" }}>⚠ DROPBOX_APP_KEY が未設定</p>
-                    <p className="text-[10px] leading-relaxed" style={{ color: "hsl(0 0% 55%)" }}>
+                  <div className="rounded-md p-3 text-sm" style={{ background: TS_DESIGN.surface, border: `1px solid ${TS_DESIGN.accent}66` }}>
+                    <p className="text-[11px] mb-2" style={{ color: TS_DESIGN.accent2 }}>⚠ DROPBOX_APP_KEY が未設定</p>
+                    <p className="text-[10px] leading-relaxed" style={{ color: TS_DESIGN.text2 }}>
                       永続接続を使用するには、Dropbox App Key と App Secret を環境変数に設定し、ここで接続してください。
                     </p>
                   </div>
-                  <div className="text-[10px] leading-relaxed" style={{ color: "hsl(0 0% 50%)" }}>
-                    <p className="font-bold mb-1" style={{ color: "hsl(0 0% 65%)" }}>設定手順：</p>
+                  <div className="text-[10px] leading-relaxed" style={{ color: TS_DESIGN.text2 }}>
+                    <p className="font-bold mb-1" style={{ color: TS_DESIGN.text }}>設定手順：</p>
                     <ol className="list-decimal list-inside space-y-1">
                       <li>dropbox.com/developers/apps でアプリを作成</li>
                       <li>Redirect URI に <code className="text-[9px]" style={{ color: "hsl(210 70% 65%)" }}>{window.location.origin}/api/dropbox/oauth/callback</code> を追加</li>
@@ -1171,7 +1216,7 @@ export default function Home() {
                       <li>アプリを再デプロイ後、このダイアログで「接続」をクリック</li>
                     </ol>
                   </div>
-                  <div className="rounded-md p-2 text-[10px] font-mono" style={{ background: "hsl(0 0% 8%)", color: "hsl(0 0% 50%)" }}>
+                  <div className="rounded-md p-2 text-[10px] font-mono" style={{ background: TS_DESIGN.bg2, color: TS_DESIGN.text3 }}>
                     現在の状態: Dropbox 未設定 (環境変数を設定してデプロイしてください)
                   </div>
                 </>
@@ -1183,7 +1228,7 @@ export default function Home() {
         <Dialog open={columnDialogPreset !== null} onOpenChange={(open) => { if (!open) { setColumnDialogPreset(null); setNewName(""); } }}>
           {(() => {
             const colInfo = COLUMNS.find(c => c.key === columnDialogPreset);
-            const accentColor = colInfo?.color ?? "hsl(0 0% 50%)";
+            const accentColor = colInfo?.color ?? TS_DESIGN.text2;
             return (
               <DialogContent style={{ borderColor: accentColor, borderWidth: "1px" }}>
                 <DialogHeader>
@@ -1228,7 +1273,7 @@ export default function Home() {
         <Dialog open={folderDialogPreset !== null} onOpenChange={(open) => { if (!open) { setFolderDialogPreset(null); setNewFolderName(""); } }}>
           {(() => {
             const colInfo = COLUMNS.find(c => c.key === folderDialogPreset);
-            const accentColor = colInfo?.color ?? "hsl(0 0% 50%)";
+            const accentColor = colInfo?.color ?? TS_DESIGN.text2;
             return (
               <DialogContent style={{ borderColor: accentColor, borderWidth: "1px" }}>
                 <DialogHeader>
@@ -1270,7 +1315,7 @@ export default function Home() {
         </Dialog>
       </div>
 
-      <div className="flex-1 min-h-0 lg:overflow-hidden overflow-y-auto" style={{ scrollbarWidth: "thin", scrollbarColor: "hsl(0 0% 25%) transparent" }}>
+      <div className="flex-1 min-h-0 lg:overflow-hidden overflow-y-auto" style={{ scrollbarWidth: "thin", scrollbarColor: `${TS_DESIGN.border} transparent` }}>
         <div className="max-w-[1400px] w-full mx-auto px-3 sm:px-6 pb-6 lg:h-full lg:overflow-hidden">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 lg:h-full lg:overflow-hidden" style={{ gridTemplateRows: "1fr" }} data-testid="project-columns">
           {groupedProjects.map((col) => (
@@ -1315,7 +1360,7 @@ export default function Home() {
                 <div
                   className="absolute inset-1 z-20 flex items-center justify-center rounded pointer-events-none"
                   style={{
-                    backgroundColor: `color-mix(in srgb, ${col.color} 18%, hsl(0 0% 10% / 0.75))`,
+                    backgroundColor: `color-mix(in srgb, ${col.color} 22%, rgba(31,31,29,0.80))`,
                     backdropFilter: "blur(2px)",
                   }}
                 >
@@ -1324,7 +1369,7 @@ export default function Home() {
                     <div className="text-sm font-bold tracking-wider" style={{ color: col.color }}>
                       {col.label} にインポート
                     </div>
-                    <div className="text-[10px]" style={{ color: `color-mix(in srgb, ${col.color} 80%, hsl(0 0% 80%))` }}>
+                    <div className="text-[10px]" style={{ color: `color-mix(in srgb, ${col.color} 80%, ${TS_DESIGN.text})` }}>
                       ここで離す（複数OK）
                     </div>
                   </div>
@@ -1332,16 +1377,25 @@ export default function Home() {
               )}
               <div className="mb-3 px-2 shrink-0">
                 <div className="flex items-center justify-between mb-1 gap-2">
-                  <h2 className="text-base sm:text-lg font-bold tracking-[0.12em] truncate min-w-0" style={{ color: col.color }}>
+                  <h2
+                    className="font-bold tracking-[0.12em] truncate min-w-0"
+                    style={{
+                      color: col.color,
+                      fontSize: 17,
+                      fontFamily: '"Helvetica Neue","Hiragino Sans",sans-serif',
+                    }}
+                  >
                     {col.label}
                   </h2>
                   <div className="flex items-center gap-2 shrink-0">
                     <button
-                      className="text-[9px] font-mono px-1.5 py-0.5 rounded flex items-center gap-0.5 whitespace-nowrap"
+                      className="font-mono px-1.5 py-0.5 rounded flex items-center gap-0.5 whitespace-nowrap"
                       style={{
+                        fontSize: 9,
                         color: col.color,
-                        backgroundColor: "hsl(0 0% 12%)",
+                        backgroundColor: TS_DESIGN.surface,
                         border: `1px solid ${col.color}44`,
+                        letterSpacing: "0.08em",
                       }}
                       onClick={() => setSortMode(sortMode === "name" ? "date" : "name")}
                       data-testid={`button-sort-toggle-${col.key}`}
@@ -1350,18 +1404,22 @@ export default function Home() {
                       <ArrowUpDown className="w-2.5 h-2.5" />
                       {sortMode === "name" ? "あいう順" : "作成日順"}
                     </button>
-                    <span className="text-[10px] font-mono" style={{ color: "hsl(0 0% 36%)" }}>
+                    <span className="text-[10px] font-mono" style={{ color: TS_DESIGN.text3 }}>
                       {col.projects.length}
                     </span>
                   </div>
                 </div>
-                <div className="h-px mb-2" style={{ backgroundColor: col.color, opacity: 0.3 }} />
+                <div className="h-px mb-2" style={{ backgroundColor: col.color, opacity: 0.4 }} />
                 <div className="flex gap-1.5">
                   <Button
                     size="sm"
                     variant="outline"
                     className="flex-1 text-[11px] tracking-wider h-7 whitespace-nowrap"
-                    style={{ borderColor: `color-mix(in srgb, ${col.color} 40%, transparent)`, color: `color-mix(in srgb, ${col.color} 70%, hsl(0 0% 70%))`, backgroundColor: `color-mix(in srgb, ${col.color} 6%, transparent)` }}
+                    style={{
+                      borderColor: `color-mix(in srgb, ${col.color} 50%, ${TS_DESIGN.border})`,
+                      color: `color-mix(in srgb, ${col.color} 70%, ${TS_DESIGN.text})`,
+                      backgroundColor: `color-mix(in srgb, ${col.color} 8%, ${TS_DESIGN.surface})`,
+                    }}
                     onClick={() => setColumnDialogPreset(col.key)}
                     data-testid={`button-new-song-${col.key}`}
                   >
@@ -1373,7 +1431,11 @@ export default function Home() {
                     variant="outline"
                     className="text-[11px] tracking-wider h-7"
                     title={`.telopファイルを${col.label}にインポート`}
-                    style={{ borderColor: `color-mix(in srgb, ${col.color} 40%, transparent)`, color: `color-mix(in srgb, ${col.color} 70%, hsl(0 0% 70%))`, backgroundColor: `color-mix(in srgb, ${col.color} 6%, transparent)` }}
+                    style={{
+                      borderColor: `color-mix(in srgb, ${col.color} 50%, ${TS_DESIGN.border})`,
+                      color: `color-mix(in srgb, ${col.color} 70%, ${TS_DESIGN.text})`,
+                      backgroundColor: `color-mix(in srgb, ${col.color} 8%, ${TS_DESIGN.surface})`,
+                    }}
                     onClick={() => {
                       columnImportTargetRef.current = col.key;
                       columnTelopInputRef.current?.click();
@@ -1386,14 +1448,18 @@ export default function Home() {
                     size="sm"
                     variant="outline"
                     className="text-[11px] tracking-wider h-7"
-                    style={{ borderColor: `color-mix(in srgb, ${col.color} 40%, transparent)`, color: `color-mix(in srgb, ${col.color} 70%, hsl(0 0% 70%))`, backgroundColor: `color-mix(in srgb, ${col.color} 6%, transparent)` }}
+                    style={{
+                      borderColor: `color-mix(in srgb, ${col.color} 50%, ${TS_DESIGN.border})`,
+                      color: `color-mix(in srgb, ${col.color} 70%, ${TS_DESIGN.text})`,
+                      backgroundColor: `color-mix(in srgb, ${col.color} 8%, ${TS_DESIGN.surface})`,
+                    }}
                     onClick={() => setFolderDialogPreset(col.key)}
                     data-testid={`button-new-folder-${col.key}`}
                   >
                     <FolderPlus className="w-3 h-3" />
                   </Button>
                 </div>
-                <p className="text-[9px] mt-1.5 text-center tracking-wider" style={{ color: `color-mix(in srgb, ${col.color} 45%, hsl(0 0% 40%))` }}>
+                <p className="text-[9px] mt-1.5 text-center tracking-wider" style={{ color: TS_DESIGN.text3 }}>
                   .telopをドロップ / <Upload className="w-2.5 h-2.5 inline" />でインポート
                 </p>
               </div>
@@ -1411,8 +1477,8 @@ export default function Home() {
                         key={folder.id}
                         className="rounded-md overflow-hidden"
                         style={{
-                          backgroundColor: folderDragOver === folder.id ? `color-mix(in srgb, ${col.color} 15%, hsl(0 0% 9%))` : "hsl(0 0% 9%)",
-                          border: folderDragOver === folder.id ? `1px dashed ${col.color}` : "1px solid hsl(0 0% 14%)",
+                          backgroundColor: folderDragOver === folder.id ? `color-mix(in srgb, ${col.color} 15%, ${TS_DESIGN.bg2})` : TS_DESIGN.bg2,
+                          border: folderDragOver === folder.id ? `1px dashed ${col.color}` : `1px solid ${TS_DESIGN.border}`,
                         }}
                         onDragOver={(e) => {
                           if (!dragProjectId) return;
@@ -1452,7 +1518,7 @@ export default function Home() {
                       >
                         <div
                           className="flex items-center gap-2 px-3 py-2 cursor-pointer group/folder"
-                          style={{ borderLeft: `3px solid ${col.color}`, backgroundColor: `color-mix(in srgb, ${col.color} 6%, transparent)` }}
+                          style={{ borderLeft: `3px solid ${col.color}`, backgroundColor: `color-mix(in srgb, ${col.color} 8%, ${TS_DESIGN.surface})` }}
                           onClick={() => toggleFolderCollapse(folder.id)}
                         >
                           {folder.collapsed ? (
@@ -1481,7 +1547,7 @@ export default function Home() {
                               {folder.name}
                             </span>
                           )}
-                          <span className="text-[9px] font-mono" style={{ color: "hsl(0 0% 36%)" }}>
+                          <span className="text-[9px] font-mono" style={{ color: TS_DESIGN.text3 }}>
                             {folderProjects.length}曲
                           </span>
                           <Button
@@ -1491,7 +1557,7 @@ export default function Home() {
                             onClick={(e) => startRenameFolder(folder, e)}
                             title="フォルダ名変更"
                           >
-                            <Pencil className="w-2.5 h-2.5" style={{ color: "hsl(0 0% 55%)" }} />
+                            <Pencil className="w-2.5 h-2.5" style={{ color: TS_DESIGN.text2 }} />
                           </Button>
                           <Button
                             size="icon"
@@ -1513,7 +1579,7 @@ export default function Home() {
                         )}
                         {!folder.collapsed && folderProjects.length === 0 && (
                           <div className="px-4 py-3 text-center">
-                            <p className="text-[9px]" style={{ color: "hsl(0 0% 30%)" }}>
+                            <p className="text-[9px]" style={{ color: TS_DESIGN.text3 }}>
                               曲をドラッグ&ドロップで追加
                             </p>
                           </div>
@@ -1527,13 +1593,13 @@ export default function Home() {
               {isLoading ? (
                 <div className="space-y-0.5 px-1 shrink-0">
                   {[1, 2].map((i) => (
-                    <div key={i} className="h-7 rounded animate-pulse" style={{ backgroundColor: "hsl(0 0% 10%)" }} />
+                    <div key={i} className="h-7 rounded animate-pulse" style={{ backgroundColor: TS_DESIGN.surface }} />
                   ))}
                 </div>
               ) : col.allProjectsSorted.length > 0 ? (
                 <div
                   className="space-y-px px-1 flex-1 lg:min-h-0 lg:overflow-y-auto"
-                  style={{ scrollbarWidth: "thin", scrollbarColor: `color-mix(in srgb, ${col.color} 40%, hsl(0 0% 20%)) transparent` }}
+                  style={{ scrollbarWidth: "thin", scrollbarColor: `color-mix(in srgb, ${col.color} 40%, ${TS_DESIGN.border}) transparent` }}
                 >
                   {(() => {
                     let lastLabel = "";
@@ -1546,9 +1612,9 @@ export default function Home() {
                   })()}
                 </div>
               ) : (
-                <div className="flex flex-col items-center justify-center py-8 text-center flex-1 rounded-md" style={{ backgroundColor: "hsl(0 0% 8%)", border: "1px dashed hsl(0 0% 15%)" }}>
-                  <FolderOpen className="w-5 h-5 mb-2" style={{ color: "hsl(0 0% 25%)" }} />
-                  <p className="text-[10px]" style={{ color: "hsl(0 0% 30%)" }}>
+                <div className="flex flex-col items-center justify-center py-8 text-center flex-1 rounded-md" style={{ backgroundColor: TS_DESIGN.bg2, border: `1px dashed ${TS_DESIGN.border}` }}>
+                  <FolderOpen className="w-5 h-5 mb-2" style={{ color: TS_DESIGN.text3 }} />
+                  <p className="text-[10px]" style={{ color: TS_DESIGN.text3 }}>
                     プロジェクトなし
                   </p>
                 </div>
@@ -1559,12 +1625,12 @@ export default function Home() {
         </div>
       </div>
 
-      <footer className="shrink-0 py-2 px-4" style={{ borderTop: "1px solid hsl(0 0% 12%)", background: "hsl(0 0% 6%)" }}>
+      <footer className="shrink-0 py-2 px-4" style={{ borderTop: `1px solid ${TS_DESIGN.border}`, background: TS_DESIGN.bg2 }}>
         <div className="max-w-[1400px] mx-auto flex items-center justify-between">
-          <span className="text-[9px] font-mono tracking-wider uppercase" style={{ color: "hsl(0 0% 30%)" }}>
-            Telop Studio
+          <span className="text-[9px] font-mono tracking-wider uppercase" style={{ color: TS_DESIGN.text3 }}>
+            TELOP STUDIO
           </span>
-          <span className="text-[9px] font-mono" style={{ color: "hsl(0 0% 25%)" }}>
+          <span className="text-[9px] font-mono" style={{ color: TS_DESIGN.text3 }}>
             {projects.length} projects
           </span>
         </div>

@@ -51,24 +51,7 @@ function Router() {
   );
 }
 
-// Shared design tokens. This is the first surface of the app to get the
-// warm-gray PROMPTER STUDIO treatment; accent is TELOP's gold-yellow instead
-// of PROMPTER's beige. Inline here (rather than Tailwind classes) so this
-// file stays self-contained and we can match PROMPTER's existing HTML index
-// one-to-one. Future screens should reach for the same tokens.
-const TS_DESIGN = {
-  bg: "#262624",
-  bg2: "#1f1f1d",
-  surface: "#323230",
-  border: "#46463f",
-  text: "#ece6d8",
-  text2: "#a8a8a0",
-  text3: "#76766f",
-  accent: "#e5bf3d",        // TELOP テーマカラーのゴールドイエロー
-  accent2: "#f2d468",       // hover / lighter
-  accentGlow: "rgba(229,191,61,0.3)",
-  errorRed: "#e07a7a",
-};
+import { TS_DESIGN } from "@/lib/designTokens";
 
 function LoginScreen({ onLogin }: { onLogin: (user: AuthUser) => void }) {
   const [mode, setMode] = useState<"login" | "register">("login");
