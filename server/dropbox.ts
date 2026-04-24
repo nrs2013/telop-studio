@@ -368,6 +368,83 @@ async function rawDownload(accessToken: string, filePath: string, nsId?: string)
   return { ok: false, status: resp.status, body };
 }
 
+/**
+ * Streaming counterpart of downloadFromDropbox.
+ *
+ * The buffer-based function below loads the whole file into RAM before
+ * returning. That's fine for small files (lyrics docs, a few hundred KB of
+ * JSON) but a 30 MB WAV swamps Railway's container memory and — worse —
+ * blocks the request until the entire download finishes, so MP3 conversion
+ * and upload to the browser happen strictly *after* the Dropbox download
+ * completes. End-to-end time was roughly additive.
+ *
+ * This variant resolves the same namespace / shared-folder logic and then
+ * returns the still-open fetch Response object, so callers can pipe its
+ * body straight into ffmpeg's stdin (or the HTTP response) while bytes
+ * are still arriving from Dropbox. Downloads now overlap with transcoding
+ * and network upload.
+ */
+export async function downloadFromDropboxStream(dropboxPath: string): Promise<{ response: Response; contentLength: number | null }> {
+  return withDropboxRetry(async () => {
+    const accessToken = await getAccessToken();
+    const apiArg = JSON.stringify({ path: dropboxPath })
+      .replace(/[\u0080-\uFFFF]/g, (ch) => `\\u${ch.charCodeAt(0).toString(16).padStart(4, '0')}`);
+    const baseHeaders: Record<string, string> = {
+      Authorization: `Bearer ${accessToken}`,
+      'Dropbox-API-Arg': apiArg,
+    };
+
+    // Attempt direct download from home namespace first.
+    let resp = await fetch('https://content.dropboxapi.com/2/files/download', { method: 'POST', headers: baseHeaders });
+    if (resp.ok) {
+      const cl = resp.headers.get('content-length');
+      return { response: resp, contentLength: cl ? parseInt(cl, 10) : null };
+    }
+
+    // 409 (path/not_found) → try shared-folder namespace resolution, same
+    // algorithm as the buffer variant.
+    if (resp.status === 409) {
+      // Drain the failed response body to free the socket.
+      await resp.arrayBuffer().catch(() => {});
+      const resolved = await resolvePathNamespace(dropboxPath, accessToken);
+      if (resolved) {
+        const nsHeaders = {
+          ...baseHeaders,
+          'Dropbox-API-Arg': JSON.stringify({ path: resolved.relativePath })
+            .replace(/[\u0080-\uFFFF]/g, (ch) => `\\u${ch.charCodeAt(0).toString(16).padStart(4, '0')}`),
+          'Dropbox-API-Path-Root': buildPathRootHeader(resolved.nsId),
+        };
+        const nsResp = await fetch('https://content.dropboxapi.com/2/files/download', { method: 'POST', headers: nsHeaders });
+        if (nsResp.ok) {
+          const cl = nsResp.headers.get('content-length');
+          return { response: nsResp, contentLength: cl ? parseInt(cl, 10) : null };
+        }
+        const body = await nsResp.text();
+        const err = new Error(`Response failed with a ${nsResp.status} code: ${body}`);
+        (err as any).status = nsResp.status;
+        throw err;
+      }
+
+      // Last resort: root_namespace_id
+      const acct = await new Dropbox({ accessToken }).usersGetCurrentAccount();
+      const rootNsId = (acct.result as any)?.root_info?.root_namespace_id;
+      if (rootNsId) {
+        const rootHeaders = { ...baseHeaders, 'Dropbox-API-Path-Root': buildPathRootHeader(String(rootNsId)) };
+        const rootResp = await fetch('https://content.dropboxapi.com/2/files/download', { method: 'POST', headers: rootHeaders });
+        if (rootResp.ok) {
+          const cl = rootResp.headers.get('content-length');
+          return { response: rootResp, contentLength: cl ? parseInt(cl, 10) : null };
+        }
+      }
+    }
+
+    const body = await resp.text().catch(() => '');
+    const err = new Error(`Response failed with a ${resp.status} code: ${body}`);
+    (err as any).status = resp.status;
+    throw err;
+  });
+}
+
 export async function downloadFromDropbox(dropboxPath: string): Promise<Buffer> {
   return withDropboxRetry(async () => {
     const accessToken = await getAccessToken();

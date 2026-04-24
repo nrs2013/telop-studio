@@ -38,7 +38,8 @@ import { serverStorage, verifyPassword, upgradePasswordIfNeeded } from "./storag
 import session from "express-session";
 import connectPgSimple from "connect-pg-simple";
 import pg from "pg";
-import { uploadToDropbox, downloadFromDropbox, listDropboxFiles, searchDropboxFiles, checkDropboxConnection, checkDropboxFileExists, deleteFromDropbox, renameInDropbox, getUncachableDropboxClient, getTeamDropboxClient, getDropboxAuthUrl, exchangeDropboxCode, disconnectDropboxCustom, getDropboxOAuthStatus, browseDropboxFolder, diagnoseDrpboxStructure } from "./dropbox";
+import { uploadToDropbox, downloadFromDropbox, downloadFromDropboxStream, listDropboxFiles, searchDropboxFiles, checkDropboxConnection, checkDropboxFileExists, deleteFromDropbox, renameInDropbox, getUncachableDropboxClient, getTeamDropboxClient, getDropboxAuthUrl, exchangeDropboxCode, disconnectDropboxCustom, getDropboxOAuthStatus, browseDropboxFolder, diagnoseDrpboxStructure } from "./dropbox";
+import { Readable } from "stream";
 import kuromoji from "kuromoji";
 
 let kuromojiTokenizer: kuromoji.Tokenizer<kuromoji.IpadicFeatures> | null = null;
@@ -1052,69 +1053,114 @@ export async function registerRoutes(
   });
 
   app.get("/api/dropbox/download", async (req, res) => {
-    try {
-      const dropboxPath = req.query.path as string;
-      const convertToMp3 = req.query.convert === "mp3";
-      if (!dropboxPath) return res.status(400).json({ message: "path is required" });
-      const buffer = await downloadFromDropbox(dropboxPath);
-      const fileName = path.basename(dropboxPath);
-      const fileExt = path.extname(fileName).toLowerCase();
+    const dropboxPath = req.query.path as string;
+    const convertToMp3 = req.query.convert === "mp3";
+    if (!dropboxPath) return res.status(400).json({ message: "path is required" });
 
-      if (convertToMp3 && fileExt !== ".mp3") {
-        const tmpDir = path.join(process.cwd(), "tmp_audio");
-        if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
-        const inputPath = path.join(tmpDir, `input_${Date.now()}${fileExt}`);
-        const outputPath = path.join(tmpDir, `output_${Date.now()}.mp3`);
-        try {
-          fs.writeFileSync(inputPath, buffer);
-          await new Promise<void>((resolve, reject) => {
-            const proc = spawn(FFMPEG_BIN, [
-              "-y", "-i", inputPath,
-              "-vn", "-ar", "44100", "-ac", "2", "-b:a", "192k",
-              "-f", "mp3", outputPath
-            ]);
-            let stderr = "";
-            proc.stderr.on("data", (d: Buffer) => { stderr += d.toString(); });
-            proc.on("close", (code) => {
-              if (code === 0) resolve();
-              else reject(new Error(`FFmpeg exited with code ${code}: ${stderr.slice(-500)}`));
-            });
-            proc.on("error", reject);
-          });
-          const mp3Buffer = fs.readFileSync(outputPath);
-          const mp3Name = fileName.replace(/\.[^.]+$/i, ".mp3");
-          res.setHeader("Content-Type", "audio/mpeg");
-          res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(mp3Name)}"`);
-          res.setHeader("Content-Length", mp3Buffer.length);
-          res.send(mp3Buffer);
-        } finally {
-          try { fs.unlinkSync(inputPath); } catch {}
-          try { fs.unlinkSync(outputPath); } catch {}
-        }
+    const fileName = path.basename(dropboxPath);
+    const fileExt = path.extname(fileName).toLowerCase();
+    const needsConvert = convertToMp3 && fileExt !== ".mp3";
+
+    try {
+      // Streaming pipeline — replaces the old buffer-then-disk-then-ffmpeg flow.
+      // The previous implementation held the entire Dropbox file in RAM, wrote
+      // it to /tmp, invoked ffmpeg on the on-disk copy, read the transcoded
+      // output back into RAM, then res.send()-ed it. End-to-end latency was
+      // strictly additive (download → disk → encode → disk → send). Now the
+      // Dropbox fetch, ffmpeg transcode, and HTTP response all run concurrently:
+      // bytes flow Dropbox → ffmpeg stdin → ffmpeg stdout → browser without ever
+      // touching disk.
+      const { response: dbxResp } = await downloadFromDropboxStream(dropboxPath);
+      if (!dbxResp.body) throw new Error("Dropbox response has no body");
+      const dbxNodeStream = Readable.fromWeb(dbxResp.body as any);
+
+      if (needsConvert) {
+        const mp3Name = fileName.replace(/\.[^.]+$/i, ".mp3");
+        res.setHeader("Content-Type", "audio/mpeg");
+        res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(mp3Name)}"`);
+        // No Content-Length: transcoded size is unknown until the final byte.
+        // HTTP chunked transfer-encoding handles that transparently.
+
+        const ff = spawn(FFMPEG_BIN, [
+          "-hide_banner", "-loglevel", "error",
+          "-i", "pipe:0",
+          "-vn", "-ar", "44100", "-ac", "2", "-b:a", "192k",
+          "-threads", "2",
+          "-f", "mp3", "pipe:1",
+        ], { stdio: ["pipe", "pipe", "pipe"] });
+
+        let stderr = "";
+        ff.stderr.on("data", (d: Buffer) => {
+          stderr += d.toString();
+          if (stderr.length > 4000) stderr = stderr.slice(-2000);
+        });
+
+        // Forward any error on the Dropbox stream to ffmpeg — don't hang forever.
+        dbxNodeStream.on("error", (e) => {
+          console.error("[Dropbox] stream error:", e.message);
+          ff.stdin.destroy(e);
+        });
+
+        // Pipe: Dropbox → ffmpeg stdin
+        dbxNodeStream.pipe(ff.stdin);
+        // Pipe: ffmpeg stdout → HTTP response
+        ff.stdout.pipe(res);
+
+        ff.on("close", (code) => {
+          if (code !== 0 && !res.headersSent) {
+            res.status(500).json({ message: "MP3 変換に失敗しました", error: stderr.slice(-400) });
+          } else if (code !== 0) {
+            console.error(`[Dropbox] ffmpeg exited ${code}: ${stderr.slice(-200)}`);
+            // Response already started streaming — can only end abruptly.
+            res.end();
+          }
+        });
+
+        // If the client hangs up, kill ffmpeg and the Dropbox pull so we
+        // don't keep paying for a cancelled request.
+        req.on("close", () => {
+          if (!ff.killed) ff.kill("SIGKILL");
+          dbxNodeStream.destroy();
+        });
         return;
       }
 
+      // Passthrough (no transcoding): stream Dropbox → response directly.
       const extMap: Record<string, string> = {
         ".mp3": "audio/mpeg", ".wav": "audio/wav", ".m4a": "audio/mp4", ".aac": "audio/aac",
-        ".ogg": "audio/ogg", ".flac": "audio/flac", ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", ".xls": "application/vnd.ms-excel",
+        ".ogg": "audio/ogg", ".flac": "audio/flac",
+        ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        ".xls": "application/vnd.ms-excel",
         ".pdf": "application/pdf", ".txt": "text/plain",
       };
       const contentType = extMap[fileExt] || "application/octet-stream";
       res.setHeader("Content-Type", contentType);
       res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(fileName)}"`);
-      res.setHeader("Content-Length", buffer.length);
-      res.send(buffer);
+      const cl = dbxResp.headers.get("content-length");
+      if (cl) res.setHeader("Content-Length", cl);
+
+      dbxNodeStream.on("error", (e) => {
+        console.error("[Dropbox] passthrough stream error:", e.message);
+        if (!res.headersSent) res.status(502).json({ message: "Dropbox 転送エラー" });
+        else res.end();
+      });
+      dbxNodeStream.pipe(res);
+      req.on("close", () => { dbxNodeStream.destroy(); });
     } catch (err: any) {
       console.error("[Dropbox] Download error:", err.message);
       const errMsg = err.message || "";
       const errSummary = err?.error?.error_summary || "";
-      if (errMsg.includes("token") || errMsg.includes("auth") || errMsg.includes("expired") || errMsg.includes("invalid_access_token") || errSummary.includes("invalid_access_token")) {
-        res.status(401).json({ message: "Dropbox認証エラー", error: errMsg });
-      } else if (errSummary.includes("path/not_found") || errSummary.includes("path/restricted_content")) {
-        res.status(404).json({ message: "Dropbox上にファイルが見つかりません", error: errMsg });
+      if (!res.headersSent) {
+        if (errMsg.includes("token") || errMsg.includes("auth") || errMsg.includes("expired") || errMsg.includes("invalid_access_token") || errSummary.includes("invalid_access_token")) {
+          res.status(401).json({ message: "Dropbox認証エラー", error: errMsg });
+        } else if (errSummary.includes("path/not_found") || errSummary.includes("path/restricted_content")) {
+          res.status(404).json({ message: "Dropbox上にファイルが見つかりません", error: errMsg });
+        } else {
+          res.status(500).json({ message: "Dropboxからのダウンロードに失敗しました", error: errMsg });
+        }
       } else {
-        res.status(500).json({ message: "Dropboxからのダウンロードに失敗しました", error: errMsg });
+        res.end();
       }
     }
   });
