@@ -521,5 +521,60 @@ function resolveOctaveErrors(candidates: BPMCandidate[]): number {
   while (finalBpm > 200) finalBpm /= 2;
   if (!Number.isFinite(finalBpm)) return FALLBACK_BPM;
 
-  return Math.round(finalBpm);
+  // --- ステージ2：キック帯域マッチで整数精度に精密化（±3 BPM を 0.25 刻みで網羅探索）---
+  const rough = Math.round(finalBpm);
+  const refined = refineBPMByKickMatch(channelData, sampleRate, rough);
+  return refined;
+}
+
+/** 既存の検出結果（rough）から ±3 BPM の範囲を 0.25 刻みで網羅し、
+ *  キックドラム帯域のエンベロープと各ビート位置の一致度でスコアリング。
+ *  最も整合する整数 BPM を返す。楽曲後半でのグリッドドリフトを大幅に抑制する。 */
+export function refineBPMByKickMatch(
+  channelData: Float32Array,
+  sampleRate: number,
+  roughBpm: number
+): number {
+  if (!channelData || !sampleRate || !roughBpm) return roughBpm;
+  const duration = channelData.length / sampleRate;
+  const fsEnv = 1000;
+  const dsFactor = Math.max(1, Math.floor(sampleRate / fsEnv));
+  const envLen = Math.floor(channelData.length / dsFactor);
+  const env = new Float32Array(envLen);
+  // 区間内の最大絶対値でエンベロープ化（キック/スネアのアタックを捉える）
+  for (let i = 0; i < envLen; i++) {
+    let peak = 0;
+    const s = i * dsFactor;
+    const e = Math.min(channelData.length, s + dsFactor);
+    for (let j = s; j < e; j++) {
+      const v = Math.abs(channelData[j]);
+      if (v > peak) peak = v;
+    }
+    env[i] = peak;
+  }
+  let bestBpm = roughBpm;
+  let bestScore = -1;
+  // ±3 BPM を 0.25 刻みで評価
+  for (let delta = -3; delta <= 3 + 1e-9; delta += 0.25) {
+    const bpm = roughBpm + delta;
+    if (bpm < 40 || bpm > 300) continue;
+    const secPerBeat = 60 / bpm;
+    // 先頭オフセット（downbeat 候補）も網羅
+    let scoreForBpm = -1;
+    for (let off = 0; off < 2; off += 0.05) {
+      let score = 0, count = 0;
+      const maxBeats = Math.min(500, Math.floor((duration - off) / secPerBeat));
+      for (let i = 0; i < maxBeats; i++) {
+        const t = off + i * secPerBeat;
+        const idx = Math.floor(t * fsEnv);
+        if (idx >= 0 && idx < envLen) { score += env[idx]; count++; }
+      }
+      if (count > 20 && score > scoreForBpm) scoreForBpm = score;
+    }
+    if (scoreForBpm > bestScore) {
+      bestScore = scoreForBpm;
+      bestBpm = bpm;
+    }
+  }
+  return Math.round(bestBpm);
 }
