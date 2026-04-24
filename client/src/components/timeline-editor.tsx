@@ -877,6 +877,33 @@ export const TimelineEditor = memo(function TimelineEditor({
   useEffect(() => {
     window.dispatchEvent(new CustomEvent("timeline-bpm-change", { detail: bpm }));
   }, [bpm]);
+
+  // 既存の保存済み BPM を無視して、強化アルゴリズム（キック帯域マッチ）で BPM を再検出する
+  const redetectBpmNow = useCallback(async () => {
+    if (!audioArrayBuffer) return;
+    setBpmLoading(true);
+    try {
+      const AudioCtx = (window as any).AudioContext || (window as any).webkitAudioContext;
+      const tmpCtx: AudioContext = new AudioCtx();
+      const clonedBuffer = audioArrayBuffer.slice(0);
+      const decoded = await new Promise<AudioBuffer>((resolve, reject) => {
+        tmpCtx.decodeAudioData(clonedBuffer, resolve, reject);
+      });
+      try { tmpCtx.close(); } catch {}
+      const raw = decoded.getChannelData(0);
+      const channelCopy = new Float32Array(raw.length);
+      channelCopy.set(raw);
+      const sampleRate = decoded.sampleRate;
+      const bpmResult = detectBPMFromSamples(channelCopy, sampleRate);
+      if (bpmResult) {
+        setBpm(bpmResult);
+      }
+    } catch (err) {
+      console.warn("BPM re-detect failed:", err);
+    } finally {
+      setBpmLoading(false);
+    }
+  }, [audioArrayBuffer]);
   const getOtherBlocks = useCallback((excludeIds: Set<string>) => {
     const blocks: { id: string; startTime: number; endTime: number }[] = [];
     for (const line of lyrics) {
@@ -2315,6 +2342,31 @@ export const TimelineEditor = memo(function TimelineEditor({
               title="クリックでBPM手動入力"
             >
               {Math.round(bpm)}<span className="text-xs font-semibold ml-1" style={{ color: "hsl(0 0% 45%)" }}>BPM</span>
+            </button>
+          )}
+          {bpm && !bpmEditing && !tapMode && !bpmLoading && audioArrayBuffer && (
+            <button
+              tabIndex={-1}
+              className="text-[10px] font-bold font-mono tracking-wider px-1.5 py-0.5 rounded transition-colors"
+              style={{
+                color: "hsl(0 0% 55%)",
+                border: "1px solid hsl(0 0% 25%)",
+                backgroundColor: "transparent",
+                cursor: "pointer",
+              }}
+              onMouseEnter={(e) => {
+                (e.currentTarget as HTMLButtonElement).style.color = "hsl(30 90% 60%)";
+                (e.currentTarget as HTMLButtonElement).style.borderColor = "hsl(30 80% 45%)";
+              }}
+              onMouseLeave={(e) => {
+                (e.currentTarget as HTMLButtonElement).style.color = "hsl(0 0% 55%)";
+                (e.currentTarget as HTMLButtonElement).style.borderColor = "hsl(0 0% 25%)";
+              }}
+              onClick={redetectBpmNow}
+              data-testid="button-redetect-bpm"
+              title="BPM を再検出（強化アルゴリズムで再計算）"
+            >
+              RE-DETECT
             </button>
           )}
           {bpm && !bpmEditing && !tapMode && (
