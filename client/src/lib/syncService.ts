@@ -329,17 +329,32 @@ export const syncService = {
         }
       }
 
+      // Audio track metadata sync. The same dirty-project guard the
+      // project and lyrics branches use (lines 289-290 and 305-329) has
+      // to apply here too — otherwise a user's manual Dropbox re-link
+      // gets silently overwritten by the next autoSync pull before the
+      // schedulePush has had time to flush the new dropboxPath to the
+      // server. Symptom reported in production: the link reverts after
+      // about a minute (the autoSync interval) back to whatever the
+      // server still has stored.
       const serverAudioTracks = serverData.audioTracks[sp.id] || [];
-      for (const sat of serverAudioTracks) {
-        await storage.upsertAudioTrackMeta({
-          id: sat.id,
-          projectId: sp.id,
-          label: sat.label,
-          fileName: sat.file_name || sat.fileName,
-          mimeType: sat.mime_type || sat.mimeType || "audio/mpeg",
-          createdAt: sat.created_at || sat.createdAt || new Date().toISOString(),
-          dropboxPath: sat.dropbox_path || sat.dropboxPath || undefined,
-        });
+      if (!dirtyProjects.has(sp.id)) {
+        for (const sat of serverAudioTracks) {
+          await storage.upsertAudioTrackMeta({
+            id: sat.id,
+            projectId: sp.id,
+            label: sat.label,
+            fileName: sat.file_name || sat.fileName,
+            mimeType: sat.mime_type || sat.mimeType || "audio/mpeg",
+            createdAt: sat.created_at || sat.createdAt || new Date().toISOString(),
+            dropboxPath: sat.dropbox_path || sat.dropboxPath || undefined,
+          });
+        }
+      } else {
+        console.log("[AutoSync] Skipping audio-track pull for dirty project:", sp.id);
+        // Make sure the pending local changes still get pushed; the dirty
+        // flag alone doesn't trigger a push on its own.
+        this.schedulePush(sp.id);
       }
 
       const serverMarkers = (serverData.markers || {})[sp.id] || [];

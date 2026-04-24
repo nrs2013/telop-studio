@@ -1965,6 +1965,10 @@ export default function ProjectPage() {
               const dbxData = await dbxRes.json();
               console.log("[DropboxUpload] Success, path:", dbxData.dropboxPath);
               await storage.updateAudioTrackDropboxPath(newTrack.id, dbxData.dropboxPath);
+              // Mark + push so autoSync cannot overwrite this with the
+              // server's older dropboxPath before we finish uploading.
+              syncService.markDirty(id);
+              syncService.schedulePush(id);
               const updatedTracks = await storage.getAudioTracks(id);
               setAudioTracks(updatedTracks);
               toast({ title: `Dropboxに保存しました: ${dbxData.fileName}` });
@@ -2086,6 +2090,9 @@ export default function ProjectPage() {
           await storage.updateAudioTrackBlob(existingEmptyTrack.id, finalArrayBuffer);
           await storage.updateAudioTrackDropboxPath(existingEmptyTrack.id, dropboxFile.path);
           await storage.updateProject(id, { audioFileName: mp3FileName });
+          // Lock the new link in before autoSync's next pull can clobber it.
+          syncService.markDirty(id);
+          syncService.schedulePush(id);
           savedTrackId = existingEmptyTrack.id;
           if (audioUrl) URL.revokeObjectURL(audioUrl);
           const blobUrl = URL.createObjectURL(finalBlob);
@@ -2099,6 +2106,8 @@ export default function ProjectPage() {
         } else {
           const newTrack = await storage.saveAudioTrack(id, finalBlob, mp3FileName, trackLabel, "audio/mpeg", dropboxFile.path);
           await storage.updateProject(id, { audioFileName: mp3FileName, activeAudioTrackId: newTrack.id });
+          syncService.markDirty(id);
+          syncService.schedulePush(id);
           savedTrackId = newTrack.id;
           if (audioUrl) URL.revokeObjectURL(audioUrl);
           const blobUrl = URL.createObjectURL(finalBlob);
@@ -2124,6 +2133,8 @@ export default function ProjectPage() {
               const dbxData = await dbxRes.json();
               console.log("[DropboxCopy] Copied to Telop音源:", dbxData.dropboxPath);
               await storage.updateAudioTrackDropboxPath(savedTrackId, dbxData.dropboxPath);
+              syncService.markDirty(capturedProjectId);
+              syncService.schedulePush(capturedProjectId);
               const updatedTracks = await storage.getAudioTracks(capturedProjectId);
               setAudioTracks(updatedTracks);
               toast({ title: `Telop音源にコピーしました: ${dbxData.fileName}` });
@@ -2261,6 +2272,8 @@ export default function ProjectPage() {
         const dbxData = await dbxRes.json();
         await storage.updateAudioTrackDropboxPath(trackId, dbxData.dropboxPath);
         if (id) {
+          syncService.markDirty(id);
+          syncService.schedulePush(id);
           const updatedTracks = await storage.getAudioTracks(id);
           setAudioTracks(updatedTracks);
         }
@@ -2586,6 +2599,12 @@ export default function ProjectPage() {
                 // Unique auto-link successful.
                 await storage.updateAudioTrackBlob(trackId, ab);
                 await storage.updateAudioTrackDropboxPath(trackId, finalPath);
+                // Push the new path to the server immediately so autoSync
+                // doesn't pull the stale server row back over our new link.
+                if (id) {
+                  syncService.markDirty(id);
+                  syncService.schedulePush(id);
+                }
                 const blob = new Blob([ab], { type: "audio/mpeg" });
                 objectUrl = URL.createObjectURL(blob);
                 setAudioUrl(objectUrl);
@@ -4385,6 +4404,8 @@ export default function ProjectPage() {
               const dbxData = await dbxRes.json();
               console.log("[TelopImport] Uploaded to Telop音源:", dbxData.dropboxPath);
               await storage.updateAudioTrackDropboxPath(track.id, dbxData.dropboxPath);
+              syncService.markDirty(id);
+              syncService.schedulePush(id);
               const updatedTracks = await storage.getAudioTracks(id);
               setAudioTracks(updatedTracks);
             } else {
