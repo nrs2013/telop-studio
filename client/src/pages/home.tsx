@@ -11,6 +11,7 @@ import { storage } from "@/lib/storage";
 import { syncService } from "@/lib/syncService";
 import { homeUndoManager, useUndo } from "@/lib/undoManager";
 import { TS_DESIGN } from "@/lib/designTokens";
+import { safeSetItem } from "@/lib/safeStorage";
 
 function formatDate(dateStr: string | null) {
   if (!dateStr) return "";
@@ -191,12 +192,22 @@ export default function Home() {
   const [readingsMap, setReadingsMap] = useState<Record<string, string>>({});
 
   useEffect(() => {
-    localStorage.setItem("telop-sort-mode", sortMode);
-  }, [sortMode]);
+    safeSetItem(
+      "telop-sort-mode",
+      sortMode,
+      (msg) => toast({ title: msg, variant: "destructive" }),
+      "並び替え設定",
+    );
+  }, [sortMode, toast]);
 
   useEffect(() => {
-    saveFolders(folders);
-  }, [folders]);
+    safeSetItem(
+      "telop-folders",
+      JSON.stringify(folders),
+      (msg) => toast({ title: msg, variant: "destructive" }),
+      "フォルダ一覧",
+    );
+  }, [folders, toast]);
 
   useEffect(() => {
     const onOnline = () => setIsOnline(true);

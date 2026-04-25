@@ -134,6 +134,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { Slider } from "@/components/ui/slider";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
+import { safeSetItem } from "@/lib/safeStorage";
 import {
   ArrowLeft,
   Upload,
@@ -1086,11 +1087,16 @@ export default function ProjectPage() {
   const updateShortcut = useCallback((action: string, code: string) => {
     setCustomKeyMap(prev => {
       const next = { ...prev, [action]: code };
-      localStorage.setItem("telop-shortcuts", JSON.stringify(next));
+      safeSetItem(
+        "telop-shortcuts",
+        JSON.stringify(next),
+        (msg) => toast({ title: msg, variant: "destructive" }),
+        "ショートカット設定",
+      );
       return next;
     });
     setEditingShortcut(null);
-  }, []);
+  }, [toast]);
 
   const resetShortcuts = useCallback(() => {
     setCustomKeyMap({});
@@ -1215,7 +1221,12 @@ export default function ProjectPage() {
   useEffect(() => {
     if (!id || !sectionBlocksInit) return;
     const h = setTimeout(() => {
-      try { localStorage.setItem(`telop-sections-v1-${id}`, JSON.stringify(sectionBlocks)); } catch {}
+      safeSetItem(
+        `telop-sections-v1-${id}`,
+        JSON.stringify(sectionBlocks),
+        (msg) => toast({ title: msg, variant: "destructive" }),
+        "SECTION ブロックの位置データ",
+      );
     }, 250);
     return () => clearTimeout(h);
   }, [sectionBlocks, id, sectionBlocksInit]);
@@ -1275,9 +1286,12 @@ export default function ProjectPage() {
   useEffect(() => {
     if (!id || !scoreInitialized) return;
     const handle = setTimeout(() => {
-      try {
-        localStorage.setItem(`telop-score-v3-${id}`, JSON.stringify(scoreRows));
-      } catch {}
+      safeSetItem(
+        `telop-score-v3-${id}`,
+        JSON.stringify(scoreRows),
+        (msg) => toast({ title: msg, variant: "destructive" }),
+        "譜割タブのデータ",
+      );
     }, 250);
     return () => clearTimeout(handle);
   }, [scoreRows, id, scoreInitialized]);
