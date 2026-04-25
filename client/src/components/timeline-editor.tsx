@@ -2852,10 +2852,11 @@ export const TimelineEditor = memo(function TimelineEditor({
 
         {(() => {
           const activeLanes = 2;
-          const blocksZoneH = SECTION_BAND_H + activeLanes * (LANE_HEIGHT + LANE_GAP) + 4;
+          const blocksZoneH = activeLanes * (LANE_HEIGHT + LANE_GAP) + 4;
           const TRACK_GAP = 2;
           const WAVE_H = waveformPeaks ? 2 * (LANE_HEIGHT + LANE_GAP) : 0;
-          const totalH = blocksZoneH + (waveformPeaks ? TRACK_GAP + WAVE_H : 0);
+          const AUDIO_BLOCK_H = waveformPeaks ? SECTION_BAND_H + WAVE_H : 0;
+          const totalH = blocksZoneH + (waveformPeaks ? TRACK_GAP + AUDIO_BLOCK_H : 0);
           const HEADER_W = 56;
           return (
             <div className="flex-1 flex overflow-hidden relative">
@@ -2864,32 +2865,27 @@ export const TimelineEditor = memo(function TimelineEditor({
                 style={{ width: `${HEADER_W}px` }}
               >
                 <div
-                  className="flex flex-col relative"
+                  className="flex items-center gap-1.5"
                   style={{
                     height: `${blocksZoneH}px`,
                     backgroundColor: "hsl(0 0% 7%)",
                     borderRight: "1px solid hsl(0 0% 22%)",
+                    paddingLeft: "4px",
                   }}
                 >
-                  <div className="flex flex-col items-center justify-center shrink-0" style={{ height: `${SECTION_BAND_H}px`, borderBottom: "1px solid hsl(0 0% 15%)", gap: 1 }}>
-                    <span className="text-[9px] font-mono font-bold tracking-wider" style={{ color: "hsl(0 0% 60%)" }}>SEC</span>
-                    <span className="text-[7px] font-mono leading-tight" style={{ color: "hsl(0 0% 38%)" }}>構造</span>
-                  </div>
-                  <div className="flex items-center gap-1.5 flex-1" style={{ paddingLeft: "4px" }}>
-                    <div style={{ width: "3px", height: "100%", backgroundColor: "hsl(48 100% 45%)", borderRadius: "1px", flexShrink: 0, alignSelf: "stretch" }} />
-                    <div className="flex flex-col items-start justify-center">
-                      <span className="text-[13px] font-mono font-black leading-none" style={{ color: "hsl(48 100% 50%)" }}>T</span>
-                      <span className="text-[7px] font-mono font-semibold leading-tight" style={{ color: "hsl(0 0% 85%)" }}>TELOP</span>
-                    </div>
+                  <div style={{ width: "3px", height: "100%", backgroundColor: "hsl(48 100% 45%)", borderRadius: "1px", flexShrink: 0, alignSelf: "stretch" }} />
+                  <div className="flex flex-col items-start justify-center">
+                    <span className="text-[13px] font-mono font-black leading-none" style={{ color: "hsl(48 100% 50%)" }}>T</span>
+                    <span className="text-[7px] font-mono font-semibold leading-tight" style={{ color: "hsl(0 0% 85%)" }}>TELOP</span>
                   </div>
                 </div>
                 {waveformPeaks && (
                   <>
                     <div style={{ height: `${TRACK_GAP}px`, backgroundColor: "hsl(0 0% 5%)" }} />
                     <div
-                      className="flex items-center gap-1.5"
+                      className="flex items-center gap-1.5 relative"
                       style={{
-                        height: `${WAVE_H}px`,
+                        height: `${AUDIO_BLOCK_H}px`,
                         backgroundColor: "hsl(0 0% 7%)",
                         borderRight: "1px solid hsl(0 0% 22%)",
                         paddingLeft: "4px",
@@ -2899,6 +2895,7 @@ export const TimelineEditor = memo(function TimelineEditor({
                       <div className="flex flex-col items-start justify-center" style={{ minWidth: 0, overflow: "hidden" }}>
                         <span className="text-[13px] font-mono font-black leading-none" style={{ color: "hsl(48 100% 50%)" }}>A</span>
                         <span className="text-[7px] font-mono font-semibold leading-tight" style={{ color: "hsl(0 0% 85%)" }}>AUDIO</span>
+                        <span className="text-[7px] font-mono font-semibold leading-tight" style={{ color: "hsl(0 0% 50%)", marginTop: 4 }}>+ SEC</span>
                       </div>
                     </div>
                   </>
@@ -2969,7 +2966,7 @@ export const TimelineEditor = memo(function TimelineEditor({
                   window.addEventListener("mouseup", onUp);
                 };
                 return (
-                  <div className="absolute left-0 right-0 top-0 z-30 overflow-hidden" style={{ height: SECTION_BAND_H, background: "hsl(0 0% 9%)", borderBottom: "1px solid hsl(0 0% 22%)" }}>
+                  <div className="absolute left-0 right-0 z-30 overflow-hidden" style={{ top: blocksZoneH + TRACK_GAP, height: SECTION_BAND_H, background: "hsla(0,0%,0%,0.3)", borderTop: "1px solid hsl(0 0% 14%)", borderBottom: "1px solid hsl(0 0% 14%)" }}>
                     <div className="absolute inset-0 pointer-events-none" />
                     <div className="absolute top-0 bottom-0" style={{ left: -tlScrollLeft }}>
                       {blocks.map(b => {
@@ -3026,15 +3023,15 @@ export const TimelineEditor = memo(function TimelineEditor({
                   </div>
                 );
               })()}
-              {!(bpm && bpm > 0) && (
-                <div className="absolute left-0 right-0 top-0 z-30 pointer-events-none" style={{ height: SECTION_BAND_H, background: "hsl(0 0% 9%)", borderBottom: "1px solid hsl(0 0% 22%)", display: "flex", alignItems: "center", justifyContent: "center", color: "hsl(0 0% 35%)", fontSize: 10, letterSpacing: "0.1em" }}>
+              {waveformPeaks && !(bpm && bpm > 0) && (
+                <div className="absolute left-0 right-0 z-30 pointer-events-none" style={{ top: blocksZoneH + TRACK_GAP, height: SECTION_BAND_H, background: "hsla(0,0%,0%,0.3)", borderTop: "1px solid hsl(0 0% 14%)", borderBottom: "1px solid hsl(0 0% 14%)", display: "flex", alignItems: "center", justifyContent: "center", color: "hsl(0 0% 35%)", fontSize: 10, letterSpacing: "0.1em" }}>
                   BPM 検出後に SECTION ブロックを配置できます
                 </div>
               )}
               <div
                 ref={timelineRef}
                 className="absolute inset-0 overflow-x-auto overflow-y-hidden cursor-crosshair select-none scrollbar-hide"
-                style={{ scrollbarWidth: "none", msOverflowStyle: "none", top: SECTION_BAND_H }}
+                style={{ scrollbarWidth: "none", msOverflowStyle: "none", top: 0 }}
                 data-testid="area-timeline-blocks"
                 data-pps={pixelsPerSecond}
                 data-duration={duration}
@@ -3327,7 +3324,7 @@ export const TimelineEditor = memo(function TimelineEditor({
                     )}
                     <div
                       className="absolute left-0 right-0"
-                      style={{ top: "18px" }}
+                      style={{ top: "0px" }}
                       onMouseMove={fadeMode ? (e) => {
                         const target = e.target as HTMLElement;
                         if (!target.closest("[data-block]")) {
@@ -3649,7 +3646,7 @@ export const TimelineEditor = memo(function TimelineEditor({
                       <div
                         className="absolute left-0 right-0"
                         style={{
-                          top: `${blocksZoneH + TRACK_GAP}px`,
+                          top: `${blocksZoneH + TRACK_GAP + SECTION_BAND_H}px`,
                           height: `${WAVE_H}px`,
                           backgroundColor: "hsl(0 0% 7%)",
                         }}
@@ -3747,9 +3744,9 @@ export const TimelineEditor = memo(function TimelineEditor({
                         className="absolute pointer-events-none z-30"
                         style={{
                           left: `${minX}px`,
-                          top: "18px",
+                          top: "0px",
                           width: `${w}px`,
-                          height: `${blocksZoneH - 18}px`,
+                          height: `${blocksZoneH}px`,
                           backgroundColor: "hsla(0, 0%, 56%, 0.15)",
                           border: "1px solid hsla(0, 0%, 56%, 0.5)",
                         }}
