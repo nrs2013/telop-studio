@@ -6018,24 +6018,22 @@ export default function ProjectPage() {
                   <div style={{ padding: "6px 10px", color: TS_DESIGN.text3, fontSize: 9, letterSpacing: "0.18em", textTransform: "uppercase", fontWeight: 600 }}>LYRIC</div>
                 </div>
                 <div className="flex-1 overflow-y-auto">
-                  <div style={{ display: "grid", gridTemplateColumns: "64px 48px 1fr" }}>
+                  <div>
                     {scoreRows.map((row, idx) => (
-                      <Fragment key={row.id}>
-                        <label style={{ border: 0, borderRight: `1px solid ${TS_DESIGN.border}`, display: "flex", alignItems: "stretch", minHeight: 28, cursor: "text" }}>
-                          <input
+                      <div key={row.id} style={{ display: "flex", alignItems: "flex-start" }} className="group/score-row">
+                        <label style={{ width: 64, borderRight: `1px solid ${TS_DESIGN.border}`, display: "flex", alignItems: "flex-start", minHeight: 28, cursor: "text", flexShrink: 0 }}>
+                          <textarea
                             value={row.section}
                             onChange={(e) => updateScoreRow(idx, { section: e.target.value })}
-                            placeholder=""
-                            className="w-full bg-transparent outline-none text-center"
-                            style={{ color: TS_DESIGN.text2, fontSize: 12, letterSpacing: "0.06em", fontWeight: 500, padding: "4px 6px", border: 0 }}
+                            rows={Math.max(1, row.section.split("\n").length)}
+                            className="w-full bg-transparent outline-none resize-none text-center"
+                            style={{ color: TS_DESIGN.text2, fontSize: 12, letterSpacing: "0.06em", fontWeight: 500, padding: "4px 6px", border: 0, lineHeight: 1.5, minHeight: 28 }}
                             data-testid={`score-section-${idx}`}
                           />
                         </label>
-                        <label style={{ border: 0, borderRight: `1px solid ${TS_DESIGN.border}`, display: "flex", alignItems: "stretch", minHeight: 28, cursor: "text" }}>
-                          <input
-                            type="text"
-                            inputMode="numeric"
-                            value={row.bars ?? ""}
+                        <label style={{ width: 48, borderRight: `1px solid ${TS_DESIGN.border}`, display: "flex", alignItems: "flex-start", minHeight: 28, cursor: "text", flexShrink: 0 }}>
+                          <textarea
+                            value={row.bars === null ? "" : String(row.bars)}
                             onChange={(e) => {
                               const raw = e.target.value.trim();
                               if (raw === "") {
@@ -6045,17 +6043,16 @@ export default function ProjectPage() {
                                 if (!isNaN(v) && v >= 1 && v <= 999) updateScoreRow(idx, { bars: v });
                               }
                             }}
-                            onFocus={(e) => (e.target as HTMLInputElement).select()}
-                            className="w-full bg-transparent outline-none text-center tabular-nums"
-                            style={{ color: TS_DESIGN.text2, fontSize: 13, padding: "4px 4px", border: 0 }}
+                            rows={1}
+                            className="w-full bg-transparent outline-none resize-none text-center tabular-nums"
+                            style={{ color: TS_DESIGN.text2, fontSize: 13, padding: "4px 4px", border: 0, lineHeight: 1.5, minHeight: 28 }}
                             data-testid={`score-bars-${idx}`}
                           />
                         </label>
-                        <label style={{ border: 0, position: "relative", display: "flex", alignItems: "stretch", minHeight: 28, cursor: "text" }} className="group/score-row">
+                        <label style={{ flex: 1, position: "relative", display: "flex", alignItems: "flex-start", minHeight: 28, cursor: "text" }}>
                           <textarea
                             value={row.lyric}
                             onChange={(e) => updateScoreRow(idx, { lyric: e.target.value })}
-                            placeholder=""
                             rows={Math.max(1, row.lyric.split("\n").length)}
                             className="w-full bg-transparent outline-none resize-none"
                             style={{ color: TS_DESIGN.text, fontSize: 13, lineHeight: 1.5, minHeight: 28, padding: "4px 28px 4px 10px", border: 0 }}
@@ -6070,7 +6067,7 @@ export default function ProjectPage() {
                             data-testid={`score-delete-${idx}`}
                           >×</button>
                         </label>
-                      </Fragment>
+                      </div>
                     ))}
                   </div>
                   <div style={{ padding: "10px 8px", display: "flex", justifyContent: "center", gap: 8 }}>
