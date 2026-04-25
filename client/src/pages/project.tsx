@@ -5742,7 +5742,7 @@ export default function ProjectPage() {
               )}
               {activeRightTab === "score" && (
                 <span className="text-[9px] ml-auto" style={{ color: TS_DESIGN.text3 }}>
-                  Cmd+Return（SECTION の一番左）で 1 行挿入
+                  ⌘+Return：上に 1 行挿入 / ⌘+Delete：この行削除
                 </span>
               )}
             </div>
@@ -6024,57 +6024,65 @@ export default function ProjectPage() {
                 </div>
                 <div className="flex-1 overflow-y-auto">
                   <div style={{ display: "grid", gridTemplateColumns: "64px 56px 1fr" }}>
-                    {scoreRows.map((row, idx) => (
-                      <Fragment key={row.id}>
-                        <label style={{ borderRight: `1px solid ${TS_DESIGN.border}`, display: "flex", alignItems: "flex-start", minHeight: 28, cursor: "text" }}>
-                          <textarea
-                            value={row.section}
-                            onChange={(e) => updateScoreRow(idx, { section: e.target.value })}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                                const ta = e.target as HTMLTextAreaElement;
-                                if (ta.selectionStart === 0) {
-                                  e.preventDefault();
-                                  insertScoreRowAbove(idx);
-                                }
-                              }
-                            }}
-                            rows={Math.max(1, row.section.split("\n").length)}
-                            className="w-full bg-transparent outline-none resize-none text-center"
-                            style={{ color: TS_DESIGN.text, fontSize: 13, lineHeight: 1.5, minHeight: 28, padding: "4px 6px", border: 0, fontFamily: "inherit" }}
-                            data-testid={`score-section-${idx}`}
-                          />
-                        </label>
-                        <label style={{ borderRight: `1px solid ${TS_DESIGN.border}`, display: "flex", alignItems: "flex-start", minHeight: 28, cursor: "text" }}>
-                          <textarea
-                            value={row.bars}
-                            onChange={(e) => updateScoreRow(idx, { bars: e.target.value })}
-                            rows={Math.max(1, row.bars.split("\n").length)}
-                            className="w-full bg-transparent outline-none resize-none text-center"
-                            style={{ color: TS_DESIGN.text, fontSize: 13, lineHeight: 1.5, minHeight: 28, padding: "4px 4px", border: 0, fontFamily: "inherit" }}
-                            data-testid={`score-bars-${idx}`}
-                          />
-                        </label>
-                        <label style={{ position: "relative", display: "flex", alignItems: "flex-start", minHeight: 28, cursor: "text" }} className="group/score-row">
-                          <textarea
-                            value={row.lyric}
-                            onChange={(e) => updateScoreRow(idx, { lyric: e.target.value })}
-                            rows={Math.max(1, row.lyric.split("\n").length)}
-                            className="w-full bg-transparent outline-none resize-none text-left"
-                            style={{ color: TS_DESIGN.text, fontSize: 13, lineHeight: 1.5, minHeight: 28, padding: "4px 28px 4px 10px", border: 0, fontFamily: "inherit" }}
-                            data-testid={`score-lyric-${idx}`}
-                          />
-                          <button
-                            onClick={(e) => { e.preventDefault(); e.stopPropagation(); deleteScoreRow(idx); }}
-                            tabIndex={-1}
-                            className="absolute right-1 top-1 w-5 h-5 flex items-center justify-center rounded opacity-0 group-hover/score-row:opacity-100 hover:bg-white/10"
-                            style={{ color: TS_DESIGN.text3, fontSize: 14 }}
-                            title="この行を削除"
-                            data-testid={`score-delete-${idx}`}
-                          >×</button>
-                        </label>
-                      </Fragment>
-                    ))}
+                    {scoreRows.map((row, idx) => {
+                      const onCellKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+                        const ta = e.target as HTMLTextAreaElement;
+                        if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                          if (ta.selectionStart === 0) {
+                            e.preventDefault();
+                            insertScoreRowAbove(idx);
+                          }
+                        } else if ((e.metaKey || e.ctrlKey) && (e.key === "Backspace" || e.key === "Delete")) {
+                          e.preventDefault();
+                          deleteScoreRow(idx);
+                        }
+                      };
+                      return (
+                        <Fragment key={row.id}>
+                          <label style={{ borderRight: `1px solid ${TS_DESIGN.border}`, display: "flex", alignItems: "flex-start", minHeight: 28, cursor: "text" }}>
+                            <textarea
+                              value={row.section}
+                              onChange={(e) => updateScoreRow(idx, { section: e.target.value })}
+                              onKeyDown={onCellKeyDown}
+                              rows={Math.max(1, row.section.split("\n").length)}
+                              className="w-full bg-transparent outline-none resize-none text-center"
+                              style={{ color: TS_DESIGN.text, fontSize: 13, lineHeight: 1.5, minHeight: 28, padding: "4px 6px", border: 0, fontFamily: "inherit" }}
+                              data-testid={`score-section-${idx}`}
+                            />
+                          </label>
+                          <label style={{ borderRight: `1px solid ${TS_DESIGN.border}`, display: "flex", alignItems: "flex-start", minHeight: 28, cursor: "text" }}>
+                            <textarea
+                              value={row.bars}
+                              onChange={(e) => updateScoreRow(idx, { bars: e.target.value })}
+                              onKeyDown={onCellKeyDown}
+                              rows={Math.max(1, row.bars.split("\n").length)}
+                              className="w-full bg-transparent outline-none resize-none text-center"
+                              style={{ color: TS_DESIGN.text, fontSize: 13, lineHeight: 1.5, minHeight: 28, padding: "4px 4px", border: 0, fontFamily: "inherit" }}
+                              data-testid={`score-bars-${idx}`}
+                            />
+                          </label>
+                          <label style={{ position: "relative", display: "flex", alignItems: "flex-start", minHeight: 28, cursor: "text" }} className="group/score-row">
+                            <textarea
+                              value={row.lyric}
+                              onChange={(e) => updateScoreRow(idx, { lyric: e.target.value })}
+                              onKeyDown={onCellKeyDown}
+                              rows={Math.max(1, row.lyric.split("\n").length)}
+                              className="w-full bg-transparent outline-none resize-none text-left"
+                              style={{ color: TS_DESIGN.text, fontSize: 13, lineHeight: 1.5, minHeight: 28, padding: "4px 28px 4px 10px", border: 0, fontFamily: "inherit" }}
+                              data-testid={`score-lyric-${idx}`}
+                            />
+                            <button
+                              onClick={(e) => { e.preventDefault(); e.stopPropagation(); deleteScoreRow(idx); }}
+                              tabIndex={-1}
+                              className="absolute right-1 top-1 w-5 h-5 flex items-center justify-center rounded opacity-0 group-hover/score-row:opacity-100 hover:bg-white/10"
+                              style={{ color: TS_DESIGN.text3, fontSize: 14 }}
+                              title="この行を削除"
+                              data-testid={`score-delete-${idx}`}
+                            >×</button>
+                          </label>
+                        </Fragment>
+                      );
+                    })}
                   </div>
                 </div>
               </div>
