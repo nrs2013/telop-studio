@@ -6021,7 +6021,7 @@ export default function ProjectPage() {
                   <div style={{ display: "grid", gridTemplateColumns: "64px 48px 1fr" }}>
                     {scoreRows.map((row, idx) => (
                       <Fragment key={row.id}>
-                        <label style={{ borderRight: `1px solid ${TS_DESIGN.border}`, display: "flex", alignItems: "stretch", minHeight: 28, cursor: "text" }}>
+                        <label style={{ border: 0, borderRight: `1px solid ${TS_DESIGN.border}`, display: "flex", alignItems: "stretch", minHeight: 28, cursor: "text" }}>
                           <input
                             value={row.section}
                             onChange={(e) => updateScoreRow(idx, { section: e.target.value })}
@@ -6031,7 +6031,7 @@ export default function ProjectPage() {
                             data-testid={`score-section-${idx}`}
                           />
                         </label>
-                        <label style={{ borderRight: `1px solid ${TS_DESIGN.border}`, display: "flex", alignItems: "stretch", minHeight: 28, cursor: "text" }}>
+                        <label style={{ border: 0, borderRight: `1px solid ${TS_DESIGN.border}`, display: "flex", alignItems: "stretch", minHeight: 28, cursor: "text" }}>
                           <input
                             type="text"
                             inputMode="numeric"
@@ -6051,7 +6051,7 @@ export default function ProjectPage() {
                             data-testid={`score-bars-${idx}`}
                           />
                         </label>
-                        <label style={{ position: "relative", display: "flex", alignItems: "stretch", minHeight: 28, cursor: "text" }} className="group/score-row">
+                        <label style={{ border: 0, position: "relative", display: "flex", alignItems: "stretch", minHeight: 28, cursor: "text" }} className="group/score-row">
                           <textarea
                             value={row.lyric}
                             onChange={(e) => updateScoreRow(idx, { lyric: e.target.value })}
