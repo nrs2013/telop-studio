@@ -1218,19 +1218,19 @@ export default function ProjectPage() {
             bars: typeof r.bars === "string" ? r.bars : (typeof r.bars === "number" && Number.isFinite(r.bars) ? String(r.bars) : ""),
             lyric: typeof r.lyric === "string" ? r.lyric : "",
           }));
-          // 最低 30 行を保証（過去データが少なければ空行で埋める）
-          if (rows.length < 30) {
-            rows = [...rows, ...buildEmptyScoreRows(30 - rows.length)];
+          // 最低 100 行を保証（過去データが少なければ空行で埋める）
+          if (rows.length < 100) {
+            rows = [...rows, ...buildEmptyScoreRows(100 - rows.length)];
           }
           setScoreRows(rows);
         } else {
-          setScoreRows(buildEmptyScoreRows(30));
+          setScoreRows(buildEmptyScoreRows(100));
         }
       } else {
-        setScoreRows(buildEmptyScoreRows(30));
+        setScoreRows(buildEmptyScoreRows(100));
       }
     } catch {
-      setScoreRows(buildEmptyScoreRows(30));
+      setScoreRows(buildEmptyScoreRows(100));
     }
     setScoreInitialized(true);
   }, [id, buildEmptyScoreRows]);
@@ -6061,28 +6061,6 @@ export default function ProjectPage() {
                         </label>
                       </Fragment>
                     ))}
-                  </div>
-                  <div style={{ padding: "10px 8px", display: "flex", justifyContent: "center", gap: 8 }}>
-                    <button
-                      onClick={() => addScoreRows(10)}
-                      tabIndex={-1}
-                      className="text-[10px] px-3 py-1 rounded hover:bg-white/5"
-                      style={{ color: TS_DESIGN.text3, border: `1px dashed ${TS_DESIGN.border}` }}
-                      data-testid="btn-score-add-10"
-                      title="10 行追加"
-                    >+ 10 行</button>
-                    <button
-                      onClick={() => {
-                        if (confirm("譜割を全部リセットして空 30 行に戻します。よろしいですか？")) {
-                          setScoreRows(buildEmptyScoreRows(30));
-                        }
-                      }}
-                      tabIndex={-1}
-                      className="text-[10px] px-3 py-1 rounded hover:bg-white/5"
-                      style={{ color: TS_DESIGN.text3, border: `1px dashed ${TS_DESIGN.border}` }}
-                      data-testid="btn-score-reset"
-                      title="この曲の譜割を全部リセット"
-                    >全部リセット</button>
                   </div>
                 </div>
               </div>
