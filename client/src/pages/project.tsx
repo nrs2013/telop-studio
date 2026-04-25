@@ -5239,15 +5239,15 @@ export default function ProjectPage() {
           <div
             ref={previewWrapperRef}
             className="flex-1 flex items-center justify-center overflow-hidden relative"
-            style={{ minHeight: 0 }}
+            style={{ minHeight: 0, padding: "20px 24px" }}
             onMouseDown={() => { const el = document.activeElement as HTMLElement; if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA")) el.blur(); }}
           >
           <div
             className="relative group/preview"
             style={
               previewSize
-                ? { width: previewSize.width, height: previewSize.height }
-                : { width: "100%", maxWidth: "100%", maxHeight: "100%", aspectRatio: `${outputW} / ${outputH}` }
+                ? { width: previewSize.width, height: previewSize.height, boxShadow: "0 12px 36px rgba(0, 0, 0, 0.65), 0 3px 10px rgba(0, 0, 0, 0.45)", borderRadius: 4 }
+                : { width: "100%", maxWidth: "100%", maxHeight: "100%", aspectRatio: `${outputW} / ${outputH}`, boxShadow: "0 12px 36px rgba(0, 0, 0, 0.65), 0 3px 10px rgba(0, 0, 0, 0.45)", borderRadius: 4 }
             }
           >
           <div
