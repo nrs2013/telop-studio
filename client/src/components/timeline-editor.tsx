@@ -72,6 +72,9 @@ interface TimelineEditorProps {
   zoomInLabel?: string;
   rightTitleAnimDurMs?: number;
   rightTitleText?: string;
+  // 譜割タブから受け取るデータ。SECTION 名 + 小節数（文字列、空も可）の配列。
+  // 累積小節 × BPM から時刻計算してタイムライン上に SECTION マーカーを表示する。
+  scoreRows?: { id: string; section: string; bars: string; lyric: string }[];
 }
 
 let decodedCache: { projectId: string; bufferByteLength: number; channelData: Float32Array; sampleRate: number } | null = null;
@@ -168,6 +171,7 @@ export const TimelineEditor = memo(function TimelineEditor({
   zoomInLabel,
   rightTitleAnimDurMs,
   rightTitleText,
+  scoreRows,
 }: TimelineEditorProps) {
   const aHue = propAccentHue ?? 270;
   const [zoom, setZoom] = useState(50);
@@ -3010,6 +3014,41 @@ export const TimelineEditor = memo(function TimelineEditor({
                       backgroundColor: "hsl(0 0% 7%)",
                     }}
                   >
+                    {/* SECTION マーカー帯（譜割タブから）。bpm + 累積小節 + gridOffset で時刻計算してラベル配置。 */}
+                    {scoreRows && scoreRows.length > 0 && bpm && bpm > 0 && (
+                      <div className="absolute left-0 right-0 top-0 pointer-events-none" style={{ height: 16, zIndex: 25 }}>
+                        {(() => {
+                          const beatsPerBar = 4;
+                          const secPerBar = (60 / bpm) * beatsPerBar;
+                          const offset = gridOffsetRef.current || 0;
+                          let cumBars = 0;
+                          const items: React.ReactNode[] = [];
+                          for (const row of scoreRows) {
+                            const sectionLabel = row.section.trim();
+                            if (sectionLabel) {
+                              const startTime = offset + cumBars * secPerBar;
+                              const x = startTime * pixelsPerSecond;
+                              items.push(
+                                <div key={row.id} className="absolute" style={{
+                                  left: Math.max(0, x), top: 0, height: 16,
+                                  color: "hsl(48 100% 65%)",
+                                  fontSize: 9, fontWeight: 700, letterSpacing: "0.08em",
+                                  background: "hsla(0, 0%, 0%, 0.78)",
+                                  padding: "0 5px",
+                                  borderLeft: "2px solid hsl(48 100% 50%)",
+                                  whiteSpace: "nowrap", lineHeight: "16px",
+                                }}>
+                                  {sectionLabel.toUpperCase()}
+                                </div>
+                              );
+                            }
+                            const barsNum = parseInt(row.bars) || 0;
+                            cumBars += barsNum;
+                          }
+                          return items;
+                        })()}
+                      </div>
+                    )}
                     <div
                       data-ruler
                       className="absolute left-0 right-0 top-0 z-20 cursor-col-resize"

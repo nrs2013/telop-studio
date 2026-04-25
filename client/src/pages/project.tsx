@@ -6152,6 +6152,7 @@ export default function ProjectPage() {
               zoomOutLabel={codeToLabel(resolvedKeyMap.zoomOut)}
               zoomInLabel={codeToLabel(resolvedKeyMap.zoomIn)}
               rightTitleText={(project?.creditRightTitle || project?.songTitle || "").trim()}
+              scoreRows={scoreRows}
             />
         </div>
       </div>
