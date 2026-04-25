@@ -6011,76 +6011,90 @@ export default function ProjectPage() {
             </div>
             ))}
             {activeRightTab === "score" && (
-              <div className="flex-1 overflow-y-auto" data-testid="score-table" style={{ background: TS_DESIGN.bg2 }}>
-                <div style={{ display: "grid", gridTemplateColumns: "64px 48px 1fr", position: "sticky", top: 0, background: TS_DESIGN.bg2, zIndex: 1, borderBottom: `1px solid ${TS_DESIGN.border}` }}>
+              <div className="flex-1 flex flex-col overflow-hidden" data-testid="score-table" style={{ background: TS_DESIGN.bg2 }}>
+                <div className="shrink-0" style={{ display: "grid", gridTemplateColumns: "64px 48px 1fr", borderBottom: `1px solid ${TS_DESIGN.border}` }}>
                   <div style={{ borderRight: `1px solid ${TS_DESIGN.border}`, padding: "6px 4px", textAlign: "center", color: TS_DESIGN.text3, fontSize: 9, letterSpacing: "0.18em", textTransform: "uppercase", fontWeight: 600 }}>SECTION</div>
                   <div style={{ borderRight: `1px solid ${TS_DESIGN.border}`, padding: "6px 4px", textAlign: "center", color: TS_DESIGN.text3, fontSize: 9, letterSpacing: "0.18em", textTransform: "uppercase", fontWeight: 600 }}>BAR</div>
                   <div style={{ padding: "6px 10px", color: TS_DESIGN.text3, fontSize: 9, letterSpacing: "0.18em", textTransform: "uppercase", fontWeight: 600 }}>LYRIC</div>
                 </div>
-                <div style={{ display: "grid", gridTemplateColumns: "64px 48px 1fr" }}>
-                  {scoreRows.map((row, idx) => (
-                    <Fragment key={row.id}>
-                      <label style={{ borderRight: `1px solid ${TS_DESIGN.border}`, borderBottom: `1px solid ${TS_DESIGN.border}`, display: "flex", alignItems: "stretch", minHeight: 28, cursor: "text" }}>
-                        <input
-                          value={row.section}
-                          onChange={(e) => updateScoreRow(idx, { section: e.target.value })}
-                          placeholder=""
-                          className="w-full bg-transparent outline-none text-center"
-                          style={{ color: TS_DESIGN.text2, fontSize: 12, letterSpacing: "0.06em", fontWeight: 500, padding: "4px 6px", border: 0 }}
-                          data-testid={`score-section-${idx}`}
-                        />
-                      </label>
-                      <label style={{ borderRight: `1px solid ${TS_DESIGN.border}`, borderBottom: `1px solid ${TS_DESIGN.border}`, display: "flex", alignItems: "stretch", minHeight: 28, cursor: "text" }}>
-                        <input
-                          type="text"
-                          inputMode="numeric"
-                          value={row.bars ?? ""}
-                          onChange={(e) => {
-                            const raw = e.target.value.trim();
-                            if (raw === "") {
-                              updateScoreRow(idx, { bars: null });
-                            } else {
-                              const v = parseInt(raw);
-                              if (!isNaN(v) && v >= 1 && v <= 999) updateScoreRow(idx, { bars: v });
-                            }
-                          }}
-                          onFocus={(e) => (e.target as HTMLInputElement).select()}
-                          className="w-full bg-transparent outline-none text-center tabular-nums"
-                          style={{ color: TS_DESIGN.text2, fontSize: 13, padding: "4px 4px", border: 0 }}
-                          data-testid={`score-bars-${idx}`}
-                        />
-                      </label>
-                      <label style={{ borderBottom: `1px solid ${TS_DESIGN.border}`, position: "relative", display: "flex", alignItems: "stretch", minHeight: 28, cursor: "text" }} className="group/score-row">
-                        <textarea
-                          value={row.lyric}
-                          onChange={(e) => updateScoreRow(idx, { lyric: e.target.value })}
-                          placeholder=""
-                          rows={Math.max(1, row.lyric.split("\n").length)}
-                          className="w-full bg-transparent outline-none resize-none"
-                          style={{ color: TS_DESIGN.text, fontSize: 13, lineHeight: 1.5, minHeight: 28, padding: "4px 28px 4px 10px", border: 0 }}
-                          data-testid={`score-lyric-${idx}`}
-                        />
-                        <button
-                          onClick={(e) => { e.preventDefault(); e.stopPropagation(); deleteScoreRow(idx); }}
-                          tabIndex={-1}
-                          className="absolute right-1 top-1 w-5 h-5 flex items-center justify-center rounded opacity-0 group-hover/score-row:opacity-100 hover:bg-white/10"
-                          style={{ color: TS_DESIGN.text3, fontSize: 14 }}
-                          title="この行を削除"
-                          data-testid={`score-delete-${idx}`}
-                        >×</button>
-                      </label>
-                    </Fragment>
-                  ))}
-                </div>
-                <div style={{ padding: "10px 8px", textAlign: "center" }}>
-                  <button
-                    onClick={() => addScoreRows(10)}
-                    tabIndex={-1}
-                    className="text-[10px] px-3 py-1 rounded hover:bg-white/5"
-                    style={{ color: TS_DESIGN.text3, border: `1px dashed ${TS_DESIGN.border}` }}
-                    data-testid="btn-score-add-10"
-                    title="10 行追加"
-                  >+ 10 行</button>
+                <div className="flex-1 overflow-y-auto">
+                  <div style={{ display: "grid", gridTemplateColumns: "64px 48px 1fr" }}>
+                    {scoreRows.map((row, idx) => (
+                      <Fragment key={row.id}>
+                        <label style={{ borderRight: `1px solid ${TS_DESIGN.border}`, display: "flex", alignItems: "stretch", minHeight: 28, cursor: "text" }}>
+                          <input
+                            value={row.section}
+                            onChange={(e) => updateScoreRow(idx, { section: e.target.value })}
+                            placeholder=""
+                            className="w-full bg-transparent outline-none text-center"
+                            style={{ color: TS_DESIGN.text2, fontSize: 12, letterSpacing: "0.06em", fontWeight: 500, padding: "4px 6px", border: 0 }}
+                            data-testid={`score-section-${idx}`}
+                          />
+                        </label>
+                        <label style={{ borderRight: `1px solid ${TS_DESIGN.border}`, display: "flex", alignItems: "stretch", minHeight: 28, cursor: "text" }}>
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            value={row.bars ?? ""}
+                            onChange={(e) => {
+                              const raw = e.target.value.trim();
+                              if (raw === "") {
+                                updateScoreRow(idx, { bars: null });
+                              } else {
+                                const v = parseInt(raw);
+                                if (!isNaN(v) && v >= 1 && v <= 999) updateScoreRow(idx, { bars: v });
+                              }
+                            }}
+                            onFocus={(e) => (e.target as HTMLInputElement).select()}
+                            className="w-full bg-transparent outline-none text-center tabular-nums"
+                            style={{ color: TS_DESIGN.text2, fontSize: 13, padding: "4px 4px", border: 0 }}
+                            data-testid={`score-bars-${idx}`}
+                          />
+                        </label>
+                        <label style={{ position: "relative", display: "flex", alignItems: "stretch", minHeight: 28, cursor: "text" }} className="group/score-row">
+                          <textarea
+                            value={row.lyric}
+                            onChange={(e) => updateScoreRow(idx, { lyric: e.target.value })}
+                            placeholder=""
+                            rows={Math.max(1, row.lyric.split("\n").length)}
+                            className="w-full bg-transparent outline-none resize-none"
+                            style={{ color: TS_DESIGN.text, fontSize: 13, lineHeight: 1.5, minHeight: 28, padding: "4px 28px 4px 10px", border: 0 }}
+                            data-testid={`score-lyric-${idx}`}
+                          />
+                          <button
+                            onClick={(e) => { e.preventDefault(); e.stopPropagation(); deleteScoreRow(idx); }}
+                            tabIndex={-1}
+                            className="absolute right-1 top-1 w-5 h-5 flex items-center justify-center rounded opacity-0 group-hover/score-row:opacity-100 hover:bg-white/10"
+                            style={{ color: TS_DESIGN.text3, fontSize: 14 }}
+                            title="この行を削除"
+                            data-testid={`score-delete-${idx}`}
+                          >×</button>
+                        </label>
+                      </Fragment>
+                    ))}
+                  </div>
+                  <div style={{ padding: "10px 8px", display: "flex", justifyContent: "center", gap: 8 }}>
+                    <button
+                      onClick={() => addScoreRows(10)}
+                      tabIndex={-1}
+                      className="text-[10px] px-3 py-1 rounded hover:bg-white/5"
+                      style={{ color: TS_DESIGN.text3, border: `1px dashed ${TS_DESIGN.border}` }}
+                      data-testid="btn-score-add-10"
+                      title="10 行追加"
+                    >+ 10 行</button>
+                    <button
+                      onClick={() => {
+                        if (confirm("譜割を全部リセットして空 30 行に戻します。よろしいですか？")) {
+                          setScoreRows(buildEmptyScoreRows(30));
+                        }
+                      }}
+                      tabIndex={-1}
+                      className="text-[10px] px-3 py-1 rounded hover:bg-white/5"
+                      style={{ color: TS_DESIGN.text3, border: `1px dashed ${TS_DESIGN.border}` }}
+                      data-testid="btn-score-reset"
+                      title="この曲の譜割を全部リセット"
+                    >全部リセット</button>
+                  </div>
                 </div>
               </div>
             )}
