@@ -6036,13 +6036,6 @@ export default function ProjectPage() {
                 data-testid="score-table"
                 style={{ background: TS_DESIGN.bg2 }}
               >
-                <style>{`
-                  [data-testid^="score-section-"]:focus,
-                  [data-testid^="score-bars-"]:focus,
-                  [data-testid^="score-lyric-"]:focus {
-                    background: rgba(255, 255, 255, 0.06) !important;
-                  }
-                `}</style>
                 <div className="shrink-0" style={{ display: "grid", gridTemplateColumns: "64px 56px 1fr", borderBottom: `1px solid ${TS_DESIGN.border}` }}>
                   <div style={{ borderRight: `1px solid ${TS_DESIGN.border}`, padding: "6px 4px", textAlign: "center", color: TS_DESIGN.text3, fontSize: 9, letterSpacing: "0.18em", textTransform: "uppercase", fontWeight: 600 }}>SECTION</div>
                   <div style={{ borderRight: `1px solid ${TS_DESIGN.border}`, padding: "6px 4px", textAlign: "center", color: TS_DESIGN.text3, fontSize: 9, letterSpacing: "0.18em", textTransform: "uppercase", fontWeight: 600 }}>BAR</div>
