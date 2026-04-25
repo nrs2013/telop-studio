@@ -6025,16 +6025,37 @@ export default function ProjectPage() {
                 <div className="flex-1 overflow-y-auto">
                   <div style={{ display: "grid", gridTemplateColumns: "64px 56px 1fr" }}>
                     {scoreRows.map((row, idx) => {
-                      const onCellKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+                      const onCellKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>, col: "section" | "bars" | "lyric") => {
                         const ta = e.target as HTMLTextAreaElement;
                         if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
                           if (ta.selectionStart === 0) {
                             e.preventDefault();
                             insertScoreRowAbove(idx);
                           }
-                        } else if ((e.metaKey || e.ctrlKey) && (e.key === "Backspace" || e.key === "Delete")) {
+                          return;
+                        }
+                        if ((e.metaKey || e.ctrlKey) && (e.key === "Backspace" || e.key === "Delete")) {
                           e.preventDefault();
                           deleteScoreRow(idx);
+                          return;
+                        }
+                        if (e.key === "Tab") {
+                          e.preventDefault();
+                          const order: ("section" | "bars" | "lyric")[] = ["section", "bars", "lyric"];
+                          const colIdx = order.indexOf(col);
+                          let nextRow = idx;
+                          let nextColIdx = colIdx + (e.shiftKey ? -1 : 1);
+                          if (nextColIdx >= order.length) { nextRow += 1; nextColIdx = 0; }
+                          else if (nextColIdx < 0) { nextRow -= 1; nextColIdx = order.length - 1; }
+                          if (nextRow < 0 || nextRow >= scoreRows.length) return;
+                          const nextCol = order[nextColIdx];
+                          const sel = `[data-testid="score-${nextCol}-${nextRow}"]`;
+                          const next = document.querySelector(sel) as HTMLTextAreaElement | null;
+                          if (next) {
+                            next.focus();
+                            const len = next.value.length;
+                            next.setSelectionRange(len, len);
+                          }
                         }
                       };
                       return (
@@ -6043,7 +6064,7 @@ export default function ProjectPage() {
                             <textarea
                               value={row.section}
                               onChange={(e) => updateScoreRow(idx, { section: e.target.value })}
-                              onKeyDown={onCellKeyDown}
+                              onKeyDown={(e) => onCellKeyDown(e, "section")}
                               rows={Math.max(1, row.section.split("\n").length)}
                               className="w-full bg-transparent outline-none resize-none text-center"
                               style={{ color: TS_DESIGN.text, fontSize: 13, lineHeight: 1.5, minHeight: 28, padding: "4px 6px", border: 0, fontFamily: "inherit" }}
@@ -6054,7 +6075,7 @@ export default function ProjectPage() {
                             <textarea
                               value={row.bars}
                               onChange={(e) => updateScoreRow(idx, { bars: e.target.value })}
-                              onKeyDown={onCellKeyDown}
+                              onKeyDown={(e) => onCellKeyDown(e, "bars")}
                               rows={Math.max(1, row.bars.split("\n").length)}
                               className="w-full bg-transparent outline-none resize-none text-center"
                               style={{ color: TS_DESIGN.text, fontSize: 13, lineHeight: 1.5, minHeight: 28, padding: "4px 4px", border: 0, fontFamily: "inherit" }}
@@ -6065,7 +6086,7 @@ export default function ProjectPage() {
                             <textarea
                               value={row.lyric}
                               onChange={(e) => updateScoreRow(idx, { lyric: e.target.value })}
-                              onKeyDown={onCellKeyDown}
+                              onKeyDown={(e) => onCellKeyDown(e, "lyric")}
                               rows={Math.max(1, row.lyric.split("\n").length)}
                               className="w-full bg-transparent outline-none resize-none text-left"
                               style={{ color: TS_DESIGN.text, fontSize: 13, lineHeight: 1.5, minHeight: 28, padding: "4px 28px 4px 10px", border: 0, fontFamily: "inherit" }}
