@@ -1183,10 +1183,10 @@ export default function ProjectPage() {
   const lyricsTextRef = useRef("");
 
   // 譜割（SCORE）タブ用 state。SECTION 名 + 小節数 + 歌詞テキスト の 3 列スプレッドシート。
-  // 全セルが任意入力（空欄 OK）。最初から空行が並んでる Excel ライク表示。
+  // 全セルが任意入力（空欄 OK、文字でも改行でも何でも書ける）。
   // データはまだ DB スキーマに無いので、当面 localStorage にプロジェクト ID 単位で保存する。
   const [activeRightTab, setActiveRightTab] = useState<"lyrics" | "score">("lyrics");
-  const [scoreRows, setScoreRows] = useState<{ id: string; section: string; bars: number | null; lyric: string }[]>([]);
+  const [scoreRows, setScoreRows] = useState<{ id: string; section: string; bars: string; lyric: string }[]>([]);
   const [scoreInitialized, setScoreInitialized] = useState(false);
 
   // 初期空行を 30 行作るヘルパー
@@ -1194,7 +1194,7 @@ export default function ProjectPage() {
     return Array.from({ length: count }, (_, i) => ({
       id: `init-${Date.now().toString(36)}-${i}`,
       section: "",
-      bars: null as number | null,
+      bars: "",
       lyric: "",
     }));
   }, []);
@@ -1215,7 +1215,7 @@ export default function ProjectPage() {
           let rows = parsed.filter((r: any) => r && typeof r.id === "string").map((r: any) => ({
             id: String(r.id),
             section: typeof r.section === "string" ? r.section : "",
-            bars: typeof r.bars === "number" && Number.isFinite(r.bars) ? r.bars : null,
+            bars: typeof r.bars === "string" ? r.bars : (typeof r.bars === "number" && Number.isFinite(r.bars) ? String(r.bars) : ""),
             lyric: typeof r.lyric === "string" ? r.lyric : "",
           }));
           // 最低 30 行を保証（過去データが少なければ空行で埋める）
@@ -1250,12 +1250,12 @@ export default function ProjectPage() {
       ...Array.from({ length: count }, (_, i) => ({
         id: `add-${Date.now().toString(36)}-${i}-${Math.random().toString(36).slice(2, 6)}`,
         section: "",
-        bars: null as number | null,
+        bars: "",
         lyric: "",
       })),
     ]);
   }, []);
-  const updateScoreRow = useCallback((idx: number, patch: Partial<{ section: string; bars: number | null; lyric: string }>) => {
+  const updateScoreRow = useCallback((idx: number, patch: Partial<{ section: string; bars: string; lyric: string }>) => {
     setScoreRows(prev => prev.map((r, i) => i === idx ? { ...r, ...patch } : r));
   }, []);
   const deleteScoreRow = useCallback((idx: number) => {
@@ -6033,17 +6033,9 @@ export default function ProjectPage() {
                         </label>
                         <label style={{ borderRight: `1px solid ${TS_DESIGN.border}`, display: "flex", alignItems: "flex-start", minHeight: 28, cursor: "text" }}>
                           <textarea
-                            value={row.bars === null ? "" : String(row.bars)}
-                            onChange={(e) => {
-                              const raw = e.target.value.trim();
-                              if (raw === "") {
-                                updateScoreRow(idx, { bars: null });
-                              } else {
-                                const v = parseInt(raw);
-                                if (!isNaN(v) && v >= 1 && v <= 999) updateScoreRow(idx, { bars: v });
-                              }
-                            }}
-                            rows={1}
+                            value={row.bars}
+                            onChange={(e) => updateScoreRow(idx, { bars: e.target.value })}
+                            rows={Math.max(1, row.bars.split("\n").length)}
                             className="w-full bg-transparent outline-none resize-none text-center tabular-nums"
                             style={{ color: TS_DESIGN.text2, fontSize: 13, padding: "4px 4px", border: 0, lineHeight: 1.5, minHeight: 28 }}
                             data-testid={`score-bars-${idx}`}
