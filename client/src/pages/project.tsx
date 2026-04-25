@@ -1208,41 +1208,17 @@ export default function ProjectPage() {
     }
     setScoreInitialized(false);
     try {
-      const raw = localStorage.getItem(`telop-score-v2-${id}`);
+      const raw = localStorage.getItem(`telop-score-v3-${id}`);
       if (raw) {
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          // 旧データを適合：誤って改行が入って 1 セルに複数 SECTION/BAR が詰まったケースを、
-          // 行ごとに分割して展開する。LYRIC は「空行区切り」のブロックを section/bars がある行に
-          // 順番に割り当てる（譜割の各セクションに歌詞ブロックを対応させる）。
-          const expanded: { id: string; section: string; bars: string; lyric: string }[] = [];
-          for (const r of parsed) {
-            if (!r || typeof r.id !== "string") continue;
-            const sectionRaw = typeof r.section === "string" ? r.section : "";
-            const barsRaw = typeof r.bars === "string" ? r.bars : (typeof r.bars === "number" && Number.isFinite(r.bars) ? String(r.bars) : "");
-            const lyricRaw = typeof r.lyric === "string" ? r.lyric : "";
-            const sectionLines = sectionRaw.split(/\r?\n/);
-            const barsLines = barsRaw.split(/\r?\n/);
-            const lyricBlocks = lyricRaw.split(/\r?\n\s*\r?\n/);
-            const maxLen = Math.max(sectionLines.length, barsLines.length, 1);
-            let lyricBlockIdx = 0;
-            for (let i = 0; i < maxLen; i++) {
-              const section = (sectionLines[i] || "").trim();
-              const bars = (barsLines[i] || "").trim();
-              let assignedLyric = "";
-              if (section || bars) {
-                assignedLyric = (lyricBlocks[lyricBlockIdx] || "").trim();
-                lyricBlockIdx++;
-              }
-              expanded.push({
-                id: i === 0 ? String(r.id) : `mig-${String(r.id)}-${i}`,
-                section,
-                bars,
-                lyric: assignedLyric,
-              });
-            }
-          }
-          let rows = expanded;
+          // ストレートに復元のみ。データの加工・分割は一切しない（破壊リスク回避）。
+          let rows = parsed.filter((r: any) => r && typeof r.id === "string").map((r: any) => ({
+            id: String(r.id),
+            section: typeof r.section === "string" ? r.section : "",
+            bars: typeof r.bars === "string" ? r.bars : (typeof r.bars === "number" && Number.isFinite(r.bars) ? String(r.bars) : ""),
+            lyric: typeof r.lyric === "string" ? r.lyric : "",
+          }));
           // 最低 100 行を保証（少なければ空行で埋める）
           if (rows.length < 100) {
             rows = [...rows, ...buildEmptyScoreRows(100 - rows.length)];
@@ -1264,7 +1240,7 @@ export default function ProjectPage() {
   useEffect(() => {
     if (!id || !scoreInitialized) return;
     try {
-      localStorage.setItem(`telop-score-v2-${id}`, JSON.stringify(scoreRows));
+      localStorage.setItem(`telop-score-v3-${id}`, JSON.stringify(scoreRows));
     } catch {}
   }, [scoreRows, id, scoreInitialized]);
 
