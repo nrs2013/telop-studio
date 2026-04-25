@@ -15,7 +15,7 @@ class UndoManager {
 
   subscribe(fn: () => void) {
     this.listeners.add(fn);
-    return () => this.listeners.delete(fn);
+    return () => { this.listeners.delete(fn); };
   }
 
   private notify() {

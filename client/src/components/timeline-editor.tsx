@@ -1349,10 +1349,10 @@ export const TimelineEditor = memo(function TimelineEditor({
   creditBarSelectedRef.current = creditBarSelected;
 
   useEffect(() => {
-    setLocalCreditIn(prev => prev !== null && creditInTime !== null && Math.abs(prev - creditInTime) < 0.01 ? null : prev);
+    setLocalCreditIn(prev => prev !== null && creditInTime != null && Math.abs(prev - creditInTime) < 0.01 ? null : prev);
   }, [creditInTime]);
   useEffect(() => {
-    setLocalCreditOut(prev => prev !== null && creditOutTime !== null && Math.abs(prev - creditOutTime) < 0.01 ? null : prev);
+    setLocalCreditOut(prev => prev !== null && creditOutTime != null && Math.abs(prev - creditOutTime) < 0.01 ? null : prev);
   }, [creditOutTime]);
 
   const [creditDragPreviewX, setCreditDragPreviewX] = useState<number | null>(null);
