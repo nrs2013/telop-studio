@@ -6193,6 +6193,7 @@ export default function ProjectPage() {
               savedBpm={project?.detectedBpm ?? null}
               onSelectionChange={setTimelineSelectedIds}
               bpmGridOffset={project?.bpmGridOffset ?? 0}
+              scoreRows={scoreRows}
               onBpmGridOffsetChange={(offset) => {
                 updateProjectData({ bpmGridOffset: offset } as any);
               }}
