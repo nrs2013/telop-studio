@@ -74,10 +74,6 @@ function loadFolders(): ConcertFolder[] {
   } catch { return []; }
 }
 
-function saveFolders(folders: ConcertFolder[]) {
-  localStorage.setItem("telop-folders", JSON.stringify(folders));
-}
-
 function getJapaneseReading(name: string): string {
   return name.toLowerCase();
 }
