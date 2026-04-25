@@ -1182,6 +1182,45 @@ export default function ProjectPage() {
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lyricsTextRef = useRef("");
 
+  // ====== タイムライン側 譜割モード（時間ベース SECTION ブロック）======
+  // 既存の手入力 譜割（telop-score-v3-*）には触らない。新しいキーで完全に独立。
+  type SectionBlock = { id: string; label: string; startBar: number; endBar: number };
+  const [timelineMode, setTimelineMode] = useState<"lyric" | "score">("lyric");
+  const [sectionBlocks, setSectionBlocks] = useState<SectionBlock[]>([]);
+  const [sectionBlocksInit, setSectionBlocksInit] = useState(false);
+
+  useEffect(() => {
+    if (!id) return;
+    setSectionBlocksInit(false);
+    try {
+      const raw = localStorage.getItem(`telop-sections-v1-${id}`);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          setSectionBlocks(parsed.filter((b: any) =>
+            b && typeof b.id === "string" && typeof b.label === "string"
+            && typeof b.startBar === "number" && typeof b.endBar === "number"
+          ));
+        } else {
+          setSectionBlocks([]);
+        }
+      } else {
+        setSectionBlocks([]);
+      }
+    } catch {
+      setSectionBlocks([]);
+    }
+    setSectionBlocksInit(true);
+  }, [id]);
+
+  useEffect(() => {
+    if (!id || !sectionBlocksInit) return;
+    const h = setTimeout(() => {
+      try { localStorage.setItem(`telop-sections-v1-${id}`, JSON.stringify(sectionBlocks)); } catch {}
+    }, 250);
+    return () => clearTimeout(h);
+  }, [sectionBlocks, id, sectionBlocksInit]);
+
   // ====== 譜割（SCORE）タブ ======
   // 安全装置：データ加工なし／自動振り分けなし／マイグレーションなし
   const [activeRightTab, setActiveRightTab] = useState<"lyrics" | "score">("lyrics");
@@ -6263,6 +6302,10 @@ export default function ProjectPage() {
               onSelectionChange={setTimelineSelectedIds}
               bpmGridOffset={project?.bpmGridOffset ?? 0}
               scoreRows={scoreRows}
+              timelineMode={timelineMode}
+              onTimelineModeChange={setTimelineMode}
+              sectionBlocks={sectionBlocks}
+              onSectionBlocksChange={setSectionBlocks}
               onBpmGridOffsetChange={(offset) => {
                 updateProjectData({ bpmGridOffset: offset } as any);
               }}
