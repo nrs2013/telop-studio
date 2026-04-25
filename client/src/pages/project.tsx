@@ -6010,15 +6010,25 @@ export default function ProjectPage() {
                       const onCellKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>, col: "section" | "bars" | "lyric") => {
                         // 日本語入力（IME）変換中は何もしない（ Enter で行追加されたり Tab で文字消えたりするのを防ぐ）
                         if (e.nativeEvent.isComposing || (e.nativeEvent as any).keyCode === 229) return;
-                        // Cmd+Return：今の行の 3 セルの先頭に \n を同時挿入 → 中身が下に押し出される
+                        // Cmd+Return：カーソルがいる行の上に空行を 1 つ挿入（3 セル同時、行インデックス基準）
                         if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
                           e.preventDefault();
-                          const cursorPos = e.currentTarget.selectionStart;
+                          const ta0 = e.currentTarget;
+                          const cursorPos = ta0.selectionStart;
+                          const currentValue = ta0.value;
+                          // カーソルが何行目にいるか（0-indexed）
+                          const lineIdx = currentValue.slice(0, cursorPos).split("\n").length - 1;
+                          const insertAt = (value: string, idx: number): string => {
+                            const lines = value.split("\n");
+                            while (lines.length < idx) lines.push("");
+                            lines.splice(idx, 0, "");
+                            return lines.join("\n");
+                          };
                           setScoreRows(prev => prev.map((r, i) => i === idx ? {
                             ...r,
-                            section: "\n" + r.section,
-                            bars: "\n" + r.bars,
-                            lyric: "\n" + r.lyric,
+                            section: insertAt(r.section, lineIdx),
+                            bars: insertAt(r.bars, lineIdx),
+                            lyric: insertAt(r.lyric, lineIdx),
                           } : r));
                           setTimeout(() => {
                             const ta = document.querySelector(`[data-testid="score-${col}-${idx}"]`) as HTMLTextAreaElement | null;
@@ -6026,25 +6036,32 @@ export default function ProjectPage() {
                           }, 50);
                           return;
                         }
-                        // Cmd+Delete：今の行の 3 セルの先頭の \n を同時削除 → 中身が上に戻る
+                        // Cmd+Delete：カーソルの 1 つ上の行が空なら、それを削除（3 セル同時）。空でなければ何もしない。
                         if ((e.metaKey || e.ctrlKey) && (e.key === "Backspace" || e.key === "Delete")) {
                           e.preventDefault();
                           const ta0 = e.currentTarget;
                           const cursorPos = ta0.selectionStart;
-                          const currentStarts = ta0.value.startsWith("\n");
+                          const currentValue = ta0.value;
+                          const lineIdx = currentValue.slice(0, cursorPos).split("\n").length - 1;
+                          if (lineIdx <= 0) return;
+                          const currentLines = currentValue.split("\n");
+                          if (currentLines[lineIdx - 1] !== "") return;
+                          const removeAt = (value: string, idx: number): string => {
+                            const lines = value.split("\n");
+                            if (lines.length > idx && lines[idx] === "") {
+                              lines.splice(idx, 1);
+                            }
+                            return lines.join("\n");
+                          };
                           setScoreRows(prev => prev.map((r, i) => i === idx ? {
                             ...r,
-                            section: r.section.startsWith("\n") ? r.section.slice(1) : r.section,
-                            bars: r.bars.startsWith("\n") ? r.bars.slice(1) : r.bars,
-                            lyric: r.lyric.startsWith("\n") ? r.lyric.slice(1) : r.lyric,
+                            section: removeAt(r.section, lineIdx - 1),
+                            bars: removeAt(r.bars, lineIdx - 1),
+                            lyric: removeAt(r.lyric, lineIdx - 1),
                           } : r));
                           setTimeout(() => {
                             const ta = document.querySelector(`[data-testid="score-${col}-${idx}"]`) as HTMLTextAreaElement | null;
-                            if (ta) {
-                              ta.focus();
-                              const newPos = currentStarts ? Math.max(0, cursorPos - 1) : cursorPos;
-                              ta.setSelectionRange(newPos, newPos);
-                            }
+                            if (ta) { ta.focus(); ta.setSelectionRange(Math.max(0, cursorPos - 1), Math.max(0, cursorPos - 1)); }
                           }, 50);
                           return;
                         }
