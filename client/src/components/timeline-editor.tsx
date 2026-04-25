@@ -2878,10 +2878,10 @@ export const TimelineEditor = memo(function TimelineEditor({
         )}
 
         {(() => {
-          const activeLanes = 1;
+          const activeLanes = 2;
           const blocksZoneH = 18 + activeLanes * (LANE_HEIGHT + LANE_GAP) + 4;
           const TRACK_GAP = 2;
-          const WAVE_H = waveformPeaks ? (LANE_HEIGHT + LANE_GAP) : 0;
+          const WAVE_H = waveformPeaks ? 2 * (LANE_HEIGHT + LANE_GAP) : 0;
           const totalH = blocksZoneH + (waveformPeaks ? TRACK_GAP + WAVE_H : 0);
           const HEADER_W = 48;
           return (
@@ -2933,7 +2933,7 @@ export const TimelineEditor = memo(function TimelineEditor({
               {/* SECTION 帯（モードで内容が変わる）*/}
               {timelineMode === "lyric" && scoreRows && scoreRows.length > 0 && bpm && bpm > 0 && (
                 // 既存の読み取り専用イエロー文字帯（手入力の scoreRows から）
-                <div className="absolute left-0 right-0 top-0 z-30 overflow-hidden pointer-events-none" style={{ height: 38, background: "hsl(0 0% 9%)", borderBottom: "1px solid hsl(0 0% 22%)" }}>
+                <div className="absolute left-0 right-0 top-0 z-30 overflow-hidden pointer-events-none" style={{ height: 18, background: "hsl(0 0% 9%)", borderBottom: "1px solid hsl(0 0% 22%)" }}>
                   <div className="absolute top-0 bottom-0" style={{ left: -tlScrollLeft }}>
                     {(() => {
                       const beatsPerBar = 4;
@@ -2952,12 +2952,12 @@ export const TimelineEditor = memo(function TimelineEditor({
                             const x = startTime * pixelsPerSecond;
                             items.push(
                               <div key={`${row.id}-${i}`} className="absolute top-0" style={{
-                                left: Math.max(0, x), height: 38,
+                                left: Math.max(0, x), height: 18,
                                 color: "hsl(48 100% 65%)",
-                                fontSize: 12, fontWeight: 700, letterSpacing: "0.08em",
+                                fontSize: 10, fontWeight: 700, letterSpacing: "0.08em",
                                 padding: "0 6px",
                                 borderLeft: "2px solid hsl(48 100% 50%)",
-                                whiteSpace: "nowrap", lineHeight: "38px",
+                                whiteSpace: "nowrap", lineHeight: "18px",
                                 background: "hsla(0, 0%, 0%, 0.4)",
                               }}>
                                 {sectionLabel.toUpperCase()}
@@ -3038,7 +3038,7 @@ export const TimelineEditor = memo(function TimelineEditor({
                   window.addEventListener("mouseup", onUp);
                 };
                 return (
-                  <div className="absolute left-0 right-0 top-0 z-30 overflow-hidden" style={{ height: 38, background: "hsl(0 0% 9%)", borderBottom: "1px solid hsl(0 0% 22%)" }}>
+                  <div className="absolute left-0 right-0 top-0 z-30 overflow-hidden" style={{ height: 40, background: "hsl(0 0% 9%)", borderBottom: "1px solid hsl(0 0% 22%)" }}>
                     <div className="absolute top-0 bottom-0" style={{ left: -tlScrollLeft }}>
                       {blocks.map(b => {
                         const startTime = offset + b.startBar * secPerBar;
@@ -3050,7 +3050,7 @@ export const TimelineEditor = memo(function TimelineEditor({
                           <div
                             key={b.id}
                             className="absolute"
-                            style={{ left: Math.max(0, x), top: 2, width: w, height: 34, background: c.bg, border: `1px solid ${c.border}`, borderRadius: 3, color: c.text, cursor: "move", display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", overflow: "hidden", userSelect: "none" }}
+                            style={{ left: Math.max(0, x), top: 2, width: w, height: 36, background: c.bg, border: `1px solid ${c.border}`, borderRadius: 3, color: c.text, cursor: "move", display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", overflow: "hidden", userSelect: "none" }}
                             onMouseDown={(e) => onBlockMouseDown(e, b, "move")}
                             onClick={(e) => {
                               const t = e.target as HTMLElement;
@@ -3095,7 +3095,7 @@ export const TimelineEditor = memo(function TimelineEditor({
               <div
                 ref={timelineRef}
                 className="absolute inset-0 overflow-x-auto overflow-y-hidden cursor-crosshair select-none scrollbar-hide"
-                style={{ scrollbarWidth: "none", msOverflowStyle: "none", top: bpm && bpm > 0 ? (timelineMode === "score" ? 38 : (scoreRows && scoreRows.length > 0 ? 38 : 0)) : 0 }}
+                style={{ scrollbarWidth: "none", msOverflowStyle: "none", top: bpm && bpm > 0 ? (timelineMode === "score" ? 40 : (scoreRows && scoreRows.length > 0 ? 18 : 0)) : 0 }}
                 data-testid="area-timeline-blocks"
                 data-pps={pixelsPerSecond}
                 data-duration={duration}
