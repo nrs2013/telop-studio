@@ -6012,7 +6012,42 @@ export default function ProjectPage() {
             </div>
             ))}
             {activeRightTab === "score" && (
-              <div className="flex-1 flex flex-col overflow-hidden" data-testid="score-table" style={{ background: TS_DESIGN.bg2 }}>
+              <div
+                className="flex-1 flex flex-col overflow-hidden"
+                data-testid="score-table"
+                style={{ background: TS_DESIGN.bg2 }}
+                onPaste={(e) => {
+                  // SECTION/BAR の input への通常ペーストには干渉しない
+                  const target = e.target as HTMLElement;
+                  if (target.tagName === "INPUT") return;
+                  // クリップボードのテキストを取得し、空行（連続改行）で複数ブロックに分けられるか判定
+                  const text = e.clipboardData.getData("text/plain");
+                  if (!text) return;
+                  const blocks = text.split(/\r?\n\s*\r?\n/).map(b => b.trim()).filter(b => b.length > 0);
+                  // 単一ブロック（空行なし）は通常ペースト動作に任せる
+                  if (blocks.length <= 1) return;
+                  e.preventDefault();
+                  // ルール 2 を守る：実行前に必ず現在状態をバックアップ
+                  if (id) {
+                    try {
+                      const ts = new Date().toISOString().replace(/[:.]/g, "-");
+                      localStorage.setItem(`telop-score-backup-${id}-${ts}`, JSON.stringify(scoreRows));
+                    } catch {}
+                  }
+                  // SECTION 名がある行の空 LYRIC セルへ、上から順に各ブロックを割り当てる
+                  setScoreRows(prev => {
+                    const next = [...prev];
+                    let bIdx = 0;
+                    for (let i = 0; i < next.length && bIdx < blocks.length; i++) {
+                      if (next[i].section.trim() && !next[i].lyric.trim()) {
+                        next[i] = { ...next[i], lyric: blocks[bIdx] };
+                        bIdx++;
+                      }
+                    }
+                    return next;
+                  });
+                }}
+              >
                 <div className="shrink-0" style={{ display: "grid", gridTemplateColumns: "64px 48px 1fr", borderBottom: `1px solid ${TS_DESIGN.border}` }}>
                   <div style={{ borderRight: `1px solid ${TS_DESIGN.border}`, padding: "6px 4px", textAlign: "center", color: TS_DESIGN.text3, fontSize: 9, letterSpacing: "0.18em", textTransform: "uppercase", fontWeight: 600 }}>SECTION</div>
                   <div style={{ borderRight: `1px solid ${TS_DESIGN.border}`, padding: "6px 4px", textAlign: "center", color: TS_DESIGN.text3, fontSize: 9, letterSpacing: "0.18em", textTransform: "uppercase", fontWeight: 600 }}>BAR</div>
