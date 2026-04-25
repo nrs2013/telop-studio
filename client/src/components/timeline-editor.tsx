@@ -175,6 +175,8 @@ export const TimelineEditor = memo(function TimelineEditor({
 }: TimelineEditorProps) {
   const aHue = propAccentHue ?? 270;
   const [zoom, setZoom] = useState(50);
+  // タイムライン scroll 同期用（SECTION マーカー帯を横スクロールに追従させる）
+  const [tlScrollLeft, setTlScrollLeft] = useState(0);
   const zoomScrollSuppressRef = useRef(0);
   const zoomIntendedScrollRef = useRef(-1);
   const [fadeInTime, setFadeInTime] = useState(1);
@@ -2900,13 +2902,51 @@ export const TimelineEditor = memo(function TimelineEditor({
               </div>
 
               <div className="flex-1 relative">
+              {/* SECTION 帯（譜割タブから連動）。再生コントロールの下、タイムラインの上に固定表示。横スクロールに追従。 */}
+              {scoreRows && scoreRows.length > 0 && bpm && bpm > 0 && (
+                <div className="absolute left-0 right-0 top-0 z-30 overflow-hidden pointer-events-none" style={{ height: 18, background: "hsl(0 0% 9%)", borderBottom: "1px solid hsl(0 0% 22%)" }}>
+                  <div className="absolute top-0 bottom-0" style={{ left: -tlScrollLeft }}>
+                    {(() => {
+                      const beatsPerBar = 4;
+                      const secPerBar = (60 / bpm) * beatsPerBar;
+                      const offset = gridOffsetRef.current || 0;
+                      let cumBars = 0;
+                      const items: React.ReactNode[] = [];
+                      for (const row of scoreRows) {
+                        const sectionLabel = row.section.trim();
+                        if (sectionLabel) {
+                          const startTime = offset + cumBars * secPerBar;
+                          const x = startTime * pixelsPerSecond;
+                          items.push(
+                            <div key={row.id} className="absolute top-0" style={{
+                              left: Math.max(0, x), height: 18,
+                              color: "hsl(48 100% 65%)",
+                              fontSize: 10, fontWeight: 700, letterSpacing: "0.08em",
+                              padding: "0 6px",
+                              borderLeft: "2px solid hsl(48 100% 50%)",
+                              whiteSpace: "nowrap", lineHeight: "18px",
+                              background: "hsla(0, 0%, 0%, 0.4)",
+                            }}>
+                              {sectionLabel.toUpperCase()}
+                            </div>
+                          );
+                        }
+                        const barsNum = parseInt(row.bars) || 0;
+                        cumBars += barsNum;
+                      }
+                      return items;
+                    })()}
+                  </div>
+                </div>
+              )}
               <div
                 ref={timelineRef}
                 className="absolute inset-0 overflow-x-auto overflow-y-hidden cursor-crosshair select-none scrollbar-hide"
-                style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
+                style={{ scrollbarWidth: "none", msOverflowStyle: "none", top: scoreRows && scoreRows.length > 0 && bpm && bpm > 0 ? 18 : 0 }}
                 data-testid="area-timeline-blocks"
                 data-pps={pixelsPerSecond}
                 data-duration={duration}
+                onScroll={(e) => setTlScrollLeft(e.currentTarget.scrollLeft)}
                 onMouseDown={(e) => {
                   if (document.activeElement && document.activeElement !== document.body) {
                     (document.activeElement as HTMLElement).blur();
@@ -3014,41 +3054,6 @@ export const TimelineEditor = memo(function TimelineEditor({
                       backgroundColor: "hsl(0 0% 7%)",
                     }}
                   >
-                    {/* SECTION マーカー帯（譜割タブから）。bpm + 累積小節 + gridOffset で時刻計算してラベル配置。 */}
-                    {scoreRows && scoreRows.length > 0 && bpm && bpm > 0 && (
-                      <div className="absolute left-0 right-0 top-0 pointer-events-none" style={{ height: 16, zIndex: 25 }}>
-                        {(() => {
-                          const beatsPerBar = 4;
-                          const secPerBar = (60 / bpm) * beatsPerBar;
-                          const offset = gridOffsetRef.current || 0;
-                          let cumBars = 0;
-                          const items: React.ReactNode[] = [];
-                          for (const row of scoreRows) {
-                            const sectionLabel = row.section.trim();
-                            if (sectionLabel) {
-                              const startTime = offset + cumBars * secPerBar;
-                              const x = startTime * pixelsPerSecond;
-                              items.push(
-                                <div key={row.id} className="absolute" style={{
-                                  left: Math.max(0, x), top: 0, height: 16,
-                                  color: "hsl(48 100% 65%)",
-                                  fontSize: 9, fontWeight: 700, letterSpacing: "0.08em",
-                                  background: "hsla(0, 0%, 0%, 0.78)",
-                                  padding: "0 5px",
-                                  borderLeft: "2px solid hsl(48 100% 50%)",
-                                  whiteSpace: "nowrap", lineHeight: "16px",
-                                }}>
-                                  {sectionLabel.toUpperCase()}
-                                </div>
-                              );
-                            }
-                            const barsNum = parseInt(row.bars) || 0;
-                            cumBars += barsNum;
-                          }
-                          return items;
-                        })()}
-                      </div>
-                    )}
                     <div
                       data-ruler
                       className="absolute left-0 right-0 top-0 z-20 cursor-col-resize"
