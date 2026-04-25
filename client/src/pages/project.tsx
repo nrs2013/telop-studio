@@ -1233,18 +1233,28 @@ export default function ProjectPage() {
     setScoreInitialized(true);
   }, [id, buildEmptyScoreRows]);
 
+  // 保存はデバウンス（タイプ毎に走ると重い）
   useEffect(() => {
     if (!id || !scoreInitialized) return;
-    try {
-      localStorage.setItem(`telop-score-v3-${id}`, JSON.stringify(scoreRows));
-    } catch {}
+    const handle = setTimeout(() => {
+      try {
+        localStorage.setItem(`telop-score-v3-${id}`, JSON.stringify(scoreRows));
+      } catch {}
+    }, 250);
+    return () => clearTimeout(handle);
   }, [scoreRows, id, scoreInitialized]);
 
   const updateScoreRow = useCallback((idx: number, patch: Partial<{ section: string; bars: string; lyric: string }>) => {
     setScoreRows(prev => prev.map((r, i) => i === idx ? { ...r, ...patch } : r));
   }, []);
   const deleteScoreRow = useCallback((idx: number) => {
-    setScoreRows(prev => prev.filter((_, i) => i !== idx));
+    setScoreRows(prev => {
+      // 最後の 1 行は消さない（消すなら中身をクリア）
+      if (prev.length <= 1) {
+        return [{ ...prev[0], section: "", bars: "", lyric: "" }];
+      }
+      return prev.filter((_, i) => i !== idx);
+    });
   }, []);
   // SECTION の一番左で Cmd+Return → 自分の行の上に空行 1 行挿入
   const insertScoreRowAbove = useCallback((idx: number) => {
@@ -6031,10 +6041,12 @@ export default function ProjectPage() {
                   <div style={{ borderRight: `1px solid ${TS_DESIGN.border}`, padding: "6px 4px", textAlign: "center", color: TS_DESIGN.text3, fontSize: 9, letterSpacing: "0.18em", textTransform: "uppercase", fontWeight: 600 }}>BAR</div>
                   <div style={{ padding: "6px 10px", color: TS_DESIGN.text3, fontSize: 9, letterSpacing: "0.18em", textTransform: "uppercase", fontWeight: 600 }}>LYRIC</div>
                 </div>
-                <div className="flex-1 overflow-y-auto">
+                <div className="flex-1 overflow-y-auto" data-testid="score-scroll">
                   <div style={{ display: "grid", gridTemplateColumns: "64px 56px 1fr" }}>
                     {scoreRows.map((row, idx) => {
                       const onCellKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>, col: "section" | "bars" | "lyric") => {
+                        // 日本語入力（IME）変換中は何もしない（ Enter で行追加されたり Tab で文字消えたりするのを防ぐ）
+                        if (e.nativeEvent.isComposing || (e.nativeEvent as any).keyCode === 229) return;
                         if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
                           e.preventDefault();
                           insertScoreRowAbove(idx);
@@ -6057,14 +6069,18 @@ export default function ProjectPage() {
                           if (nextRow < 0) return;
                           // 末尾の LYRIC で Tab → 新しい行を末尾に追加して、その SECTION にフォーカス
                           if (nextRow >= scoreRows.length) {
-                            appendScoreRow();
-                            // 追加直後は DOM に存在しない → 次フレームでフォーカス
                             const targetIdx = scoreRows.length;
-                            requestAnimationFrame(() => {
+                            appendScoreRow();
+                            // React の再レンダリングを待ってからフォーカス（rAF 1 回だと早すぎる）
+                            setTimeout(() => {
                               const sel = `[data-testid="score-section-${targetIdx}"]`;
                               const next = document.querySelector(sel) as HTMLTextAreaElement | null;
-                              if (next) { next.focus(); next.setSelectionRange(0, 0); }
-                            });
+                              if (next) {
+                                next.focus();
+                                next.setSelectionRange(0, 0);
+                                next.scrollIntoView({ block: "nearest", behavior: "smooth" });
+                              }
+                            }, 50);
                             return;
                           }
                           const nextCol = order[nextColIdx];
@@ -6077,37 +6093,38 @@ export default function ProjectPage() {
                           }
                         }
                       };
+                      const cellBase = { borderBottom: `1px solid ${TS_DESIGN.border}`, display: "flex", alignItems: "flex-start", minHeight: 28, cursor: "text" } as const;
                       return (
                         <Fragment key={row.id}>
-                          <label style={{ borderRight: `1px solid ${TS_DESIGN.border}`, display: "flex", alignItems: "flex-start", minHeight: 28, cursor: "text" }}>
+                          <label style={{ ...cellBase, borderRight: `1px solid ${TS_DESIGN.border}` }}>
                             <textarea
                               value={row.section}
                               onChange={(e) => updateScoreRow(idx, { section: e.target.value })}
                               onKeyDown={(e) => onCellKeyDown(e, "section")}
                               rows={Math.max(1, row.section.split("\n").length)}
-                              className="w-full bg-transparent outline-none resize-none text-center"
+                              className="w-full bg-transparent outline-none resize-none text-center focus:bg-white/[0.04]"
                               style={{ color: TS_DESIGN.text, fontSize: 13, lineHeight: 1.5, minHeight: 28, padding: "4px 6px", border: 0, fontFamily: "inherit" }}
                               data-testid={`score-section-${idx}`}
                             />
                           </label>
-                          <label style={{ borderRight: `1px solid ${TS_DESIGN.border}`, display: "flex", alignItems: "flex-start", minHeight: 28, cursor: "text" }}>
+                          <label style={{ ...cellBase, borderRight: `1px solid ${TS_DESIGN.border}` }}>
                             <textarea
                               value={row.bars}
                               onChange={(e) => updateScoreRow(idx, { bars: e.target.value })}
                               onKeyDown={(e) => onCellKeyDown(e, "bars")}
                               rows={Math.max(1, row.bars.split("\n").length)}
-                              className="w-full bg-transparent outline-none resize-none text-center"
+                              className="w-full bg-transparent outline-none resize-none text-center focus:bg-white/[0.04]"
                               style={{ color: TS_DESIGN.text, fontSize: 13, lineHeight: 1.5, minHeight: 28, padding: "4px 4px", border: 0, fontFamily: "inherit" }}
                               data-testid={`score-bars-${idx}`}
                             />
                           </label>
-                          <label style={{ position: "relative", display: "flex", alignItems: "flex-start", minHeight: 28, cursor: "text" }} className="group/score-row">
+                          <label style={{ ...cellBase, position: "relative" }} className="group/score-row">
                             <textarea
                               value={row.lyric}
                               onChange={(e) => updateScoreRow(idx, { lyric: e.target.value })}
                               onKeyDown={(e) => onCellKeyDown(e, "lyric")}
                               rows={Math.max(1, row.lyric.split("\n").length)}
-                              className="w-full bg-transparent outline-none resize-none text-left"
+                              className="w-full bg-transparent outline-none resize-none text-left focus:bg-white/[0.04]"
                               style={{ color: TS_DESIGN.text, fontSize: 13, lineHeight: 1.5, minHeight: 28, padding: "4px 28px 4px 10px", border: 0, fontFamily: "inherit" }}
                               data-testid={`score-lyric-${idx}`}
                             />
@@ -6133,15 +6150,24 @@ export default function ProjectPage() {
                       );
                     })}
                   </div>
-                  <div style={{ padding: "8px 10px", borderTop: `1px solid ${TS_DESIGN.border}` }}>
-                    <button
-                      onClick={appendScoreRow}
-                      className="w-full py-2 rounded text-[11px] hover:bg-white/5 transition-colors"
-                      style={{ color: TS_DESIGN.text3, border: `1px dashed ${TS_DESIGN.border}` }}
-                      data-testid="score-append-row"
-                      title="末尾に空行を 1 行追加"
-                    >+ 行を追加</button>
-                  </div>
+                </div>
+                <div className="shrink-0" style={{ padding: "8px 10px", borderTop: `1px solid ${TS_DESIGN.border}`, background: TS_DESIGN.bg2 }}>
+                  <button
+                    onClick={() => {
+                      appendScoreRow();
+                      setTimeout(() => {
+                        const scroll = document.querySelector('[data-testid="score-scroll"]') as HTMLElement | null;
+                        if (scroll) scroll.scrollTop = scroll.scrollHeight;
+                        const lastIdx = scoreRows.length; // 追加後の最後の index
+                        const next = document.querySelector(`[data-testid="score-section-${lastIdx}"]`) as HTMLTextAreaElement | null;
+                        if (next) { next.focus(); next.setSelectionRange(0, 0); }
+                      }, 50);
+                    }}
+                    className="w-full py-2 rounded text-[11px] hover:bg-white/5 transition-colors"
+                    style={{ color: TS_DESIGN.text3, border: `1px dashed ${TS_DESIGN.border}` }}
+                    data-testid="score-append-row"
+                    title="末尾に空行を 1 行追加"
+                  >+ 行を追加</button>
                 </div>
               </div>
             )}
