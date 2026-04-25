@@ -2927,7 +2927,7 @@ export const TimelineEditor = memo(function TimelineEditor({
                               whiteSpace: "nowrap", lineHeight: "18px",
                               background: "hsla(0, 0%, 0%, 0.4)",
                             }}>
-                              {sectionLabel.toUpperCase()}
+                              {sectionLabel.toUpperCase()} <span style={{ opacity: 0.5, marginLeft: 4, fontWeight: 400 }}>[{cumBars}b]</span>
                             </div>
                           );
                         }
