@@ -6046,7 +6046,7 @@ export default function ProjectPage() {
                             onChange={(e) => updateScoreRow(idx, { lyric: e.target.value })}
                             rows={Math.max(1, row.lyric.split("\n").length)}
                             className="w-full bg-transparent outline-none resize-none"
-                            style={{ color: TS_DESIGN.text, fontSize: 13, lineHeight: 1.5, minHeight: 28, padding: "5px 28px 5px 10px", border: 0, fontFamily: "inherit" }}
+                            style={{ color: TS_DESIGN.text, fontSize: 13, lineHeight: 1.5, minHeight: 28, maxHeight: 240, overflowY: "auto", padding: "5px 28px 5px 10px", border: 0, fontFamily: "inherit" }}
                             data-testid={`score-lyric-${idx}`}
                           />
                           <button
