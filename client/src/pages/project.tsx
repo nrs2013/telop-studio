@@ -6037,9 +6037,9 @@ export default function ProjectPage() {
                           <textarea
                             value={row.lyric}
                             onChange={(e) => updateScoreRow(idx, { lyric: e.target.value })}
-                            rows={Math.max(1, row.lyric.split("\n").length)}
+                            rows={1}
                             className="w-full bg-transparent outline-none resize-none"
-                            style={{ color: TS_DESIGN.text, fontSize: 13, lineHeight: 1.5, minHeight: 28, maxHeight: 240, overflowY: "auto", padding: "5px 28px 5px 10px", border: 0, fontFamily: "inherit" }}
+                            style={{ color: TS_DESIGN.text, fontSize: 13, lineHeight: 1.5, height: 28, minHeight: 28, maxHeight: 28, overflowY: "auto", padding: "5px 28px 5px 10px", border: 0, fontFamily: "inherit" }}
                             data-testid={`score-lyric-${idx}`}
                           />
                           <button
