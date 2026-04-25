@@ -1208,7 +1208,7 @@ export default function ProjectPage() {
     }
     setScoreInitialized(false);
     try {
-      const raw = localStorage.getItem(`telop-score-${id}`);
+      const raw = localStorage.getItem(`telop-score-v2-${id}`);
       if (raw) {
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed) && parsed.length > 0) {
@@ -1239,7 +1239,7 @@ export default function ProjectPage() {
   useEffect(() => {
     if (!id || !scoreInitialized) return;
     try {
-      localStorage.setItem(`telop-score-${id}`, JSON.stringify(scoreRows));
+      localStorage.setItem(`telop-score-v2-${id}`, JSON.stringify(scoreRows));
     } catch {}
   }, [scoreRows, id, scoreInitialized]);
 
