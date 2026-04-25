@@ -2902,15 +2902,6 @@ export const TimelineEditor = memo(function TimelineEditor({
               </div>
 
               <div className="flex-1 relative">
-              {/* DEBUG: scoreRows の中身を直接確認 */}
-              {scoreRows && (
-                <div style={{ position: "absolute", top: 22, right: 0, zIndex: 100, background: "hsla(0,80%,40%,0.92)", color: "white", fontSize: 9, padding: 4, maxWidth: 320, fontFamily: "monospace", lineHeight: 1.3 }}>
-                  rows={scoreRows.length}, bpm={String(bpm)}<br />
-                  {scoreRows.slice(0, 10).map((r, i) => (
-                    <div key={i}>[{i}] s={JSON.stringify((r.section||"").slice(0,20))} b={JSON.stringify((r.bars||"").slice(0,8))}</div>
-                  ))}
-                </div>
-              )}
               {/* SECTION 帯（譜割タブから連動）。再生コントロールの下、タイムラインの上に固定表示。横スクロールに追従。 */}
               {scoreRows && scoreRows.length > 0 && bpm && bpm > 0 && (
                 <div className="absolute left-0 right-0 top-0 z-30 overflow-hidden pointer-events-none" style={{ height: 18, background: "hsl(0 0% 9%)", borderBottom: "1px solid hsl(0 0% 22%)" }}>
@@ -2936,7 +2927,7 @@ export const TimelineEditor = memo(function TimelineEditor({
                               whiteSpace: "nowrap", lineHeight: "18px",
                               background: "hsla(0, 0%, 0%, 0.4)",
                             }}>
-                              {sectionLabel.toUpperCase()} <span style={{ opacity: 0.5, marginLeft: 4, fontWeight: 400 }}>[{cumBars}b]</span>
+                              {sectionLabel.toUpperCase()}
                             </div>
                           );
                         }

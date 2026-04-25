@@ -1212,13 +1212,28 @@ export default function ProjectPage() {
       if (raw) {
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          let rows = parsed.filter((r: any) => r && typeof r.id === "string").map((r: any) => ({
-            id: String(r.id),
-            section: typeof r.section === "string" ? r.section : "",
-            bars: typeof r.bars === "string" ? r.bars : (typeof r.bars === "number" && Number.isFinite(r.bars) ? String(r.bars) : ""),
-            lyric: typeof r.lyric === "string" ? r.lyric : "",
-          }));
-          // 最低 100 行を保証（過去データが少なければ空行で埋める）
+          // 旧データを適合：誤って改行が入って 1 セルに複数 SECTION/BAR が詰まったケースを、
+          // 行ごとに分割して展開する。歌詞は元の行の先頭にだけ残す。
+          const expanded: { id: string; section: string; bars: string; lyric: string }[] = [];
+          for (const r of parsed) {
+            if (!r || typeof r.id !== "string") continue;
+            const sectionRaw = typeof r.section === "string" ? r.section : "";
+            const barsRaw = typeof r.bars === "string" ? r.bars : (typeof r.bars === "number" && Number.isFinite(r.bars) ? String(r.bars) : "");
+            const lyric = typeof r.lyric === "string" ? r.lyric : "";
+            const sectionLines = sectionRaw.split(/\r?\n/);
+            const barsLines = barsRaw.split(/\r?\n/);
+            const maxLen = Math.max(sectionLines.length, barsLines.length, 1);
+            for (let i = 0; i < maxLen; i++) {
+              expanded.push({
+                id: i === 0 ? String(r.id) : `mig-${String(r.id)}-${i}`,
+                section: (sectionLines[i] || "").trim(),
+                bars: (barsLines[i] || "").trim(),
+                lyric: i === 0 ? lyric : "",
+              });
+            }
+          }
+          let rows = expanded;
+          // 最低 100 行を保証（少なければ空行で埋める）
           if (rows.length < 100) {
             rows = [...rows, ...buildEmptyScoreRows(100 - rows.length)];
           }
@@ -6022,21 +6037,19 @@ export default function ProjectPage() {
                     {scoreRows.map((row, idx) => (
                       <Fragment key={row.id}>
                         <label style={{ borderRight: `1px solid ${TS_DESIGN.border}`, display: "flex", alignItems: "flex-start", minHeight: 28, cursor: "text" }}>
-                          <textarea
+                          <input
                             value={row.section}
-                            onChange={(e) => updateScoreRow(idx, { section: e.target.value })}
-                            rows={Math.max(1, row.section.split("\n").length)}
-                            className="w-full bg-transparent outline-none resize-none text-center"
+                            onChange={(e) => updateScoreRow(idx, { section: e.target.value.replace(/[\r\n]+/g, " ") })}
+                            className="w-full bg-transparent outline-none text-center"
                             style={{ color: TS_DESIGN.text, fontSize: 13, letterSpacing: "0.04em", fontWeight: 500, padding: "5px 6px", border: 0, lineHeight: 1.5, minHeight: 28, fontFamily: "inherit" }}
                             data-testid={`score-section-${idx}`}
                           />
                         </label>
                         <label style={{ borderRight: `1px solid ${TS_DESIGN.border}`, display: "flex", alignItems: "flex-start", minHeight: 28, cursor: "text" }}>
-                          <textarea
+                          <input
                             value={row.bars}
-                            onChange={(e) => updateScoreRow(idx, { bars: e.target.value })}
-                            rows={Math.max(1, row.bars.split("\n").length)}
-                            className="w-full bg-transparent outline-none resize-none text-center tabular-nums"
+                            onChange={(e) => updateScoreRow(idx, { bars: e.target.value.replace(/[\r\n]+/g, " ") })}
+                            className="w-full bg-transparent outline-none text-center tabular-nums"
                             style={{ color: TS_DESIGN.text, fontSize: 13, padding: "5px 4px", border: 0, lineHeight: 1.5, minHeight: 28, fontFamily: "inherit" }}
                             data-testid={`score-bars-${idx}`}
                           />
