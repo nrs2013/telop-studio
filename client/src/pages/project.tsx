@@ -1185,7 +1185,6 @@ export default function ProjectPage() {
   // ====== タイムライン側 譜割モード（時間ベース SECTION ブロック）======
   // 既存の手入力 譜割（telop-score-v3-*）には触らない。新しいキーで完全に独立。
   type SectionBlock = { id: string; label: string; startBar: number; endBar: number };
-  const [timelineMode, setTimelineMode] = useState<"lyric" | "score">("lyric");
   const [sectionBlocks, setSectionBlocks] = useState<SectionBlock[]>([]);
   const [sectionBlocksInit, setSectionBlocksInit] = useState(false);
 
@@ -6309,8 +6308,7 @@ export default function ProjectPage() {
               onSelectionChange={setTimelineSelectedIds}
               bpmGridOffset={project?.bpmGridOffset ?? 0}
               scoreRows={scoreRows}
-              timelineMode={timelineMode}
-              onTimelineModeChange={setTimelineMode}
+              timelineMode={activeRightTab === "score" ? "score" : "lyric"}
               sectionBlocks={sectionBlocks}
               onSectionBlocksChange={setSectionBlocks}
               onBpmGridOffsetChange={(offset) => {

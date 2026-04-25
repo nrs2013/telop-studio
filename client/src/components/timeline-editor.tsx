@@ -2825,30 +2825,6 @@ export const TimelineEditor = memo(function TimelineEditor({
           ▼RESET
         </button>
 
-        {/* タイムライン表示モード切替（LYRIC / 譜割） */}
-        <div className="flex items-center gap-0.5 ml-2" style={{ borderLeft: "1px solid hsl(0 0% 22%)", paddingLeft: 8 }}>
-          <button
-            tabIndex={-1}
-            onClick={() => onTimelineModeChange?.("lyric")}
-            className="text-[10px] font-bold tracking-widest uppercase px-2 py-1 rounded transition-colors"
-            style={{
-              color: timelineMode === "lyric" ? "hsl(48 100% 50%)" : "hsl(0 0% 50%)",
-              background: timelineMode === "lyric" ? "rgba(229,191,61,0.08)" : "transparent",
-            }}
-            data-testid="tab-timeline-lyric"
-          >LYRIC</button>
-          <button
-            tabIndex={-1}
-            onClick={() => onTimelineModeChange?.("score")}
-            className="text-[10px] font-bold tracking-widest uppercase px-2 py-1 rounded transition-colors"
-            style={{
-              color: timelineMode === "score" ? "hsl(48 100% 50%)" : "hsl(0 0% 50%)",
-              background: timelineMode === "score" ? "rgba(229,191,61,0.08)" : "transparent",
-            }}
-            data-testid="tab-timeline-score"
-          >譜割</button>
-        </div>
-
         <div className="flex-1" />
 
         {audioTracks && audioTracks.length > 0 && activeAudioTrackId && (() => {
@@ -3038,7 +3014,7 @@ export const TimelineEditor = memo(function TimelineEditor({
                   window.addEventListener("mouseup", onUp);
                 };
                 return (
-                  <div className="absolute left-0 right-0 top-0 z-30 overflow-hidden" style={{ height: 40, background: "hsl(0 0% 9%)", borderBottom: "1px solid hsl(0 0% 22%)" }}>
+                  <div className="absolute left-0 right-0 top-0 z-30 overflow-hidden" style={{ height: blocksZoneH, background: "hsl(0 0% 9%)", borderBottom: "1px solid hsl(0 0% 22%)" }}>
                     <div className="absolute top-0 bottom-0" style={{ left: -tlScrollLeft }}>
                       {blocks.map(b => {
                         const startTime = offset + b.startBar * secPerBar;
@@ -3050,7 +3026,7 @@ export const TimelineEditor = memo(function TimelineEditor({
                           <div
                             key={b.id}
                             className="absolute"
-                            style={{ left: Math.max(0, x), top: 2, width: w, height: 36, background: c.bg, border: `1px solid ${c.border}`, borderRadius: 3, color: c.text, cursor: "move", display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", overflow: "hidden", userSelect: "none" }}
+                            style={{ left: Math.max(0, x), top: 2, width: w, height: blocksZoneH - 4, background: c.bg, border: `1px solid ${c.border}`, borderRadius: 3, color: c.text, cursor: "move", display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", overflow: "hidden", userSelect: "none" }}
                             onMouseDown={(e) => onBlockMouseDown(e, b, "move")}
                             onClick={(e) => {
                               const t = e.target as HTMLElement;
@@ -3095,7 +3071,7 @@ export const TimelineEditor = memo(function TimelineEditor({
               <div
                 ref={timelineRef}
                 className="absolute inset-0 overflow-x-auto overflow-y-hidden cursor-crosshair select-none scrollbar-hide"
-                style={{ scrollbarWidth: "none", msOverflowStyle: "none", top: bpm && bpm > 0 ? (timelineMode === "score" ? 40 : (scoreRows && scoreRows.length > 0 ? 18 : 0)) : 0 }}
+                style={{ scrollbarWidth: "none", msOverflowStyle: "none", top: bpm && bpm > 0 ? (timelineMode === "score" ? blocksZoneH : (scoreRows && scoreRows.length > 0 ? 18 : 0)) : 0 }}
                 data-testid="area-timeline-blocks"
                 data-pps={pixelsPerSecond}
                 data-duration={duration}
@@ -3396,7 +3372,7 @@ export const TimelineEditor = memo(function TimelineEditor({
                         }
                       } : undefined}
                     >
-                      {timelineBlocks}
+                      {timelineMode !== "score" && timelineBlocks}
                       <div
                         ref={recLiveBlockRef}
                         className="absolute rounded-sm pointer-events-none"
