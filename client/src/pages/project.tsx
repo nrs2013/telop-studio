@@ -6045,33 +6045,7 @@ export default function ProjectPage() {
                 </div>
                 <div className="flex-1 overflow-y-auto" data-testid="score-scroll">
                   <div style={{ display: "grid", gridTemplateColumns: "64px 56px 1fr" }}>
-                    {(() => {
-                      // 再生位置がどの scoreRow のどの line に入ってるか（行内 line 単位でハイライト）
-                      const __bpm = project?.detectedBpm;
-                      const __offset = project?.bpmGridOffset ?? 0;
-                      const active = (() => {
-                        if (!__bpm || __bpm <= 0) return { row: -1, line: -1 };
-                        const secPerBar = (60 / __bpm) * 4;
-                        let cum = 0;
-                        for (let r = 0; r < scoreRows.length; r++) {
-                          const barLines = scoreRows[r].bars.split("\n");
-                          for (let li = 0; li < barLines.length; li++) {
-                            const bt = barLines[li] || "";
-                            const nums = bt.match(/\d+/g) || [];
-                            const lineBars = nums.reduce((s, n) => s + parseInt(n, 10), 0);
-                            const ls = __offset + cum * secPerBar;
-                            const le = ls + lineBars * secPerBar;
-                            if (currentTime >= ls && currentTime < le && lineBars > 0) {
-                              return { row: r, line: li };
-                            }
-                            cum += lineBars;
-                          }
-                        }
-                        return { row: -1, line: -1 };
-                      })();
-                      return scoreRows.map((row, idx) => {
-                        const isActive = active.row === idx;
-                        const activeLineIdx = isActive ? active.line : -1;
+                    {scoreRows.map((row, idx) => {
                       const onCellKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>, col: "section" | "bars" | "lyric") => {
                         // 日本語入力（IME）変換中は何もしない（ Enter で行追加されたり Tab で文字消えたりするのを防ぐ）
                         if (e.nativeEvent.isComposing || (e.nativeEvent as any).keyCode === 229) return;
@@ -6150,42 +6124,7 @@ export default function ProjectPage() {
                           }
                         }
                       };
-                      const cellBase = {
-                        display: "flex" as const,
-                        alignItems: "flex-start" as const,
-                        minHeight: 28,
-                        cursor: "text" as const,
-                        position: "relative" as const,
-                      };
-                      // 1 行分の高さ：fontSize 13 × lineHeight 1.5 = 19.5px
-                      const LINE_H = 19.5;
-                      // 該当 line の文字色を黄色にするオーバーレイ（テキストを上から重ね描き）
-                      const makeTextOverlay = (value: string, padding: string, textAlign: "center" | "left") => {
-                        if (activeLineIdx < 0) return null;
-                        const lines = value.split("\n");
-                        const lineText = lines[activeLineIdx] || "";
-                        if (!lineText.trim()) return null;
-                        return (
-                          <div style={{
-                            position: "absolute",
-                            left: 0, right: 0,
-                            top: 4 + activeLineIdx * LINE_H,
-                            height: LINE_H,
-                            padding,
-                            textAlign,
-                            color: "hsl(48 100% 60%)",
-                            fontWeight: 700,
-                            fontSize: 13,
-                            lineHeight: "19.5px",
-                            fontFamily: "inherit",
-                            whiteSpace: "pre",
-                            pointerEvents: "none",
-                            background: TS_DESIGN.bg2,
-                            zIndex: 2,
-                            overflow: "hidden",
-                          }}>{lineText}</div>
-                        );
-                      };
+                      const cellBase = { display: "flex", alignItems: "flex-start", minHeight: 28, cursor: "text" } as const;
                       return (
                         <Fragment key={row.id}>
                           <label style={{ ...cellBase, borderRight: `1px solid ${TS_DESIGN.border}` }}>
@@ -6195,10 +6134,9 @@ export default function ProjectPage() {
                               onKeyDown={(e) => onCellKeyDown(e, "section")}
                               rows={Math.max(1, row.section.split("\n").length)}
                               className="w-full bg-transparent outline-none resize-none text-center"
-                              style={{ position: "relative", zIndex: 1, color: TS_DESIGN.text, fontSize: 13, lineHeight: 1.5, minHeight: 28, padding: "4px 6px", border: 0, fontFamily: "inherit" }}
+                              style={{ color: TS_DESIGN.text, fontSize: 13, lineHeight: 1.5, minHeight: 28, padding: "4px 6px", border: 0, fontFamily: "inherit" }}
                               data-testid={`score-section-${idx}`}
                             />
-                            {makeTextOverlay(row.section, "0 6px", "center")}
                           </label>
                           <label style={{ ...cellBase, borderRight: `1px solid ${TS_DESIGN.border}` }}>
                             <textarea
@@ -6207,10 +6145,9 @@ export default function ProjectPage() {
                               onKeyDown={(e) => onCellKeyDown(e, "bars")}
                               rows={Math.max(1, row.bars.split("\n").length)}
                               className="w-full bg-transparent outline-none resize-none text-center"
-                              style={{ position: "relative", zIndex: 1, color: TS_DESIGN.text, fontSize: 13, lineHeight: 1.5, minHeight: 28, padding: "4px 4px", border: 0, fontFamily: "inherit" }}
+                              style={{ color: TS_DESIGN.text, fontSize: 13, lineHeight: 1.5, minHeight: 28, padding: "4px 4px", border: 0, fontFamily: "inherit" }}
                               data-testid={`score-bars-${idx}`}
                             />
-                            {makeTextOverlay(row.bars, "0 4px", "center")}
                           </label>
                           <label style={cellBase}>
                             <textarea
@@ -6219,15 +6156,13 @@ export default function ProjectPage() {
                               onKeyDown={(e) => onCellKeyDown(e, "lyric")}
                               rows={Math.max(1, row.lyric.split("\n").length)}
                               className="w-full bg-transparent outline-none resize-none text-left"
-                              style={{ position: "relative", zIndex: 1, color: TS_DESIGN.text, fontSize: 13, lineHeight: 1.5, minHeight: 28, padding: "4px 10px", border: 0, fontFamily: "inherit" }}
+                              style={{ color: TS_DESIGN.text, fontSize: 13, lineHeight: 1.5, minHeight: 28, padding: "4px 10px", border: 0, fontFamily: "inherit" }}
                               data-testid={`score-lyric-${idx}`}
                             />
-                            {makeTextOverlay(row.lyric, "0 10px", "left")}
                           </label>
                         </Fragment>
                       );
-                    });
-                    })()}
+                    })}
                   </div>
                 </div>
               </div>
