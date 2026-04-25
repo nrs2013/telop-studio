@@ -1182,105 +1182,69 @@ export default function ProjectPage() {
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lyricsTextRef = useRef("");
 
-  // ====== 譜割（SCORE）タブ ======
-  // 安全装置：データ加工なし／自動振り分けなし／マイグレーションなし
-  const [activeRightTab, setActiveRightTab] = useState<"lyrics" | "score">("lyrics");
-  const [scoreRows, setScoreRows] = useState<{ id: string; section: string; bars: string; lyric: string }[]>([]);
-  const [scoreInitialized, setScoreInitialized] = useState(false);
-
-  const buildEmptyScoreRows = useCallback((count: number) => {
-    return Array.from({ length: count }, (_, i) => ({
-      id: `init-${Date.now().toString(36)}-${i}`,
-      section: "",
-      bars: "",
-      lyric: "",
-    }));
-  }, []);
+  // ====== 譜割（ブロック方式 v1）======
+  // 過去の譜割データ（telop-score-v3-*）には一切触れない。新規キーで完全に独立。
+  type ScoreBlock = { id: string; section: string; bars: string; lyric: string };
+  const [activeRightTab, setActiveRightTab] = useState<"lyrics" | "blocks">("lyrics");
+  const [blocks, setBlocks] = useState<ScoreBlock[]>([]);
+  const [blocksInit, setBlocksInit] = useState(false);
 
   useEffect(() => {
-    if (!id) {
-      setScoreRows([]);
-      setScoreInitialized(false);
-      return;
-    }
-    setScoreInitialized(false);
+    if (!id) return;
+    setBlocksInit(false);
+    const def = (): ScoreBlock => ({ id: `b-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,5)}`, section: "", bars: "", lyric: "" });
     try {
-      const raw = localStorage.getItem(`telop-score-v3-${id}`);
+      const raw = localStorage.getItem(`telop-blocks-v1-${id}`);
       if (raw) {
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          // 既存データはそのまま使う（勝手に 100 行に padding しない）。
-          // ユーザーが消した行は消えたまま。最低 1 行だけは残す（空のときも編集できるように）。
-          const rows = parsed
-            .filter((r: any) => r && typeof r.id === "string")
-            .map((r: any) => ({
-              id: String(r.id),
-              section: typeof r.section === "string" ? r.section : "",
-              bars: typeof r.bars === "string" ? r.bars : (typeof r.bars === "number" && Number.isFinite(r.bars) ? String(r.bars) : ""),
-              lyric: typeof r.lyric === "string" ? r.lyric : "",
-            }));
-          setScoreRows(rows.length > 0 ? rows : buildEmptyScoreRows(1));
+          setBlocks(parsed.filter((b: any) => b && typeof b.id === "string").map((b: any) => ({
+            id: String(b.id),
+            section: typeof b.section === "string" ? b.section : "",
+            bars: typeof b.bars === "string" ? b.bars : "",
+            lyric: typeof b.lyric === "string" ? b.lyric : "",
+          })));
         } else {
-          setScoreRows(buildEmptyScoreRows(100));
+          setBlocks([def()]);
         }
       } else {
-        // 新規プロジェクトのみ 100 行で開く
-        setScoreRows(buildEmptyScoreRows(100));
+        setBlocks([def()]);
       }
     } catch {
-      setScoreRows(buildEmptyScoreRows(100));
+      setBlocks([def()]);
     }
-    setScoreInitialized(true);
-  }, [id, buildEmptyScoreRows]);
+    setBlocksInit(true);
+  }, [id]);
 
-  // 保存はデバウンス（タイプ毎に走ると重い）
   useEffect(() => {
-    if (!id || !scoreInitialized) return;
-    const handle = setTimeout(() => {
-      try {
-        localStorage.setItem(`telop-score-v3-${id}`, JSON.stringify(scoreRows));
-      } catch {}
+    if (!id || !blocksInit) return;
+    const h = setTimeout(() => {
+      try { localStorage.setItem(`telop-blocks-v1-${id}`, JSON.stringify(blocks)); } catch {}
     }, 250);
-    return () => clearTimeout(handle);
-  }, [scoreRows, id, scoreInitialized]);
+    return () => clearTimeout(h);
+  }, [blocks, id, blocksInit]);
 
-  const updateScoreRow = useCallback((idx: number, patch: Partial<{ section: string; bars: string; lyric: string }>) => {
-    setScoreRows(prev => prev.map((r, i) => i === idx ? { ...r, ...patch } : r));
+  const updateBlock = useCallback((idx: number, patch: Partial<ScoreBlock>) => {
+    setBlocks(prev => prev.map((b, i) => i === idx ? { ...b, ...patch } : b));
   }, []);
-  const deleteScoreRow = useCallback((idx: number) => {
-    setScoreRows(prev => {
-      // 最後の 1 行は消さない（消すなら中身をクリア）
-      if (prev.length <= 1) {
-        return [{ ...prev[0], section: "", bars: "", lyric: "" }];
-      }
+  const addBlock = useCallback(() => {
+    setBlocks(prev => [...prev, { id: `b-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,5)}`, section: "", bars: "", lyric: "" }]);
+  }, []);
+  const deleteBlock = useCallback((idx: number) => {
+    setBlocks(prev => {
+      if (prev.length <= 1) return [{ ...prev[0], section: "", bars: "", lyric: "" }];
       return prev.filter((_, i) => i !== idx);
     });
   }, []);
-  // SECTION の一番左で Cmd+Return → 自分の行の上に空行 1 行挿入
-  const insertScoreRowAbove = useCallback((idx: number) => {
-    setScoreRows(prev => {
-      const newRow = {
-        id: `ins-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
-        section: "",
-        bars: "",
-        lyric: "",
-      };
+  const moveBlock = useCallback((idx: number, dir: 1 | -1) => {
+    setBlocks(prev => {
+      const j = idx + dir;
+      if (j < 0 || j >= prev.length) return prev;
       const next = [...prev];
-      next.splice(idx, 0, newRow);
+      [next[idx], next[j]] = [next[j], next[idx]];
       return next;
     });
   }, []);
-  // 末尾に空行を1行追加
-  const appendScoreRow = useCallback(() => {
-    setScoreRows(prev => [...prev, {
-      id: `add-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
-      section: "",
-      bars: "",
-      lyric: "",
-    }]);
-  }, []);
-
-
 
   const [projectSyncing, setProjectSyncing] = useState(false);
 
@@ -5727,13 +5691,13 @@ export default function ProjectPage() {
               </button>
               <button
                 tabIndex={-1}
-                onClick={() => setActiveRightTab("score")}
+                onClick={() => setActiveRightTab("blocks")}
                 className="text-[11px] font-bold tracking-widest uppercase px-2 py-1 rounded transition-colors"
                 style={{
-                  color: activeRightTab === "score" ? "hsl(48 100% 50%)" : TS_DESIGN.text3,
-                  background: activeRightTab === "score" ? "rgba(229,191,61,0.08)" : "transparent",
+                  color: activeRightTab === "blocks" ? "hsl(48 100% 50%)" : TS_DESIGN.text3,
+                  background: activeRightTab === "blocks" ? "rgba(229,191,61,0.08)" : "transparent",
                 }}
-                data-testid="tab-right-score"
+                data-testid="tab-right-blocks"
               >
                 譜割
               </button>
@@ -5758,11 +5722,6 @@ export default function ProjectPage() {
                     </span>
                   )}
                 </>
-              )}
-              {activeRightTab === "score" && (
-                <span className="text-[9px] ml-auto" style={{ color: TS_DESIGN.text3 }}>
-                  Tab：次のセル / ⌘+Return：上に行追加 / ⌘+Delete：この行削除
-                </span>
               )}
             </div>
             {activeRightTab === "lyrics" && (isRecording ? (
@@ -6030,165 +5989,114 @@ export default function ProjectPage() {
               </div>
             </div>
             ))}
-            {activeRightTab === "score" && (
+            {activeRightTab === "blocks" && (
               <div
-                className="flex-1 flex flex-col overflow-hidden"
-                data-testid="score-table"
+                className="flex-1 overflow-y-auto"
+                data-testid="blocks-scroll"
                 style={{ background: TS_DESIGN.bg2 }}
               >
                 <style>{`
-                  [data-testid^="score-section-"]:focus,
-                  [data-testid^="score-bars-"]:focus,
-                  [data-testid^="score-lyric-"]:focus {
-                    background: rgba(255, 255, 255, 0.06) !important;
-                  }
+                  [data-testid^="block-"]:focus { background: rgba(255, 255, 255, 0.06) !important; }
                 `}</style>
-                <div className="shrink-0" style={{ display: "grid", gridTemplateColumns: "64px 56px 1fr", borderBottom: `1px solid ${TS_DESIGN.border}` }}>
-                  <div style={{ borderRight: `1px solid ${TS_DESIGN.border}`, padding: "6px 4px", textAlign: "center", color: TS_DESIGN.text3, fontSize: 9, letterSpacing: "0.18em", textTransform: "uppercase", fontWeight: 600 }}>SECTION</div>
-                  <div style={{ borderRight: `1px solid ${TS_DESIGN.border}`, padding: "6px 4px", textAlign: "center", color: TS_DESIGN.text3, fontSize: 9, letterSpacing: "0.18em", textTransform: "uppercase", fontWeight: 600 }}>BAR</div>
-                  <div style={{ padding: "6px 10px", color: TS_DESIGN.text3, fontSize: 9, letterSpacing: "0.18em", textTransform: "uppercase", fontWeight: 600 }}>LYRIC</div>
-                </div>
-                <div className="flex-1 overflow-y-auto" data-testid="score-scroll">
-                  <div style={{ display: "grid", gridTemplateColumns: "64px 56px 1fr" }}>
-                    {scoreRows.map((row, idx) => {
-                      const onCellKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>, col: "section" | "bars" | "lyric") => {
-                        // 日本語入力（IME）変換中は何もしない（ Enter で行追加されたり Tab で文字消えたりするのを防ぐ）
-                        if (e.nativeEvent.isComposing || (e.nativeEvent as any).keyCode === 229) return;
-                        if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-                          e.preventDefault();
-                          insertScoreRowAbove(idx);
-                          // 挿入された新しい空行（idx）の同じ列にカーソルを移す
-                          // → Cmd+Backspace で即座に「戻る」が実現できる
-                          setTimeout(() => {
-                            const next = document.querySelector(`[data-testid="score-${col}-${idx}"]`) as HTMLTextAreaElement | null;
-                            if (next) { next.focus(); next.setSelectionRange(0, 0); }
-                          }, 50);
-                          return;
-                        }
-                        if ((e.metaKey || e.ctrlKey) && (e.key === "Backspace" || e.key === "Delete")) {
-                          e.preventDefault();
-                          deleteScoreRow(idx);
-                          // 削除後、同じ列の同じ idx（＝消した行の次の行）にフォーカス。
-                          // 末尾を消した場合は前の行に。
-                          setTimeout(() => {
-                            const totalNow = document.querySelectorAll('[data-testid^="score-section-"]').length;
-                            const focusIdx = idx >= totalNow ? Math.max(0, totalNow - 1) : idx;
-                            const next = document.querySelector(`[data-testid="score-${col}-${focusIdx}"]`) as HTMLTextAreaElement | null;
-                            if (next) { next.focus(); next.setSelectionRange(0, 0); }
-                          }, 50);
-                          return;
-                        }
-                        if (e.key === "Tab") {
-                          e.preventDefault();
-                          const order: ("section" | "bars" | "lyric")[] = ["section", "bars", "lyric"];
-                          const colIdx = order.indexOf(col);
-                          let nextRow = idx;
-                          let nextColIdx = colIdx + (e.shiftKey ? -1 : 1);
-                          if (nextColIdx >= order.length) { nextRow += 1; nextColIdx = 0; }
-                          else if (nextColIdx < 0) { nextRow -= 1; nextColIdx = order.length - 1; }
-                          // 先頭で Shift+Tab → 何もしない（戻れない）
-                          if (nextRow < 0) return;
-                          // 末尾の LYRIC で Tab → 新しい行を末尾に追加して、その SECTION にフォーカス
-                          if (nextRow >= scoreRows.length) {
-                            const targetIdx = scoreRows.length;
-                            appendScoreRow();
-                            // React の再レンダリングを待ってからフォーカス（rAF 1 回だと早すぎる）
-                            setTimeout(() => {
-                              const sel = `[data-testid="score-section-${targetIdx}"]`;
-                              const next = document.querySelector(sel) as HTMLTextAreaElement | null;
-                              if (next) {
-                                next.focus();
-                                next.setSelectionRange(0, 0);
-                                next.scrollIntoView({ block: "nearest", behavior: "smooth" });
-                              }
-                            }, 50);
-                            return;
-                          }
-                          const nextCol = order[nextColIdx];
-                          const sel = `[data-testid="score-${nextCol}-${nextRow}"]`;
-                          const next = document.querySelector(sel) as HTMLTextAreaElement | null;
-                          if (next) {
-                            next.focus();
-                            const len = next.value.length;
-                            next.setSelectionRange(len, len);
-                          }
-                        }
-                      };
-                      const cellBase = { borderBottom: `1px solid ${TS_DESIGN.border}`, display: "flex", alignItems: "flex-start", minHeight: 28, cursor: "text" } as const;
-                      return (
-                        <Fragment key={row.id}>
-                          <label style={{ ...cellBase, borderRight: `1px solid ${TS_DESIGN.border}` }}>
-                            <textarea
-                              value={row.section}
-                              onChange={(e) => updateScoreRow(idx, { section: e.target.value })}
-                              onKeyDown={(e) => onCellKeyDown(e, "section")}
-                              rows={Math.max(1, row.section.split("\n").length)}
-                              className="w-full bg-transparent outline-none resize-none text-center"
-                              style={{ color: TS_DESIGN.text, fontSize: 13, lineHeight: 1.5, minHeight: 28, padding: "4px 6px", border: 0, fontFamily: "inherit" }}
-                              data-testid={`score-section-${idx}`}
-                            />
-                          </label>
-                          <label style={{ ...cellBase, borderRight: `1px solid ${TS_DESIGN.border}` }}>
-                            <textarea
-                              value={row.bars}
-                              onChange={(e) => updateScoreRow(idx, { bars: e.target.value })}
-                              onKeyDown={(e) => onCellKeyDown(e, "bars")}
-                              rows={Math.max(1, row.bars.split("\n").length)}
-                              className="w-full bg-transparent outline-none resize-none text-center"
-                              style={{ color: TS_DESIGN.text, fontSize: 13, lineHeight: 1.5, minHeight: 28, padding: "4px 4px", border: 0, fontFamily: "inherit" }}
-                              data-testid={`score-bars-${idx}`}
-                            />
-                          </label>
-                          <label style={{ ...cellBase, position: "relative" }} className="group/score-row">
-                            <textarea
-                              value={row.lyric}
-                              onChange={(e) => updateScoreRow(idx, { lyric: e.target.value })}
-                              onKeyDown={(e) => onCellKeyDown(e, "lyric")}
-                              rows={Math.max(1, row.lyric.split("\n").length)}
-                              className="w-full bg-transparent outline-none resize-none text-left"
-                              style={{ color: TS_DESIGN.text, fontSize: 13, lineHeight: 1.5, minHeight: 28, padding: "4px 28px 4px 10px", border: 0, fontFamily: "inherit" }}
-                              data-testid={`score-lyric-${idx}`}
-                            />
-                            <button
-                              onClick={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                const hasContent = !!(row.section.trim() || row.bars.trim() || row.lyric.trim());
-                                if (hasContent) {
-                                  const preview = [row.section, row.bars, row.lyric].filter(Boolean).join(" | ").slice(0, 50);
-                                  if (!window.confirm(`この行を削除しますか？\n${preview}`)) return;
-                                }
-                                deleteScoreRow(idx);
-                              }}
-                              tabIndex={-1}
-                              className="absolute right-1 top-1 w-5 h-5 flex items-center justify-center rounded opacity-30 hover:opacity-100 hover:bg-white/10 transition-opacity"
-                              style={{ color: TS_DESIGN.text3, fontSize: 14 }}
-                              title="この行を削除"
-                              data-testid={`score-delete-${idx}`}
-                            >×</button>
-                          </label>
-                        </Fragment>
-                      );
-                    })}
-                  </div>
-                </div>
-                <div className="shrink-0" style={{ padding: "8px 10px", borderTop: `1px solid ${TS_DESIGN.border}`, background: TS_DESIGN.bg2 }}>
+                <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+                  {blocks.map((b, idx) => (
+                    <div
+                      key={b.id}
+                      data-testid={`block-card-${idx}`}
+                      style={{
+                        background: TS_DESIGN.surface,
+                        border: `1px solid ${TS_DESIGN.border}`,
+                        borderRadius: 6,
+                        padding: 10,
+                      }}
+                    >
+                      {/* ヘッダ: セクション名 + ↑↓ + × */}
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
+                        <span style={{ color: TS_DESIGN.text3, fontSize: 10, minWidth: 18 }}>#{idx + 1}</span>
+                        <input
+                          type="text"
+                          value={b.section}
+                          onChange={(e) => updateBlock(idx, { section: e.target.value })}
+                          placeholder="セクション (1A, INTRO など)"
+                          className="flex-1 bg-transparent outline-none"
+                          style={{ color: TS_DESIGN.text, fontSize: 14, fontWeight: 700, padding: "4px 6px", border: 0 }}
+                          data-testid={`block-section-${idx}`}
+                        />
+                        <button
+                          tabIndex={-1}
+                          onClick={() => moveBlock(idx, -1)}
+                          disabled={idx === 0}
+                          className="w-6 h-6 flex items-center justify-center rounded hover:bg-white/10 disabled:opacity-20"
+                          style={{ color: TS_DESIGN.text3, fontSize: 12 }}
+                          title="上に移動"
+                          data-testid={`block-up-${idx}`}
+                        >↑</button>
+                        <button
+                          tabIndex={-1}
+                          onClick={() => moveBlock(idx, 1)}
+                          disabled={idx === blocks.length - 1}
+                          className="w-6 h-6 flex items-center justify-center rounded hover:bg-white/10 disabled:opacity-20"
+                          style={{ color: TS_DESIGN.text3, fontSize: 12 }}
+                          title="下に移動"
+                          data-testid={`block-down-${idx}`}
+                        >↓</button>
+                        <button
+                          tabIndex={-1}
+                          onClick={() => {
+                            const has = !!(b.section.trim() || b.bars.trim() || b.lyric.trim());
+                            if (has) {
+                              const preview = [b.section, b.bars, b.lyric].filter(Boolean).join(" | ").slice(0, 50);
+                              if (!window.confirm(`このブロックを削除しますか？\n${preview}`)) return;
+                            }
+                            deleteBlock(idx);
+                          }}
+                          className="w-6 h-6 flex items-center justify-center rounded hover:bg-white/10"
+                          style={{ color: TS_DESIGN.text3, fontSize: 14 }}
+                          title="このブロックを削除"
+                          data-testid={`block-delete-${idx}`}
+                        >×</button>
+                      </div>
+                      {/* 小節 */}
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+                        <span style={{ color: TS_DESIGN.text3, fontSize: 10, minWidth: 36 }}>小節</span>
+                        <input
+                          type="text"
+                          value={b.bars}
+                          onChange={(e) => updateBlock(idx, { bars: e.target.value })}
+                          placeholder="例: 4 / 4 4 4 4 / 16"
+                          className="flex-1 bg-transparent outline-none"
+                          style={{ color: TS_DESIGN.text, fontSize: 12, padding: "4px 6px", border: 0, borderBottom: `1px solid ${TS_DESIGN.border}` }}
+                          data-testid={`block-bars-${idx}`}
+                        />
+                      </div>
+                      {/* 歌詞 */}
+                      <textarea
+                        value={b.lyric}
+                        onChange={(e) => updateBlock(idx, { lyric: e.target.value })}
+                        placeholder="歌詞（自由記述、改行 OK）"
+                        rows={Math.max(2, b.lyric.split("\n").length)}
+                        className="w-full bg-transparent outline-none resize-none"
+                        style={{
+                          color: TS_DESIGN.text,
+                          fontSize: 13,
+                          lineHeight: 1.6,
+                          padding: 8,
+                          border: `1px solid ${TS_DESIGN.border}`,
+                          borderRadius: 4,
+                          fontFamily: "inherit",
+                          minHeight: 56,
+                        }}
+                        data-testid={`block-lyric-${idx}`}
+                      />
+                    </div>
+                  ))}
                   <button
-                    onClick={() => {
-                      appendScoreRow();
-                      setTimeout(() => {
-                        const scroll = document.querySelector('[data-testid="score-scroll"]') as HTMLElement | null;
-                        if (scroll) scroll.scrollTop = scroll.scrollHeight;
-                        const lastIdx = scoreRows.length; // 追加後の最後の index
-                        const next = document.querySelector(`[data-testid="score-section-${lastIdx}"]`) as HTMLTextAreaElement | null;
-                        if (next) { next.focus(); next.setSelectionRange(0, 0); }
-                      }, 50);
-                    }}
-                    className="w-full py-2 rounded text-[11px] hover:bg-white/5 transition-colors"
+                    onClick={addBlock}
+                    className="w-full py-3 rounded text-[12px] hover:bg-white/5 transition-colors"
                     style={{ color: TS_DESIGN.text3, border: `1px dashed ${TS_DESIGN.border}` }}
-                    data-testid="score-append-row"
-                    title="末尾に空行を 1 行追加"
-                  >+ 行を追加</button>
+                    data-testid="block-add"
+                    title="末尾にセクションを追加"
+                  >+ セクション追加</button>
                 </div>
               </div>
             )}
