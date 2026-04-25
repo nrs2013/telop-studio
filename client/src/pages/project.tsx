@@ -542,8 +542,7 @@ export default function ProjectPage() {
   // ====== タイムライン側 譜割モード（時間ベース SECTION ブロック）======
   // 既存の手入力 譜割（telop-score-v3-*）には触らない。新しいキーで完全に独立。
   // データ管理は useSectionBlocks フックに集約（client/src/hooks/useSectionBlocks.ts）。
-  // 現時点で UI 描画はないが、過去のドラッグ配置データを保存しておく（再導入時に復元可能）。
-  useSectionBlocks(id);
+  const { sectionBlocks, setSectionBlocks } = useSectionBlocks(id);
 
   // ====== 譜割（SCORE）タブ ======
   // データ管理は useScoreRows フックに集約（client/src/hooks/useScoreRows.ts）。
@@ -1200,6 +1199,48 @@ export default function ProjectPage() {
   const [timelineSelectedIds, setTimelineSelectedIds] = useState<Set<string>>(new Set());
   const timelineSelectedIdsRef = useRef(timelineSelectedIds);
   timelineSelectedIdsRef.current = timelineSelectedIds;
+
+  // タイムライン高さ（リサイズ可能）。localStorage に保存して次回起動時も復元。
+  const TIMELINE_H_DEFAULT = 320;
+  const TIMELINE_H_MIN = 200;
+  const [timelineHeight, setTimelineHeight] = useState<number>(TIMELINE_H_DEFAULT);
+  const timelineHeightRef = useRef<number>(TIMELINE_H_DEFAULT);
+  timelineHeightRef.current = timelineHeight;
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("telop-timeline-height");
+      if (raw) {
+        const n = parseInt(raw, 10);
+        if (Number.isFinite(n) && n >= TIMELINE_H_MIN) {
+          const max = Math.max(TIMELINE_H_MIN, Math.floor(window.innerHeight * 0.7));
+          setTimelineHeight(Math.min(n, max));
+        }
+      }
+    } catch {}
+  }, []);
+  const startTimelineResize = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const startY = e.clientY;
+    const startH = timelineHeightRef.current;
+    const onMove = (me: MouseEvent) => {
+      const dy = startY - me.clientY; // 上にドラッグで増加
+      const max = Math.max(TIMELINE_H_MIN, Math.floor(window.innerHeight * 0.7));
+      const next = Math.max(TIMELINE_H_MIN, Math.min(max, startH + dy));
+      setTimelineHeight(next);
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      safeSetItem(
+        "telop-timeline-height",
+        String(timelineHeightRef.current),
+        (msg) => toast({ title: msg, variant: "destructive" }),
+        "タイムラインの高さ",
+      );
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }, [toast]);
 
   const [pendingAudioFile, setPendingAudioFile] = useState<File | null>(null);
   const [audioConfirmStep, setAudioConfirmStep] = useState<"none" | "enter_name">("none");
@@ -5318,7 +5359,16 @@ export default function ProjectPage() {
         />
         </div>
 
-        <div className="shrink-0 overflow-hidden" style={{ height: "234px", border: "1px solid hsl(0 0% 22%)" }}>
+        <div
+          className="shrink-0 relative"
+          onMouseDown={startTimelineResize}
+          style={{ height: 6, background: "hsl(0 0% 14%)", borderTop: "1px solid hsl(0 0% 22%)", borderBottom: "1px solid hsl(0 0% 22%)", cursor: "ns-resize", userSelect: "none" }}
+          title="ドラッグでタイムラインの高さを調整"
+          data-testid="timeline-resize-handle"
+        >
+          <div style={{ position: "absolute", left: "50%", top: "50%", transform: "translate(-50%, -50%)", width: 32, height: 1, background: "hsl(0 0% 38%)" }} />
+        </div>
+        <div className="shrink-0 overflow-hidden" style={{ height: `${timelineHeight}px`, border: "1px solid hsl(0 0% 22%)" }}>
             <TimelineEditor
               projectId={id!}
               lyrics={lyrics || []}
@@ -5380,6 +5430,8 @@ export default function ProjectPage() {
               onSelectionChange={setTimelineSelectedIds}
               bpmGridOffset={project?.bpmGridOffset ?? 0}
               scoreRows={scoreRows}
+              sectionBlocks={sectionBlocks}
+              onSectionBlocksChange={setSectionBlocks}
               onBpmGridOffsetChange={(offset) => {
                 updateProjectData({ bpmGridOffset: offset } as any);
               }}
