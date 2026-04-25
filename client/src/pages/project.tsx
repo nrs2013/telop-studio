@@ -1212,12 +1212,17 @@ export default function ProjectPage() {
       if (raw) {
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          setScoreRows(parsed.filter((r: any) => r && typeof r.id === "string").map((r: any) => ({
+          let rows = parsed.filter((r: any) => r && typeof r.id === "string").map((r: any) => ({
             id: String(r.id),
             section: typeof r.section === "string" ? r.section : "",
             bars: typeof r.bars === "number" && Number.isFinite(r.bars) ? r.bars : null,
             lyric: typeof r.lyric === "string" ? r.lyric : "",
-          })));
+          }));
+          // 最低 30 行を保証（過去データが少なければ空行で埋める）
+          if (rows.length < 30) {
+            rows = [...rows, ...buildEmptyScoreRows(30 - rows.length)];
+          }
+          setScoreRows(rows);
         } else {
           setScoreRows(buildEmptyScoreRows(30));
         }
@@ -6007,20 +6012,25 @@ export default function ProjectPage() {
             ))}
             {activeRightTab === "score" && (
               <div className="flex-1 overflow-y-auto" data-testid="score-table" style={{ background: TS_DESIGN.bg2 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "64px 48px 1fr", position: "sticky", top: 0, background: TS_DESIGN.bg2, zIndex: 1, borderBottom: `1px solid ${TS_DESIGN.border}` }}>
+                  <div style={{ borderRight: `1px solid ${TS_DESIGN.border}`, padding: "6px 4px", textAlign: "center", color: TS_DESIGN.text3, fontSize: 9, letterSpacing: "0.18em", textTransform: "uppercase", fontWeight: 600 }}>SECTION</div>
+                  <div style={{ borderRight: `1px solid ${TS_DESIGN.border}`, padding: "6px 4px", textAlign: "center", color: TS_DESIGN.text3, fontSize: 9, letterSpacing: "0.18em", textTransform: "uppercase", fontWeight: 600 }}>BAR</div>
+                  <div style={{ padding: "6px 10px", color: TS_DESIGN.text3, fontSize: 9, letterSpacing: "0.18em", textTransform: "uppercase", fontWeight: 600 }}>LYRIC</div>
+                </div>
                 <div style={{ display: "grid", gridTemplateColumns: "64px 48px 1fr" }}>
                   {scoreRows.map((row, idx) => (
                     <Fragment key={row.id}>
-                      <div style={{ borderRight: `1px solid ${TS_DESIGN.border}`, borderBottom: `1px solid ${TS_DESIGN.border}`, padding: "4px 6px", display: "flex", alignItems: "center", minHeight: 28 }}>
+                      <label style={{ borderRight: `1px solid ${TS_DESIGN.border}`, borderBottom: `1px solid ${TS_DESIGN.border}`, display: "flex", alignItems: "stretch", minHeight: 28, cursor: "text" }}>
                         <input
                           value={row.section}
                           onChange={(e) => updateScoreRow(idx, { section: e.target.value })}
                           placeholder=""
                           className="w-full bg-transparent outline-none text-center"
-                          style={{ color: TS_DESIGN.text2, fontSize: 12, letterSpacing: "0.06em", fontWeight: 500 }}
+                          style={{ color: TS_DESIGN.text2, fontSize: 12, letterSpacing: "0.06em", fontWeight: 500, padding: "4px 6px", border: 0 }}
                           data-testid={`score-section-${idx}`}
                         />
-                      </div>
-                      <div style={{ borderRight: `1px solid ${TS_DESIGN.border}`, borderBottom: `1px solid ${TS_DESIGN.border}`, padding: "4px 4px", display: "flex", alignItems: "center", minHeight: 28 }}>
+                      </label>
+                      <label style={{ borderRight: `1px solid ${TS_DESIGN.border}`, borderBottom: `1px solid ${TS_DESIGN.border}`, display: "flex", alignItems: "stretch", minHeight: 28, cursor: "text" }}>
                         <input
                           type="text"
                           inputMode="numeric"
@@ -6036,29 +6046,29 @@ export default function ProjectPage() {
                           }}
                           onFocus={(e) => (e.target as HTMLInputElement).select()}
                           className="w-full bg-transparent outline-none text-center tabular-nums"
-                          style={{ color: TS_DESIGN.text2, fontSize: 13 }}
+                          style={{ color: TS_DESIGN.text2, fontSize: 13, padding: "4px 4px", border: 0 }}
                           data-testid={`score-bars-${idx}`}
                         />
-                      </div>
-                      <div style={{ padding: "4px 10px", borderBottom: `1px solid ${TS_DESIGN.border}`, position: "relative", minHeight: 28 }} className="group/score-row">
+                      </label>
+                      <label style={{ borderBottom: `1px solid ${TS_DESIGN.border}`, position: "relative", display: "flex", alignItems: "stretch", minHeight: 28, cursor: "text" }} className="group/score-row">
                         <textarea
                           value={row.lyric}
                           onChange={(e) => updateScoreRow(idx, { lyric: e.target.value })}
                           placeholder=""
                           rows={Math.max(1, row.lyric.split("\n").length)}
                           className="w-full bg-transparent outline-none resize-none"
-                          style={{ color: TS_DESIGN.text, fontSize: 13, lineHeight: 1.5, minHeight: 20, paddingRight: 24 }}
+                          style={{ color: TS_DESIGN.text, fontSize: 13, lineHeight: 1.5, minHeight: 28, padding: "4px 28px 4px 10px", border: 0 }}
                           data-testid={`score-lyric-${idx}`}
                         />
                         <button
-                          onClick={() => deleteScoreRow(idx)}
+                          onClick={(e) => { e.preventDefault(); e.stopPropagation(); deleteScoreRow(idx); }}
                           tabIndex={-1}
                           className="absolute right-1 top-1 w-5 h-5 flex items-center justify-center rounded opacity-0 group-hover/score-row:opacity-100 hover:bg-white/10"
                           style={{ color: TS_DESIGN.text3, fontSize: 14 }}
                           title="この行を削除"
                           data-testid={`score-delete-${idx}`}
                         >×</button>
-                      </div>
+                      </label>
                     </Fragment>
                   ))}
                 </div>
