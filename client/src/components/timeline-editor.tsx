@@ -2852,7 +2852,7 @@ export const TimelineEditor = memo(function TimelineEditor({
 
         {(() => {
           const activeLanes = 2;
-          const blocksZoneH = activeLanes * (LANE_HEIGHT + LANE_GAP) + 4;
+          const blocksZoneH = 18 + activeLanes * (LANE_HEIGHT + LANE_GAP) + 4;
           const TRACK_GAP = 2;
           const WAVE_H = waveformPeaks ? 2 * (LANE_HEIGHT + LANE_GAP) : 0;
           const AUDIO_BLOCK_H = waveformPeaks ? SECTION_BAND_H + WAVE_H : 0;
@@ -3324,7 +3324,7 @@ export const TimelineEditor = memo(function TimelineEditor({
                     )}
                     <div
                       className="absolute left-0 right-0"
-                      style={{ top: "0px" }}
+                      style={{ top: "18px" }}
                       onMouseMove={fadeMode ? (e) => {
                         const target = e.target as HTMLElement;
                         if (!target.closest("[data-block]")) {
@@ -3744,9 +3744,9 @@ export const TimelineEditor = memo(function TimelineEditor({
                         className="absolute pointer-events-none z-30"
                         style={{
                           left: `${minX}px`,
-                          top: "0px",
+                          top: "18px",
                           width: `${w}px`,
-                          height: `${blocksZoneH}px`,
+                          height: `${blocksZoneH - 18}px`,
                           backgroundColor: "hsla(0, 0%, 56%, 0.15)",
                           border: "1px solid hsla(0, 0%, 56%, 0.5)",
                         }}
