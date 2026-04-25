@@ -6036,6 +6036,13 @@ export default function ProjectPage() {
                 data-testid="score-table"
                 style={{ background: TS_DESIGN.bg2 }}
               >
+                <style>{`
+                  [data-testid^="score-section-"]:focus,
+                  [data-testid^="score-bars-"]:focus,
+                  [data-testid^="score-lyric-"]:focus {
+                    background: rgba(255, 255, 255, 0.06) !important;
+                  }
+                `}</style>
                 <div className="shrink-0" style={{ display: "grid", gridTemplateColumns: "64px 56px 1fr", borderBottom: `1px solid ${TS_DESIGN.border}` }}>
                   <div style={{ borderRight: `1px solid ${TS_DESIGN.border}`, padding: "6px 4px", textAlign: "center", color: TS_DESIGN.text3, fontSize: 9, letterSpacing: "0.18em", textTransform: "uppercase", fontWeight: 600 }}>SECTION</div>
                   <div style={{ borderRight: `1px solid ${TS_DESIGN.border}`, padding: "6px 4px", textAlign: "center", color: TS_DESIGN.text3, fontSize: 9, letterSpacing: "0.18em", textTransform: "uppercase", fontWeight: 600 }}>BAR</div>
@@ -6116,7 +6123,7 @@ export default function ProjectPage() {
                               onChange={(e) => updateScoreRow(idx, { section: e.target.value })}
                               onKeyDown={(e) => onCellKeyDown(e, "section")}
                               rows={Math.max(1, row.section.split("\n").length)}
-                              className="w-full bg-transparent outline-none resize-none text-center focus:bg-white/[0.04]"
+                              className="w-full bg-transparent outline-none resize-none text-center"
                               style={{ color: TS_DESIGN.text, fontSize: 13, lineHeight: 1.5, minHeight: 28, padding: "4px 6px", border: 0, fontFamily: "inherit" }}
                               data-testid={`score-section-${idx}`}
                             />
@@ -6127,7 +6134,7 @@ export default function ProjectPage() {
                               onChange={(e) => updateScoreRow(idx, { bars: e.target.value })}
                               onKeyDown={(e) => onCellKeyDown(e, "bars")}
                               rows={Math.max(1, row.bars.split("\n").length)}
-                              className="w-full bg-transparent outline-none resize-none text-center focus:bg-white/[0.04]"
+                              className="w-full bg-transparent outline-none resize-none text-center"
                               style={{ color: TS_DESIGN.text, fontSize: 13, lineHeight: 1.5, minHeight: 28, padding: "4px 4px", border: 0, fontFamily: "inherit" }}
                               data-testid={`score-bars-${idx}`}
                             />
@@ -6138,7 +6145,7 @@ export default function ProjectPage() {
                               onChange={(e) => updateScoreRow(idx, { lyric: e.target.value })}
                               onKeyDown={(e) => onCellKeyDown(e, "lyric")}
                               rows={Math.max(1, row.lyric.split("\n").length)}
-                              className="w-full bg-transparent outline-none resize-none text-left focus:bg-white/[0.04]"
+                              className="w-full bg-transparent outline-none resize-none text-left"
                               style={{ color: TS_DESIGN.text, fontSize: 13, lineHeight: 1.5, minHeight: 28, padding: "4px 28px 4px 10px", border: 0, fontFamily: "inherit" }}
                               data-testid={`score-lyric-${idx}`}
                             />
