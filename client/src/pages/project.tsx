@@ -1247,38 +1247,6 @@ export default function ProjectPage() {
   const updateScoreRow = useCallback((idx: number, patch: Partial<{ section: string; bars: string; lyric: string }>) => {
     setScoreRows(prev => prev.map((r, i) => i === idx ? { ...r, ...patch } : r));
   }, []);
-  const deleteScoreRow = useCallback((idx: number) => {
-    setScoreRows(prev => {
-      // 最後の 1 行は消さない（消すなら中身をクリア）
-      if (prev.length <= 1) {
-        return [{ ...prev[0], section: "", bars: "", lyric: "" }];
-      }
-      return prev.filter((_, i) => i !== idx);
-    });
-  }, []);
-  // SECTION の一番左で Cmd+Return → 自分の行の上に空行 1 行挿入
-  const insertScoreRowAbove = useCallback((idx: number) => {
-    setScoreRows(prev => {
-      const newRow = {
-        id: `ins-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
-        section: "",
-        bars: "",
-        lyric: "",
-      };
-      const next = [...prev];
-      next.splice(idx, 0, newRow);
-      return next;
-    });
-  }, []);
-  // 末尾に空行を1行追加
-  const appendScoreRow = useCallback(() => {
-    setScoreRows(prev => [...prev, {
-      id: `add-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
-      section: "",
-      bars: "",
-      lyric: "",
-    }]);
-  }, []);
 
 
 
@@ -5759,11 +5727,6 @@ export default function ProjectPage() {
                   )}
                 </>
               )}
-              {activeRightTab === "score" && (
-                <span className="text-[9px] ml-auto" style={{ color: TS_DESIGN.text3 }}>
-                  Tab：次のセル / ⌘+Return：上に行追加 / ⌘+Delete：この行削除
-                </span>
-              )}
             </div>
             {activeRightTab === "lyrics" && (isRecording ? (
               <div
@@ -6047,33 +6010,41 @@ export default function ProjectPage() {
                       const onCellKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>, col: "section" | "bars" | "lyric") => {
                         // 日本語入力（IME）変換中は何もしない（ Enter で行追加されたり Tab で文字消えたりするのを防ぐ）
                         if (e.nativeEvent.isComposing || (e.nativeEvent as any).keyCode === 229) return;
-                        // Cmd+Return：今の行の SECTION/BAR/LYRIC 全 3 セルの末尾に \n を同時追加
+                        // Cmd+Return：今の行の 3 セルの先頭に \n を同時挿入 → 中身が下に押し出される
                         if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
                           e.preventDefault();
+                          const cursorPos = e.currentTarget.selectionStart;
                           setScoreRows(prev => prev.map((r, i) => i === idx ? {
                             ...r,
-                            section: r.section + "\n",
-                            bars: r.bars + "\n",
-                            lyric: r.lyric + "\n",
+                            section: "\n" + r.section,
+                            bars: "\n" + r.bars,
+                            lyric: "\n" + r.lyric,
                           } : r));
                           setTimeout(() => {
                             const ta = document.querySelector(`[data-testid="score-${col}-${idx}"]`) as HTMLTextAreaElement | null;
-                            if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
+                            if (ta) { ta.focus(); ta.setSelectionRange(cursorPos + 1, cursorPos + 1); }
                           }, 50);
                           return;
                         }
-                        // Cmd+Delete：今の行の 3 セル全部から末尾の \n を同時削除
+                        // Cmd+Delete：今の行の 3 セルの先頭の \n を同時削除 → 中身が上に戻る
                         if ((e.metaKey || e.ctrlKey) && (e.key === "Backspace" || e.key === "Delete")) {
                           e.preventDefault();
+                          const ta0 = e.currentTarget;
+                          const cursorPos = ta0.selectionStart;
+                          const currentStarts = ta0.value.startsWith("\n");
                           setScoreRows(prev => prev.map((r, i) => i === idx ? {
                             ...r,
-                            section: r.section.endsWith("\n") ? r.section.slice(0, -1) : r.section,
-                            bars: r.bars.endsWith("\n") ? r.bars.slice(0, -1) : r.bars,
-                            lyric: r.lyric.endsWith("\n") ? r.lyric.slice(0, -1) : r.lyric,
+                            section: r.section.startsWith("\n") ? r.section.slice(1) : r.section,
+                            bars: r.bars.startsWith("\n") ? r.bars.slice(1) : r.bars,
+                            lyric: r.lyric.startsWith("\n") ? r.lyric.slice(1) : r.lyric,
                           } : r));
                           setTimeout(() => {
                             const ta = document.querySelector(`[data-testid="score-${col}-${idx}"]`) as HTMLTextAreaElement | null;
-                            if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
+                            if (ta) {
+                              ta.focus();
+                              const newPos = currentStarts ? Math.max(0, cursorPos - 1) : cursorPos;
+                              ta.setSelectionRange(newPos, newPos);
+                            }
                           }, 50);
                           return;
                         }
@@ -6085,24 +6056,8 @@ export default function ProjectPage() {
                           let nextColIdx = colIdx + (e.shiftKey ? -1 : 1);
                           if (nextColIdx >= order.length) { nextRow += 1; nextColIdx = 0; }
                           else if (nextColIdx < 0) { nextRow -= 1; nextColIdx = order.length - 1; }
-                          // 先頭で Shift+Tab → 何もしない（戻れない）
-                          if (nextRow < 0) return;
-                          // 末尾の LYRIC で Tab → 新しい行を末尾に追加して、その SECTION にフォーカス
-                          if (nextRow >= scoreRows.length) {
-                            const targetIdx = scoreRows.length;
-                            appendScoreRow();
-                            // React の再レンダリングを待ってからフォーカス（rAF 1 回だと早すぎる）
-                            setTimeout(() => {
-                              const sel = `[data-testid="score-section-${targetIdx}"]`;
-                              const next = document.querySelector(sel) as HTMLTextAreaElement | null;
-                              if (next) {
-                                next.focus();
-                                next.setSelectionRange(0, 0);
-                                next.scrollIntoView({ block: "nearest", behavior: "smooth" });
-                              }
-                            }, 50);
-                            return;
-                          }
+                          // 先頭で Shift+Tab、末尾の LYRIC で Tab → 何もしない
+                          if (nextRow < 0 || nextRow >= scoreRows.length) return;
                           const nextCol = order[nextColIdx];
                           const sel = `[data-testid="score-${nextCol}-${nextRow}"]`;
                           const next = document.querySelector(sel) as HTMLTextAreaElement | null;
@@ -6138,56 +6093,21 @@ export default function ProjectPage() {
                               data-testid={`score-bars-${idx}`}
                             />
                           </label>
-                          <label style={{ ...cellBase, position: "relative" }} className="group/score-row">
+                          <label style={cellBase}>
                             <textarea
                               value={row.lyric}
                               onChange={(e) => updateScoreRow(idx, { lyric: e.target.value })}
                               onKeyDown={(e) => onCellKeyDown(e, "lyric")}
                               rows={Math.max(1, row.lyric.split("\n").length)}
                               className="w-full bg-transparent outline-none resize-none text-left"
-                              style={{ color: TS_DESIGN.text, fontSize: 13, lineHeight: 1.5, minHeight: 28, padding: "4px 28px 4px 10px", border: 0, fontFamily: "inherit" }}
+                              style={{ color: TS_DESIGN.text, fontSize: 13, lineHeight: 1.5, minHeight: 28, padding: "4px 10px", border: 0, fontFamily: "inherit" }}
                               data-testid={`score-lyric-${idx}`}
                             />
-                            <button
-                              onClick={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                const hasContent = !!(row.section.trim() || row.bars.trim() || row.lyric.trim());
-                                if (hasContent) {
-                                  const preview = [row.section, row.bars, row.lyric].filter(Boolean).join(" | ").slice(0, 50);
-                                  if (!window.confirm(`この行を削除しますか？\n${preview}`)) return;
-                                }
-                                deleteScoreRow(idx);
-                              }}
-                              tabIndex={-1}
-                              className="absolute right-1 top-1 w-5 h-5 flex items-center justify-center rounded opacity-30 hover:opacity-100 hover:bg-white/10 transition-opacity"
-                              style={{ color: TS_DESIGN.text3, fontSize: 14 }}
-                              title="この行を削除"
-                              data-testid={`score-delete-${idx}`}
-                            >×</button>
                           </label>
                         </Fragment>
                       );
                     })}
                   </div>
-                </div>
-                <div className="shrink-0" style={{ padding: "8px 10px", borderTop: `1px solid ${TS_DESIGN.border}`, background: TS_DESIGN.bg2 }}>
-                  <button
-                    onClick={() => {
-                      appendScoreRow();
-                      setTimeout(() => {
-                        const scroll = document.querySelector('[data-testid="score-scroll"]') as HTMLElement | null;
-                        if (scroll) scroll.scrollTop = scroll.scrollHeight;
-                        const lastIdx = scoreRows.length; // 追加後の最後の index
-                        const next = document.querySelector(`[data-testid="score-section-${lastIdx}"]`) as HTMLTextAreaElement | null;
-                        if (next) { next.focus(); next.setSelectionRange(0, 0); }
-                      }, 50);
-                    }}
-                    className="w-full py-2 rounded text-[11px] hover:bg-white/5 transition-colors"
-                    style={{ color: TS_DESIGN.text3, border: `1px dashed ${TS_DESIGN.border}` }}
-                    data-testid="score-append-row"
-                    title="末尾に空行を 1 行追加"
-                  >+ 行を追加</button>
                 </div>
               </div>
             )}
