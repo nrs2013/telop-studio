@@ -6044,35 +6044,34 @@ export default function ProjectPage() {
                   <div style={{ padding: "6px 10px", color: TS_DESIGN.text3, fontSize: 9, letterSpacing: "0.18em", textTransform: "uppercase", fontWeight: 600 }}>LYRIC</div>
                 </div>
                 <div className="flex-1 overflow-y-auto" data-testid="score-scroll">
-                  {(() => {
-                    // null をレンダリングするだけのダミー（後の map 内で使う）
-                    return null;
-                  })()}
                   <div style={{ display: "grid", gridTemplateColumns: "64px 56px 1fr" }}>
                     {(() => {
-                      // 再生位置がどの scoreRow に入ってるかを計算（行ハイライト用）
+                      // 再生位置がどの scoreRow のどの line に入ってるか（行内 line 単位でハイライト）
                       const __bpm = project?.detectedBpm;
                       const __offset = project?.bpmGridOffset ?? 0;
-                      const activeRowIndex = (() => {
-                        if (!__bpm || __bpm <= 0) return -1;
+                      const active = (() => {
+                        if (!__bpm || __bpm <= 0) return { row: -1, line: -1 };
                         const secPerBar = (60 / __bpm) * 4;
                         let cum = 0;
                         for (let r = 0; r < scoreRows.length; r++) {
                           const barLines = scoreRows[r].bars.split("\n");
-                          let totalBars = 0;
-                          for (const bt of barLines) {
+                          for (let li = 0; li < barLines.length; li++) {
+                            const bt = barLines[li] || "";
                             const nums = bt.match(/\d+/g) || [];
-                            totalBars += nums.reduce((s, n) => s + parseInt(n, 10), 0);
+                            const lineBars = nums.reduce((s, n) => s + parseInt(n, 10), 0);
+                            const ls = __offset + cum * secPerBar;
+                            const le = ls + lineBars * secPerBar;
+                            if (currentTime >= ls && currentTime < le && lineBars > 0) {
+                              return { row: r, line: li };
+                            }
+                            cum += lineBars;
                           }
-                          const rs = __offset + cum * secPerBar;
-                          const re = rs + totalBars * secPerBar;
-                          if (currentTime >= rs && currentTime < re && totalBars > 0) return r;
-                          cum += totalBars;
                         }
-                        return -1;
+                        return { row: -1, line: -1 };
                       })();
                       return scoreRows.map((row, idx) => {
-                        const isActive = activeRowIndex === idx;
+                        const isActive = active.row === idx;
+                        const activeLineIdx = isActive ? active.line : -1;
                       const onCellKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>, col: "section" | "bars" | "lyric") => {
                         // 日本語入力（IME）変換中は何もしない（ Enter で行追加されたり Tab で文字消えたりするのを防ぐ）
                         if (e.nativeEvent.isComposing || (e.nativeEvent as any).keyCode === 229) return;
@@ -6156,40 +6155,56 @@ export default function ProjectPage() {
                         alignItems: "flex-start" as const,
                         minHeight: 28,
                         cursor: "text" as const,
-                        background: isActive ? "rgba(229,191,61,0.10)" : "transparent",
+                        position: "relative" as const,
                       };
+                      // 1 行分の高さ：fontSize 13 × lineHeight 1.5 = 19.5px
+                      const LINE_H = 19.5;
+                      const HighlightOverlay = activeLineIdx >= 0 ? (
+                        <div style={{
+                          position: "absolute",
+                          left: 0, right: 0,
+                          top: 4 + activeLineIdx * LINE_H,
+                          height: LINE_H,
+                          background: "rgba(229,191,61,0.18)",
+                          pointerEvents: "none",
+                          zIndex: 0,
+                        }} />
+                      ) : null;
                       return (
                         <Fragment key={row.id}>
                           <label style={{ ...cellBase, borderRight: `1px solid ${TS_DESIGN.border}` }}>
+                            {HighlightOverlay}
                             <textarea
                               value={row.section}
                               onChange={(e) => updateScoreRow(idx, { section: e.target.value })}
                               onKeyDown={(e) => onCellKeyDown(e, "section")}
                               rows={Math.max(1, row.section.split("\n").length)}
                               className="w-full bg-transparent outline-none resize-none text-center"
-                              style={{ color: TS_DESIGN.text, fontSize: 13, lineHeight: 1.5, minHeight: 28, padding: "4px 6px", border: 0, fontFamily: "inherit" }}
+                              style={{ position: "relative", zIndex: 1, color: TS_DESIGN.text, fontSize: 13, lineHeight: 1.5, minHeight: 28, padding: "4px 6px", border: 0, fontFamily: "inherit" }}
                               data-testid={`score-section-${idx}`}
                             />
                           </label>
                           <label style={{ ...cellBase, borderRight: `1px solid ${TS_DESIGN.border}` }}>
+                            {HighlightOverlay}
                             <textarea
                               value={row.bars}
                               onChange={(e) => updateScoreRow(idx, { bars: e.target.value })}
                               onKeyDown={(e) => onCellKeyDown(e, "bars")}
                               rows={Math.max(1, row.bars.split("\n").length)}
                               className="w-full bg-transparent outline-none resize-none text-center"
-                              style={{ color: TS_DESIGN.text, fontSize: 13, lineHeight: 1.5, minHeight: 28, padding: "4px 4px", border: 0, fontFamily: "inherit" }}
+                              style={{ position: "relative", zIndex: 1, color: TS_DESIGN.text, fontSize: 13, lineHeight: 1.5, minHeight: 28, padding: "4px 4px", border: 0, fontFamily: "inherit" }}
                               data-testid={`score-bars-${idx}`}
                             />
                           </label>
                           <label style={cellBase}>
+                            {HighlightOverlay}
                             <textarea
                               value={row.lyric}
                               onChange={(e) => updateScoreRow(idx, { lyric: e.target.value })}
                               onKeyDown={(e) => onCellKeyDown(e, "lyric")}
                               rows={Math.max(1, row.lyric.split("\n").length)}
                               className="w-full bg-transparent outline-none resize-none text-left"
-                              style={{ color: TS_DESIGN.text, fontSize: 13, lineHeight: 1.5, minHeight: 28, padding: "4px 10px", border: 0, fontFamily: "inherit" }}
+                              style={{ position: "relative", zIndex: 1, color: TS_DESIGN.text, fontSize: 13, lineHeight: 1.5, minHeight: 28, padding: "4px 10px", border: 0, fontFamily: "inherit" }}
                               data-testid={`score-lyric-${idx}`}
                             />
                           </label>
