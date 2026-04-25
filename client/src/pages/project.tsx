@@ -6308,9 +6308,6 @@ export default function ProjectPage() {
               onSelectionChange={setTimelineSelectedIds}
               bpmGridOffset={project?.bpmGridOffset ?? 0}
               scoreRows={scoreRows}
-              timelineMode={activeRightTab === "score" ? "score" : "lyric"}
-              sectionBlocks={sectionBlocks}
-              onSectionBlocksChange={setSectionBlocks}
               onBpmGridOffsetChange={(offset) => {
                 updateProjectData({ bpmGridOffset: offset } as any);
               }}

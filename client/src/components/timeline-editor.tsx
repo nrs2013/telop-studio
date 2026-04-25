@@ -73,10 +73,6 @@ interface TimelineEditorProps {
   rightTitleAnimDurMs?: number;
   rightTitleText?: string;
   scoreRows?: { id: string; section: string; bars: string; lyric: string }[];
-  timelineMode?: "lyric" | "score";
-  onTimelineModeChange?: (mode: "lyric" | "score") => void;
-  sectionBlocks?: { id: string; label: string; startBar: number; endBar: number }[];
-  onSectionBlocksChange?: (blocks: { id: string; label: string; startBar: number; endBar: number }[]) => void;
 }
 
 let decodedCache: { projectId: string; bufferByteLength: number; channelData: Float32Array; sampleRate: number } | null = null;
@@ -174,10 +170,6 @@ export const TimelineEditor = memo(function TimelineEditor({
   rightTitleAnimDurMs,
   rightTitleText,
   scoreRows,
-  timelineMode = "lyric",
-  onTimelineModeChange,
-  sectionBlocks,
-  onSectionBlocksChange,
 }: TimelineEditorProps) {
   const aHue = propAccentHue ?? 270;
   const [zoom, setZoom] = useState(50);
@@ -2906,9 +2898,8 @@ export const TimelineEditor = memo(function TimelineEditor({
               </div>
 
               <div className="flex-1 relative">
-              {/* SECTION 帯（モードで内容が変わる）*/}
-              {timelineMode === "lyric" && scoreRows && scoreRows.length > 0 && bpm && bpm > 0 && (
-                // 既存の読み取り専用イエロー文字帯（手入力の scoreRows から）
+              {/* SECTION 帯：手入力の scoreRows から読み取り専用で表示 */}
+              {scoreRows && scoreRows.length > 0 && bpm && bpm > 0 && (
                 <div className="absolute left-0 right-0 top-0 z-30 overflow-hidden pointer-events-none" style={{ height: 18, background: "hsl(0 0% 9%)", borderBottom: "1px solid hsl(0 0% 22%)" }}>
                   <div className="absolute top-0 bottom-0" style={{ left: -tlScrollLeft }}>
                     {(() => {
@@ -2951,127 +2942,10 @@ export const TimelineEditor = memo(function TimelineEditor({
                   </div>
                 </div>
               )}
-              {timelineMode === "score" && bpm && bpm > 0 && (() => {
-                // 新しいドラッグ可能な色付き SECTION ブロック帯
-                const beatsPerBar = 4;
-                const secPerBar = (60 / bpm) * beatsPerBar;
-                const offset = gridOffsetRef.current || 0;
-                const blocks = sectionBlocks || [];
-                const colorFor = (label: string) => {
-                  const l = (label || "").trim().toUpperCase();
-                  if (l === "INTRO") return { bg: "#1d4d63", border: "#2a6b87", text: "#b6e2f5" };
-                  if (l === "INTER" || l === "インター") return { bg: "#5f3a1f", border: "#8b5b2c", text: "#f0c490" };
-                  if (l === "BRIDGE" || l === "ブリッジ") return { bg: "#5c3a1f", border: "#7e4d24", text: "#f0c490" };
-                  if (l === "OUTRO" || l === "アウトロ") return { bg: "#5c1f1f", border: "#8e2f2f", text: "#ecb3b3" };
-                  if (/^[1１]/.test(l)) return { bg: "#1f3d5c", border: "#305887", text: "#b3cdec" };
-                  if (/^[2２]/.test(l)) return { bg: "#1f5c3a", border: "#2f8757", text: "#b3ecc8" };
-                  if (/^[3３]/.test(l)) return { bg: "#5c1f3d", border: "#8e2f5c", text: "#ecb3cd" };
-                  return { bg: "#2c2c2a", border: "#46463f", text: "#ece6d8" };
-                };
-                const snapBar = (bar: number, e: MouseEvent) => {
-                  const meta = e.metaKey || e.ctrlKey;
-                  const shift = e.shiftKey;
-                  let step;
-                  if (meta && shift) step = 0.25;
-                  else if (meta) step = 1;
-                  else if (shift) step = 2;
-                  else step = 4;
-                  return Math.round(bar / step) * step;
-                };
-                const onBlockMouseDown = (ev: React.MouseEvent, b: any, mode: "move" | "left" | "right") => {
-                  ev.preventDefault();
-                  ev.stopPropagation();
-                  const startMouseX = ev.clientX;
-                  const origStart = b.startBar;
-                  const origEnd = b.endBar;
-                  const onMove = (me: MouseEvent) => {
-                    const dx = me.clientX - startMouseX;
-                    const barsDx = dx / (secPerBar * pixelsPerSecond);
-                    const next = (sectionBlocks || []).map(x => {
-                      if (x.id !== b.id) return x;
-                      if (mode === "left") {
-                        let n = snapBar(origStart + barsDx, me);
-                        n = Math.max(0, Math.min(b.endBar - 0.25, n));
-                        return { ...x, startBar: n };
-                      } else if (mode === "right") {
-                        let n = snapBar(origEnd + barsDx, me);
-                        n = Math.max(b.startBar + 0.25, n);
-                        return { ...x, endBar: n };
-                      } else {
-                        const len = origEnd - origStart;
-                        let n = snapBar(origStart + barsDx, me);
-                        n = Math.max(0, n);
-                        return { ...x, startBar: n, endBar: n + len };
-                      }
-                    });
-                    onSectionBlocksChange?.(next);
-                  };
-                  const onUp = () => {
-                    window.removeEventListener("mousemove", onMove);
-                    window.removeEventListener("mouseup", onUp);
-                  };
-                  window.addEventListener("mousemove", onMove);
-                  window.addEventListener("mouseup", onUp);
-                };
-                return (
-                  <div className="absolute left-0 right-0 top-0 z-30 overflow-hidden" style={{ height: blocksZoneH, background: "hsl(0 0% 9%)", borderBottom: "1px solid hsl(0 0% 22%)" }}>
-                    <div className="absolute top-0 bottom-0" style={{ left: -tlScrollLeft }}>
-                      {blocks.map(b => {
-                        const startTime = offset + b.startBar * secPerBar;
-                        const x = startTime * pixelsPerSecond;
-                        const w = (b.endBar - b.startBar) * secPerBar * pixelsPerSecond;
-                        const c = colorFor(b.label);
-                        const len = b.endBar - b.startBar;
-                        return (
-                          <div
-                            key={b.id}
-                            className="absolute"
-                            style={{ left: Math.max(0, x), top: 2, width: w, height: blocksZoneH - 4, background: c.bg, border: `1px solid ${c.border}`, borderRadius: 3, color: c.text, cursor: "move", display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", overflow: "hidden", userSelect: "none" }}
-                            onMouseDown={(e) => onBlockMouseDown(e, b, "move")}
-                            onClick={(e) => {
-                              const t = e.target as HTMLElement;
-                              if (t.dataset.handle || t.dataset.del) return;
-                              const newName = window.prompt("SECTION 名を編集", b.label);
-                              if (newName !== null) {
-                                onSectionBlocksChange?.((sectionBlocks || []).map(x => x.id === b.id ? { ...x, label: newName } : x));
-                              }
-                            }}
-                            data-testid={`tl-section-${b.id}`}
-                          >
-                            <div style={{ fontSize: w < 60 ? 11 : 13, fontWeight: 700, letterSpacing: "0.06em", pointerEvents: "none" }}>{b.label}</div>
-                            {w >= 60 && (
-                              <div style={{ fontSize: 8, opacity: 0.7, pointerEvents: "none" }}>
-                                {Number.isInteger(len) ? len : len.toFixed(2)} 小節
-                              </div>
-                            )}
-                            <div data-handle="left" style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 6, cursor: "ew-resize" }} onMouseDown={(e) => { e.stopPropagation(); onBlockMouseDown(e, b, "left"); }} />
-                            <div data-handle="right" style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: 6, cursor: "ew-resize" }} onMouseDown={(e) => { e.stopPropagation(); onBlockMouseDown(e, b, "right"); }} />
-                            <button
-                              data-del="1"
-                              onClick={(e) => { e.stopPropagation(); onSectionBlocksChange?.((sectionBlocks || []).filter(x => x.id !== b.id)); }}
-                              style={{ position: "absolute", top: 2, right: 4, background: "rgba(0,0,0,0.4)", color: "rgba(255,255,255,0.7)", border: 0, width: 14, height: 14, borderRadius: "50%", cursor: "pointer", fontSize: 10, lineHeight: "12px", padding: 0 }}
-                              title="削除"
-                            >×</button>
-                          </div>
-                        );
-                      })}
-                    </div>
-                    <button
-                      onClick={() => {
-                        const last = (sectionBlocks || []).reduce((m, b) => Math.max(m, b.endBar), 0);
-                        const id = `b-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,5)}`;
-                        onSectionBlocksChange?.([...(sectionBlocks || []), { id, label: "NEW", startBar: last, endBar: last + 4 }]);
-                      }}
-                      style={{ position: "absolute", top: 4, right: 6, background: "rgba(229,191,61,0.15)", color: "hsl(48 100% 60%)", border: "1px solid hsl(48 70% 35%)", borderRadius: 3, padding: "2px 8px", fontSize: 10, cursor: "pointer", zIndex: 5 }}
-                      title="末尾に SECTION を追加（4 小節）"
-                    >+ 追加</button>
-                  </div>
-                );
-              })()}
               <div
                 ref={timelineRef}
                 className="absolute inset-0 overflow-x-auto overflow-y-hidden cursor-crosshair select-none scrollbar-hide"
-                style={{ scrollbarWidth: "none", msOverflowStyle: "none", top: bpm && bpm > 0 ? (timelineMode === "score" ? blocksZoneH : (scoreRows && scoreRows.length > 0 ? 18 : 0)) : 0 }}
+                style={{ scrollbarWidth: "none", msOverflowStyle: "none", top: bpm && bpm > 0 ? (scoreRows && scoreRows.length > 0 ? 18 : 0) : 0 }}
                 data-testid="area-timeline-blocks"
                 data-pps={pixelsPerSecond}
                 data-duration={duration}
@@ -3372,7 +3246,7 @@ export const TimelineEditor = memo(function TimelineEditor({
                         }
                       } : undefined}
                     >
-                      {timelineMode !== "score" && timelineBlocks}
+                      {timelineBlocks}
                       <div
                         ref={recLiveBlockRef}
                         className="absolute rounded-sm pointer-events-none"
