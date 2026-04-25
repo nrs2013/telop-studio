@@ -2900,7 +2900,8 @@ export const TimelineEditor = memo(function TimelineEditor({
               </div>
 
               <div className="flex-1 relative">
-              {/* SECTION 帯（譜割タブから連動）。タイムラインの最上部に固定、横スクロールに追従。 */}
+              {/* SECTION 帯（譜割タブから連動）。タイムラインの最上部に固定、横スクロールに追従。
+                  行（row）ではなく、各 row の中の「行内 line ごと」（SECTION/BAR を改行で揃える前提）に処理する。 */}
               {scoreRows && scoreRows.length > 0 && bpm && bpm > 0 && (
                 <div className="absolute left-0 right-0 top-0 z-30 overflow-hidden pointer-events-none" style={{ height: 18, background: "hsl(0 0% 9%)", borderBottom: "1px solid hsl(0 0% 22%)" }}>
                   <div className="absolute top-0 bottom-0" style={{ left: -tlScrollLeft }}>
@@ -2911,28 +2912,34 @@ export const TimelineEditor = memo(function TimelineEditor({
                       let cumBars = 0;
                       const items: React.ReactNode[] = [];
                       for (const row of scoreRows) {
-                        const sectionLabel = row.section.trim();
-                        if (sectionLabel) {
-                          const startTime = offset + cumBars * secPerBar;
-                          const x = startTime * pixelsPerSecond;
-                          items.push(
-                            <div key={row.id} className="absolute top-0" style={{
-                              left: Math.max(0, x), height: 18,
-                              color: "hsl(48 100% 65%)",
-                              fontSize: 10, fontWeight: 700, letterSpacing: "0.08em",
-                              padding: "0 6px",
-                              borderLeft: "2px solid hsl(48 100% 50%)",
-                              whiteSpace: "nowrap", lineHeight: "18px",
-                              background: "hsla(0, 0%, 0%, 0.4)",
-                            }}>
-                              {sectionLabel.toUpperCase()}
-                            </div>
-                          );
+                        const secLines = row.section.split("\n");
+                        const barLines = row.bars.split("\n");
+                        const maxLines = Math.max(secLines.length, barLines.length);
+                        for (let i = 0; i < maxLines; i++) {
+                          const sectionLabel = (secLines[i] || "").trim();
+                          if (sectionLabel) {
+                            const startTime = offset + cumBars * secPerBar;
+                            const x = startTime * pixelsPerSecond;
+                            items.push(
+                              <div key={`${row.id}-${i}`} className="absolute top-0" style={{
+                                left: Math.max(0, x), height: 18,
+                                color: "hsl(48 100% 65%)",
+                                fontSize: 10, fontWeight: 700, letterSpacing: "0.08em",
+                                padding: "0 6px",
+                                borderLeft: "2px solid hsl(48 100% 50%)",
+                                whiteSpace: "nowrap", lineHeight: "18px",
+                                background: "hsla(0, 0%, 0%, 0.4)",
+                              }}>
+                                {sectionLabel.toUpperCase()}
+                              </div>
+                            );
+                          }
+                          // この line の BAR セル文字列から数字を全部抽出して足し算
+                          const barText = barLines[i] || "";
+                          const nums = barText.match(/\d+/g) || [];
+                          const barSum = nums.reduce((s, n) => s + parseInt(n, 10), 0);
+                          cumBars += barSum;
                         }
-                        // BAR セルから数字を全部抽出して足し算 (例: "4 4 4 4" → 16, "16小節" → 16)
-                        const nums = row.bars.match(/\d+/g) || [];
-                        const barSum = nums.reduce((s, n) => s + parseInt(n, 10), 0);
-                        cumBars += barSum;
                       }
                       return items;
                     })()}
