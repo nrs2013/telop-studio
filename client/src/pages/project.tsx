@@ -6159,21 +6159,36 @@ export default function ProjectPage() {
                       };
                       // 1 行分の高さ：fontSize 13 × lineHeight 1.5 = 19.5px
                       const LINE_H = 19.5;
-                      const HighlightOverlay = activeLineIdx >= 0 ? (
-                        <div style={{
-                          position: "absolute",
-                          left: 0, right: 0,
-                          top: 4 + activeLineIdx * LINE_H,
-                          height: LINE_H,
-                          background: "rgba(229,191,61,0.18)",
-                          pointerEvents: "none",
-                          zIndex: 0,
-                        }} />
-                      ) : null;
+                      // 該当 line の文字色を黄色にするオーバーレイ（テキストを上から重ね描き）
+                      const makeTextOverlay = (value: string, padding: string, textAlign: "center" | "left") => {
+                        if (activeLineIdx < 0) return null;
+                        const lines = value.split("\n");
+                        const lineText = lines[activeLineIdx] || "";
+                        if (!lineText.trim()) return null;
+                        return (
+                          <div style={{
+                            position: "absolute",
+                            left: 0, right: 0,
+                            top: 4 + activeLineIdx * LINE_H,
+                            height: LINE_H,
+                            padding,
+                            textAlign,
+                            color: "hsl(48 100% 60%)",
+                            fontWeight: 700,
+                            fontSize: 13,
+                            lineHeight: "19.5px",
+                            fontFamily: "inherit",
+                            whiteSpace: "pre",
+                            pointerEvents: "none",
+                            background: TS_DESIGN.bg2,
+                            zIndex: 2,
+                            overflow: "hidden",
+                          }}>{lineText}</div>
+                        );
+                      };
                       return (
                         <Fragment key={row.id}>
                           <label style={{ ...cellBase, borderRight: `1px solid ${TS_DESIGN.border}` }}>
-                            {HighlightOverlay}
                             <textarea
                               value={row.section}
                               onChange={(e) => updateScoreRow(idx, { section: e.target.value })}
@@ -6183,9 +6198,9 @@ export default function ProjectPage() {
                               style={{ position: "relative", zIndex: 1, color: TS_DESIGN.text, fontSize: 13, lineHeight: 1.5, minHeight: 28, padding: "4px 6px", border: 0, fontFamily: "inherit" }}
                               data-testid={`score-section-${idx}`}
                             />
+                            {makeTextOverlay(row.section, "0 6px", "center")}
                           </label>
                           <label style={{ ...cellBase, borderRight: `1px solid ${TS_DESIGN.border}` }}>
-                            {HighlightOverlay}
                             <textarea
                               value={row.bars}
                               onChange={(e) => updateScoreRow(idx, { bars: e.target.value })}
@@ -6195,9 +6210,9 @@ export default function ProjectPage() {
                               style={{ position: "relative", zIndex: 1, color: TS_DESIGN.text, fontSize: 13, lineHeight: 1.5, minHeight: 28, padding: "4px 4px", border: 0, fontFamily: "inherit" }}
                               data-testid={`score-bars-${idx}`}
                             />
+                            {makeTextOverlay(row.bars, "0 4px", "center")}
                           </label>
                           <label style={cellBase}>
-                            {HighlightOverlay}
                             <textarea
                               value={row.lyric}
                               onChange={(e) => updateScoreRow(idx, { lyric: e.target.value })}
@@ -6207,6 +6222,7 @@ export default function ProjectPage() {
                               style={{ position: "relative", zIndex: 1, color: TS_DESIGN.text, fontSize: 13, lineHeight: 1.5, minHeight: 28, padding: "4px 10px", border: 0, fontFamily: "inherit" }}
                               data-testid={`score-lyric-${idx}`}
                             />
+                            {makeTextOverlay(row.lyric, "0 10px", "left")}
                           </label>
                         </Fragment>
                       );
