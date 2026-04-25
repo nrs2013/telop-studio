@@ -6022,22 +6022,20 @@ export default function ProjectPage() {
                     {scoreRows.map((row, idx) => (
                       <Fragment key={row.id}>
                         <label style={{ borderRight: `1px solid ${TS_DESIGN.border}`, display: "flex", alignItems: "flex-start", minHeight: 28, cursor: "text" }}>
-                          <textarea
+                          <input
                             value={row.section}
                             onChange={(e) => updateScoreRow(idx, { section: e.target.value })}
-                            rows={Math.max(1, row.section.split("\n").length)}
-                            className="w-full bg-transparent outline-none resize-none text-center"
-                            style={{ color: TS_DESIGN.text2, fontSize: 12, letterSpacing: "0.06em", fontWeight: 500, padding: "4px 6px", border: 0, lineHeight: 1.5, minHeight: 28 }}
+                            className="w-full bg-transparent outline-none text-center"
+                            style={{ color: TS_DESIGN.text, fontSize: 13, letterSpacing: "0.04em", fontWeight: 500, padding: "5px 6px", border: 0, lineHeight: 1.5, minHeight: 28 }}
                             data-testid={`score-section-${idx}`}
                           />
                         </label>
                         <label style={{ borderRight: `1px solid ${TS_DESIGN.border}`, display: "flex", alignItems: "flex-start", minHeight: 28, cursor: "text" }}>
-                          <textarea
+                          <input
                             value={row.bars}
                             onChange={(e) => updateScoreRow(idx, { bars: e.target.value })}
-                            rows={Math.max(1, row.bars.split("\n").length)}
-                            className="w-full bg-transparent outline-none resize-none text-center tabular-nums"
-                            style={{ color: TS_DESIGN.text2, fontSize: 13, padding: "4px 4px", border: 0, lineHeight: 1.5, minHeight: 28 }}
+                            className="w-full bg-transparent outline-none text-center tabular-nums"
+                            style={{ color: TS_DESIGN.text, fontSize: 13, padding: "5px 4px", border: 0, lineHeight: 1.5, minHeight: 28 }}
                             data-testid={`score-bars-${idx}`}
                           />
                         </label>
@@ -6047,7 +6045,7 @@ export default function ProjectPage() {
                             onChange={(e) => updateScoreRow(idx, { lyric: e.target.value })}
                             rows={Math.max(1, row.lyric.split("\n").length)}
                             className="w-full bg-transparent outline-none resize-none"
-                            style={{ color: TS_DESIGN.text, fontSize: 13, lineHeight: 1.5, minHeight: 28, padding: "4px 28px 4px 10px", border: 0 }}
+                            style={{ color: TS_DESIGN.text, fontSize: 13, lineHeight: 1.5, minHeight: 28, padding: "5px 28px 5px 10px", border: 0 }}
                             data-testid={`score-lyric-${idx}`}
                           />
                           <button
