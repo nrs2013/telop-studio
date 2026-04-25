@@ -6130,6 +6130,75 @@ export default function ProjectPage() {
             )}
           </div>
         </div>
+
+        {/* SAMPLER 欄（一番右）：譜割タブの SECTION 名から自動生成。クリックで「2 小節前から再生」 */}
+        <div
+          className="shrink-0 flex flex-col overflow-hidden"
+          style={{ width: 180, border: `1px solid ${TS_DESIGN.border}`, backgroundColor: TS_DESIGN.bg2 }}
+          data-testid="sampler-panel"
+        >
+          <div className="shrink-0" style={{ padding: "6px 10px", borderBottom: `1px solid ${TS_DESIGN.border}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <span style={{ color: "hsl(48 100% 55%)", fontSize: 9, letterSpacing: "0.18em", fontWeight: 700 }}>SAMPLER</span>
+            <span style={{ color: TS_DESIGN.text3, fontSize: 8 }}>2小節前から再生</span>
+          </div>
+          <div className="flex-1 overflow-y-auto" style={{ padding: 8, display: "flex", flexDirection: "column", gap: 6 }} data-testid="sampler-list">
+            {(() => {
+              const bpm = project?.detectedBpm;
+              const offset = project?.bpmGridOffset ?? 0;
+              if (!bpm || bpm <= 0) {
+                return <div style={{ color: TS_DESIGN.text3, fontSize: 10, padding: "8px 4px" }}>BPM 未検出。<br/>先に BPM 検出してください。</div>;
+              }
+              const beatsPerBar = 4;
+              const secPerBar = (60 / bpm) * beatsPerBar;
+              let cumBars = 0;
+              const items: React.ReactNode[] = [];
+              for (const row of scoreRows) {
+                const secLines = row.section.split("\n");
+                const barLines = row.bars.split("\n");
+                const maxLines = Math.max(secLines.length, barLines.length);
+                for (let i = 0; i < maxLines; i++) {
+                  const label = (secLines[i] || "").trim();
+                  if (label) {
+                    const sectionTime = offset + cumBars * secPerBar;
+                    const cueTime = Math.max(0, sectionTime - 2 * secPerBar);
+                    items.push(
+                      <button
+                        key={`${row.id}-${i}`}
+                        onClick={() => {
+                          seekTo(cueTime);
+                          if (!isPlayingRef.current) togglePlay();
+                        }}
+                        className="hover:bg-white/5 active:bg-white/10 transition-colors"
+                        style={{
+                          background: TS_DESIGN.surface,
+                          border: `1px solid ${TS_DESIGN.border}`,
+                          borderRadius: 4,
+                          padding: "8px 10px",
+                          color: TS_DESIGN.text,
+                          fontSize: 12,
+                          fontWeight: 500,
+                          letterSpacing: "0.06em",
+                          textAlign: "left",
+                          cursor: "pointer",
+                          fontFamily: "inherit",
+                        }}
+                        data-testid={`sampler-btn-${row.id}-${i}`}
+                        title={`${label} の 2 小節前から再生`}
+                      >▶  {label.toUpperCase()}</button>
+                    );
+                  }
+                  const barText = barLines[i] || "";
+                  const nums = barText.match(/\d+/g) || [];
+                  cumBars += nums.reduce((s, n) => s + parseInt(n, 10), 0);
+                }
+              }
+              if (items.length === 0) {
+                return <div style={{ color: TS_DESIGN.text3, fontSize: 10, padding: "8px 4px" }}>譜割タブの SECTION 欄に書き込むと、ここにボタンが並びます。</div>;
+              }
+              return items;
+            })()}
+          </div>
+        </div>
         </div>
 
         <div className="shrink-0 overflow-hidden" style={{ height: "234px", border: "1px solid hsl(0 0% 22%)" }}>
