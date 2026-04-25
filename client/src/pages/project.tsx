@@ -6054,27 +6054,33 @@ export default function ProjectPage() {
                       const onCellKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>, col: "section" | "bars" | "lyric") => {
                         // 日本語入力（IME）変換中は何もしない（ Enter で行追加されたり Tab で文字消えたりするのを防ぐ）
                         if (e.nativeEvent.isComposing || (e.nativeEvent as any).keyCode === 229) return;
+                        // Cmd+Return：今の行の SECTION/BAR/LYRIC 全 3 セルの末尾に \n を同時追加
                         if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
                           e.preventDefault();
-                          insertScoreRowAbove(idx);
-                          // 挿入された新しい空行（idx）の同じ列にカーソルを移す
-                          // → Cmd+Backspace で即座に「戻る」が実現できる
+                          setScoreRows(prev => prev.map((r, i) => i === idx ? {
+                            ...r,
+                            section: r.section + "\n",
+                            bars: r.bars + "\n",
+                            lyric: r.lyric + "\n",
+                          } : r));
                           setTimeout(() => {
-                            const next = document.querySelector(`[data-testid="score-${col}-${idx}"]`) as HTMLTextAreaElement | null;
-                            if (next) { next.focus(); next.setSelectionRange(0, 0); }
+                            const ta = document.querySelector(`[data-testid="score-${col}-${idx}"]`) as HTMLTextAreaElement | null;
+                            if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
                           }, 50);
                           return;
                         }
+                        // Cmd+Delete：今の行の 3 セル全部から末尾の \n を同時削除
                         if ((e.metaKey || e.ctrlKey) && (e.key === "Backspace" || e.key === "Delete")) {
                           e.preventDefault();
-                          deleteScoreRow(idx);
-                          // 削除後、同じ列の同じ idx（＝消した行の次の行）にフォーカス。
-                          // 末尾を消した場合は前の行に。
+                          setScoreRows(prev => prev.map((r, i) => i === idx ? {
+                            ...r,
+                            section: r.section.endsWith("\n") ? r.section.slice(0, -1) : r.section,
+                            bars: r.bars.endsWith("\n") ? r.bars.slice(0, -1) : r.bars,
+                            lyric: r.lyric.endsWith("\n") ? r.lyric.slice(0, -1) : r.lyric,
+                          } : r));
                           setTimeout(() => {
-                            const totalNow = document.querySelectorAll('[data-testid^="score-section-"]').length;
-                            const focusIdx = idx >= totalNow ? Math.max(0, totalNow - 1) : idx;
-                            const next = document.querySelector(`[data-testid="score-${col}-${focusIdx}"]`) as HTMLTextAreaElement | null;
-                            if (next) { next.focus(); next.setSelectionRange(0, 0); }
+                            const ta = document.querySelector(`[data-testid="score-${col}-${idx}"]`) as HTMLTextAreaElement | null;
+                            if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
                           }, 50);
                           return;
                         }
@@ -6114,7 +6120,7 @@ export default function ProjectPage() {
                           }
                         }
                       };
-                      const cellBase = { borderBottom: `1px solid ${TS_DESIGN.border}`, display: "flex", alignItems: "flex-start", minHeight: 28, cursor: "text" } as const;
+                      const cellBase = { display: "flex", alignItems: "flex-start", minHeight: 28, cursor: "text" } as const;
                       return (
                         <Fragment key={row.id}>
                           <label style={{ ...cellBase, borderRight: `1px solid ${TS_DESIGN.border}` }}>
