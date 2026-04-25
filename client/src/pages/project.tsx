@@ -6026,12 +6026,9 @@ export default function ProjectPage() {
                   <div style={{ display: "grid", gridTemplateColumns: "64px 56px 1fr" }}>
                     {scoreRows.map((row, idx) => {
                       const onCellKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>, col: "section" | "bars" | "lyric") => {
-                        const ta = e.target as HTMLTextAreaElement;
                         if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-                          if (ta.selectionStart === 0) {
-                            e.preventDefault();
-                            insertScoreRowAbove(idx);
-                          }
+                          e.preventDefault();
+                          insertScoreRowAbove(idx);
                           return;
                         }
                         if ((e.metaKey || e.ctrlKey) && (e.key === "Backspace" || e.key === "Delete")) {
