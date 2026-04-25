@@ -1183,10 +1183,21 @@ export default function ProjectPage() {
   const lyricsTextRef = useRef("");
 
   // 譜割（SCORE）タブ用 state。SECTION 名 + 小節数 + 歌詞テキスト の 3 列スプレッドシート。
+  // 全セルが任意入力（空欄 OK）。最初から空行が並んでる Excel ライク表示。
   // データはまだ DB スキーマに無いので、当面 localStorage にプロジェクト ID 単位で保存する。
   const [activeRightTab, setActiveRightTab] = useState<"lyrics" | "score">("lyrics");
-  const [scoreRows, setScoreRows] = useState<{ id: string; section: string; bars: number; lyric: string }[]>([]);
+  const [scoreRows, setScoreRows] = useState<{ id: string; section: string; bars: number | null; lyric: string }[]>([]);
   const [scoreInitialized, setScoreInitialized] = useState(false);
+
+  // 初期空行を 30 行作るヘルパー
+  const buildEmptyScoreRows = useCallback((count: number) => {
+    return Array.from({ length: count }, (_, i) => ({
+      id: `init-${Date.now().toString(36)}-${i}`,
+      section: "",
+      bars: null as number | null,
+      lyric: "",
+    }));
+  }, []);
 
   // 譜割：プロジェクト切替時に localStorage から復元
   useEffect(() => {
@@ -1200,24 +1211,24 @@ export default function ProjectPage() {
       const raw = localStorage.getItem(`telop-score-${id}`);
       if (raw) {
         const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) {
+        if (Array.isArray(parsed) && parsed.length > 0) {
           setScoreRows(parsed.filter((r: any) => r && typeof r.id === "string").map((r: any) => ({
             id: String(r.id),
             section: typeof r.section === "string" ? r.section : "",
-            bars: typeof r.bars === "number" && Number.isFinite(r.bars) ? r.bars : 4,
+            bars: typeof r.bars === "number" && Number.isFinite(r.bars) ? r.bars : null,
             lyric: typeof r.lyric === "string" ? r.lyric : "",
           })));
         } else {
-          setScoreRows([]);
+          setScoreRows(buildEmptyScoreRows(30));
         }
       } else {
-        setScoreRows([]);
+        setScoreRows(buildEmptyScoreRows(30));
       }
     } catch {
-      setScoreRows([]);
+      setScoreRows(buildEmptyScoreRows(30));
     }
     setScoreInitialized(true);
-  }, [id]);
+  }, [id, buildEmptyScoreRows]);
 
   // 譜割：変更時に localStorage に保存
   useEffect(() => {
@@ -1228,10 +1239,18 @@ export default function ProjectPage() {
   }, [scoreRows, id, scoreInitialized]);
 
   // 譜割：行操作のヘルパー
-  const addScoreRow = useCallback(() => {
-    setScoreRows(prev => [...prev, { id: `row-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, section: "", bars: 4, lyric: "" }]);
+  const addScoreRows = useCallback((count = 10) => {
+    setScoreRows(prev => [
+      ...prev,
+      ...Array.from({ length: count }, (_, i) => ({
+        id: `add-${Date.now().toString(36)}-${i}-${Math.random().toString(36).slice(2, 6)}`,
+        section: "",
+        bars: null as number | null,
+        lyric: "",
+      })),
+    ]);
   }, []);
-  const updateScoreRow = useCallback((idx: number, patch: Partial<{ section: string; bars: number; lyric: string }>) => {
+  const updateScoreRow = useCallback((idx: number, patch: Partial<{ section: string; bars: number | null; lyric: string }>) => {
     setScoreRows(prev => prev.map((r, i) => i === idx ? { ...r, ...patch } : r));
   }, []);
   const deleteScoreRow = useCallback((idx: number) => {
@@ -5716,14 +5735,9 @@ export default function ProjectPage() {
                 </>
               )}
               {activeRightTab === "score" && (
-                <button
-                  tabIndex={-1}
-                  onClick={addScoreRow}
-                  className="text-[10px] ml-auto px-2 py-0.5 rounded font-semibold tracking-wider hover:bg-white/10"
-                  style={{ color: TS_DESIGN.text2, border: `1px solid ${TS_DESIGN.border}` }}
-                  data-testid="btn-score-add-row"
-                  title="末尾に行を追加"
-                >+ 行追加</button>
+                <span className="text-[9px] ml-auto" style={{ color: TS_DESIGN.text3 }}>
+                  自由入力 · {scoreRows.length} 行
+                </span>
               )}
             </div>
             {activeRightTab === "lyrics" && (isRecording ? (
@@ -5993,63 +6007,71 @@ export default function ProjectPage() {
             ))}
             {activeRightTab === "score" && (
               <div className="flex-1 overflow-y-auto" data-testid="score-table" style={{ background: TS_DESIGN.bg2 }}>
-                {scoreRows.length === 0 ? (
-                  <div style={{ padding: 24, textAlign: "center", color: TS_DESIGN.text3, fontSize: 12, lineHeight: 1.7 }}>
-                    まだ譜割がありません。<br />上の「+ 行追加」で行を作ってください。
-                  </div>
-                ) : (
-                  <div style={{ display: "grid", gridTemplateColumns: "64px 48px 1fr" }}>
-                    {scoreRows.map((row, idx) => (
-                      <Fragment key={row.id}>
-                        <div style={{ borderRight: `1px solid ${TS_DESIGN.border}`, padding: "6px 6px", display: "flex", alignItems: "center" }}>
-                          <input
-                            value={row.section}
-                            onChange={(e) => updateScoreRow(idx, { section: e.target.value })}
-                            placeholder="—"
-                            className="w-full bg-transparent outline-none text-center placeholder-dark"
-                            style={{ color: TS_DESIGN.text2, fontSize: 12, letterSpacing: "0.06em", fontWeight: 500 }}
-                            data-testid={`score-section-${idx}`}
-                          />
-                        </div>
-                        <div style={{ borderRight: `1px solid ${TS_DESIGN.border}`, padding: "6px 4px", display: "flex", alignItems: "center" }}>
-                          <input
-                            type="number"
-                            min={1}
-                            max={64}
-                            value={row.bars}
-                            onChange={(e) => {
-                              const v = parseInt(e.target.value);
-                              if (!isNaN(v) && v >= 1 && v <= 64) updateScoreRow(idx, { bars: v });
-                            }}
-                            onFocus={(e) => (e.target as HTMLInputElement).select()}
-                            className="w-full bg-transparent outline-none text-center tabular-nums"
-                            style={{ color: TS_DESIGN.text2, fontSize: 13 }}
-                            data-testid={`score-bars-${idx}`}
-                          />
-                        </div>
-                        <div style={{ padding: "6px 10px", position: "relative" }} className="group/score-row">
-                          <textarea
-                            value={row.lyric}
-                            onChange={(e) => updateScoreRow(idx, { lyric: e.target.value })}
-                            placeholder=""
-                            rows={Math.max(1, row.lyric.split("\n").length)}
-                            className="w-full bg-transparent outline-none resize-none placeholder-dark"
-                            style={{ color: TS_DESIGN.text, fontSize: 13, lineHeight: 1.6, minHeight: 22 }}
-                            data-testid={`score-lyric-${idx}`}
-                          />
-                          <button
-                            onClick={() => deleteScoreRow(idx)}
-                            tabIndex={-1}
-                            className="absolute right-1 top-1 w-5 h-5 flex items-center justify-center rounded opacity-0 group-hover/score-row:opacity-100 hover:bg-white/10"
-                            style={{ color: TS_DESIGN.text3, fontSize: 14 }}
-                            title="この行を削除"
-                            data-testid={`score-delete-${idx}`}
-                          >×</button>
-                        </div>
-                      </Fragment>
-                    ))}
-                  </div>
-                )}
+                <div style={{ display: "grid", gridTemplateColumns: "64px 48px 1fr" }}>
+                  {scoreRows.map((row, idx) => (
+                    <Fragment key={row.id}>
+                      <div style={{ borderRight: `1px solid ${TS_DESIGN.border}`, borderBottom: `1px solid ${TS_DESIGN.border}`, padding: "4px 6px", display: "flex", alignItems: "center", minHeight: 28 }}>
+                        <input
+                          value={row.section}
+                          onChange={(e) => updateScoreRow(idx, { section: e.target.value })}
+                          placeholder=""
+                          className="w-full bg-transparent outline-none text-center"
+                          style={{ color: TS_DESIGN.text2, fontSize: 12, letterSpacing: "0.06em", fontWeight: 500 }}
+                          data-testid={`score-section-${idx}`}
+                        />
+                      </div>
+                      <div style={{ borderRight: `1px solid ${TS_DESIGN.border}`, borderBottom: `1px solid ${TS_DESIGN.border}`, padding: "4px 4px", display: "flex", alignItems: "center", minHeight: 28 }}>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          value={row.bars ?? ""}
+                          onChange={(e) => {
+                            const raw = e.target.value.trim();
+                            if (raw === "") {
+                              updateScoreRow(idx, { bars: null });
+                            } else {
+                              const v = parseInt(raw);
+                              if (!isNaN(v) && v >= 1 && v <= 999) updateScoreRow(idx, { bars: v });
+                            }
+                          }}
+                          onFocus={(e) => (e.target as HTMLInputElement).select()}
+                          className="w-full bg-transparent outline-none text-center tabular-nums"
+                          style={{ color: TS_DESIGN.text2, fontSize: 13 }}
+                          data-testid={`score-bars-${idx}`}
+                        />
+                      </div>
+                      <div style={{ padding: "4px 10px", borderBottom: `1px solid ${TS_DESIGN.border}`, position: "relative", minHeight: 28 }} className="group/score-row">
+                        <textarea
+                          value={row.lyric}
+                          onChange={(e) => updateScoreRow(idx, { lyric: e.target.value })}
+                          placeholder=""
+                          rows={Math.max(1, row.lyric.split("\n").length)}
+                          className="w-full bg-transparent outline-none resize-none"
+                          style={{ color: TS_DESIGN.text, fontSize: 13, lineHeight: 1.5, minHeight: 20, paddingRight: 24 }}
+                          data-testid={`score-lyric-${idx}`}
+                        />
+                        <button
+                          onClick={() => deleteScoreRow(idx)}
+                          tabIndex={-1}
+                          className="absolute right-1 top-1 w-5 h-5 flex items-center justify-center rounded opacity-0 group-hover/score-row:opacity-100 hover:bg-white/10"
+                          style={{ color: TS_DESIGN.text3, fontSize: 14 }}
+                          title="この行を削除"
+                          data-testid={`score-delete-${idx}`}
+                        >×</button>
+                      </div>
+                    </Fragment>
+                  ))}
+                </div>
+                <div style={{ padding: "10px 8px", textAlign: "center" }}>
+                  <button
+                    onClick={() => addScoreRows(10)}
+                    tabIndex={-1}
+                    className="text-[10px] px-3 py-1 rounded hover:bg-white/5"
+                    style={{ color: TS_DESIGN.text3, border: `1px dashed ${TS_DESIGN.border}` }}
+                    data-testid="btn-score-add-10"
+                    title="10 行追加"
+                  >+ 10 行</button>
+                </div>
               </div>
             )}
           </div>
