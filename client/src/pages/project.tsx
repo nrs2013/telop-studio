@@ -1213,22 +1213,32 @@ export default function ProjectPage() {
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed) && parsed.length > 0) {
           // 旧データを適合：誤って改行が入って 1 セルに複数 SECTION/BAR が詰まったケースを、
-          // 行ごとに分割して展開する。歌詞は元の行の先頭にだけ残す。
+          // 行ごとに分割して展開する。LYRIC は「空行区切り」のブロックを section/bars がある行に
+          // 順番に割り当てる（譜割の各セクションに歌詞ブロックを対応させる）。
           const expanded: { id: string; section: string; bars: string; lyric: string }[] = [];
           for (const r of parsed) {
             if (!r || typeof r.id !== "string") continue;
             const sectionRaw = typeof r.section === "string" ? r.section : "";
             const barsRaw = typeof r.bars === "string" ? r.bars : (typeof r.bars === "number" && Number.isFinite(r.bars) ? String(r.bars) : "");
-            const lyric = typeof r.lyric === "string" ? r.lyric : "";
+            const lyricRaw = typeof r.lyric === "string" ? r.lyric : "";
             const sectionLines = sectionRaw.split(/\r?\n/);
             const barsLines = barsRaw.split(/\r?\n/);
+            const lyricBlocks = lyricRaw.split(/\r?\n\s*\r?\n/);
             const maxLen = Math.max(sectionLines.length, barsLines.length, 1);
+            let lyricBlockIdx = 0;
             for (let i = 0; i < maxLen; i++) {
+              const section = (sectionLines[i] || "").trim();
+              const bars = (barsLines[i] || "").trim();
+              let assignedLyric = "";
+              if (section || bars) {
+                assignedLyric = (lyricBlocks[lyricBlockIdx] || "").trim();
+                lyricBlockIdx++;
+              }
               expanded.push({
                 id: i === 0 ? String(r.id) : `mig-${String(r.id)}-${i}`,
-                section: (sectionLines[i] || "").trim(),
-                bars: (barsLines[i] || "").trim(),
-                lyric: i === 0 ? lyric : "",
+                section,
+                bars,
+                lyric: assignedLyric,
               });
             }
           }
