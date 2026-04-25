@@ -6050,11 +6050,25 @@ export default function ProjectPage() {
                         if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
                           e.preventDefault();
                           insertScoreRowAbove(idx);
+                          // 挿入された新しい空行（idx）の同じ列にカーソルを移す
+                          // → Cmd+Backspace で即座に「戻る」が実現できる
+                          setTimeout(() => {
+                            const next = document.querySelector(`[data-testid="score-${col}-${idx}"]`) as HTMLTextAreaElement | null;
+                            if (next) { next.focus(); next.setSelectionRange(0, 0); }
+                          }, 50);
                           return;
                         }
                         if ((e.metaKey || e.ctrlKey) && (e.key === "Backspace" || e.key === "Delete")) {
                           e.preventDefault();
                           deleteScoreRow(idx);
+                          // 削除後、同じ列の同じ idx（＝消した行の次の行）にフォーカス。
+                          // 末尾を消した場合は前の行に。
+                          setTimeout(() => {
+                            const totalNow = document.querySelectorAll('[data-testid^="score-section-"]').length;
+                            const focusIdx = idx >= totalNow ? Math.max(0, totalNow - 1) : idx;
+                            const next = document.querySelector(`[data-testid="score-${col}-${focusIdx}"]`) as HTMLTextAreaElement | null;
+                            if (next) { next.focus(); next.setSelectionRange(0, 0); }
+                          }, 50);
                           return;
                         }
                         if (e.key === "Tab") {
