@@ -6044,8 +6044,35 @@ export default function ProjectPage() {
                   <div style={{ padding: "6px 10px", color: TS_DESIGN.text3, fontSize: 9, letterSpacing: "0.18em", textTransform: "uppercase", fontWeight: 600 }}>LYRIC</div>
                 </div>
                 <div className="flex-1 overflow-y-auto" data-testid="score-scroll">
+                  {(() => {
+                    // null をレンダリングするだけのダミー（後の map 内で使う）
+                    return null;
+                  })()}
                   <div style={{ display: "grid", gridTemplateColumns: "64px 56px 1fr" }}>
-                    {scoreRows.map((row, idx) => {
+                    {(() => {
+                      // 再生位置がどの scoreRow に入ってるかを計算（行ハイライト用）
+                      const __bpm = project?.detectedBpm;
+                      const __offset = project?.bpmGridOffset ?? 0;
+                      const activeRowIndex = (() => {
+                        if (!__bpm || __bpm <= 0) return -1;
+                        const secPerBar = (60 / __bpm) * 4;
+                        let cum = 0;
+                        for (let r = 0; r < scoreRows.length; r++) {
+                          const barLines = scoreRows[r].bars.split("\n");
+                          let totalBars = 0;
+                          for (const bt of barLines) {
+                            const nums = bt.match(/\d+/g) || [];
+                            totalBars += nums.reduce((s, n) => s + parseInt(n, 10), 0);
+                          }
+                          const rs = __offset + cum * secPerBar;
+                          const re = rs + totalBars * secPerBar;
+                          if (currentTime >= rs && currentTime < re && totalBars > 0) return r;
+                          cum += totalBars;
+                        }
+                        return -1;
+                      })();
+                      return scoreRows.map((row, idx) => {
+                        const isActive = activeRowIndex === idx;
                       const onCellKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>, col: "section" | "bars" | "lyric") => {
                         // 日本語入力（IME）変換中は何もしない（ Enter で行追加されたり Tab で文字消えたりするのを防ぐ）
                         if (e.nativeEvent.isComposing || (e.nativeEvent as any).keyCode === 229) return;
@@ -6124,7 +6151,13 @@ export default function ProjectPage() {
                           }
                         }
                       };
-                      const cellBase = { display: "flex", alignItems: "flex-start", minHeight: 28, cursor: "text" } as const;
+                      const cellBase = {
+                        display: "flex" as const,
+                        alignItems: "flex-start" as const,
+                        minHeight: 28,
+                        cursor: "text" as const,
+                        background: isActive ? "rgba(229,191,61,0.10)" : "transparent",
+                      };
                       return (
                         <Fragment key={row.id}>
                           <label style={{ ...cellBase, borderRight: `1px solid ${TS_DESIGN.border}` }}>
@@ -6162,7 +6195,8 @@ export default function ProjectPage() {
                           </label>
                         </Fragment>
                       );
-                    })}
+                    });
+                    })()}
                   </div>
                 </div>
               </div>
