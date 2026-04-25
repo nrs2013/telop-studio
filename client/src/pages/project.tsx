@@ -6018,10 +6018,10 @@ export default function ProjectPage() {
                   <div style={{ padding: "6px 10px", color: TS_DESIGN.text3, fontSize: 9, letterSpacing: "0.18em", textTransform: "uppercase", fontWeight: 600 }}>LYRIC</div>
                 </div>
                 <div className="flex-1 overflow-y-auto">
-                  <div>
+                  <div style={{ display: "grid", gridTemplateColumns: "64px 48px 1fr" }}>
                     {scoreRows.map((row, idx) => (
-                      <div key={row.id} style={{ display: "flex", alignItems: "flex-start" }} className="group/score-row">
-                        <label style={{ width: 64, borderRight: `1px solid ${TS_DESIGN.border}`, display: "flex", alignItems: "flex-start", minHeight: 28, cursor: "text", flexShrink: 0 }}>
+                      <Fragment key={row.id}>
+                        <label style={{ borderRight: `1px solid ${TS_DESIGN.border}`, display: "flex", alignItems: "flex-start", minHeight: 28, cursor: "text" }}>
                           <textarea
                             value={row.section}
                             onChange={(e) => updateScoreRow(idx, { section: e.target.value })}
@@ -6031,7 +6031,7 @@ export default function ProjectPage() {
                             data-testid={`score-section-${idx}`}
                           />
                         </label>
-                        <label style={{ width: 48, borderRight: `1px solid ${TS_DESIGN.border}`, display: "flex", alignItems: "flex-start", minHeight: 28, cursor: "text", flexShrink: 0 }}>
+                        <label style={{ borderRight: `1px solid ${TS_DESIGN.border}`, display: "flex", alignItems: "flex-start", minHeight: 28, cursor: "text" }}>
                           <textarea
                             value={row.bars === null ? "" : String(row.bars)}
                             onChange={(e) => {
@@ -6049,7 +6049,7 @@ export default function ProjectPage() {
                             data-testid={`score-bars-${idx}`}
                           />
                         </label>
-                        <label style={{ flex: 1, position: "relative", display: "flex", alignItems: "flex-start", minHeight: 28, cursor: "text" }}>
+                        <label style={{ position: "relative", display: "flex", alignItems: "flex-start", minHeight: 28, cursor: "text" }} className="group/score-row">
                           <textarea
                             value={row.lyric}
                             onChange={(e) => updateScoreRow(idx, { lyric: e.target.value })}
@@ -6067,7 +6067,7 @@ export default function ProjectPage() {
                             data-testid={`score-delete-${idx}`}
                           >×</button>
                         </label>
-                      </div>
+                      </Fragment>
                     ))}
                   </div>
                   <div style={{ padding: "10px 8px", display: "flex", justifyContent: "center", gap: 8 }}>
