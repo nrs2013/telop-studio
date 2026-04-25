@@ -1209,6 +1209,8 @@ export default function ProjectPage() {
       if (raw) {
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed) && parsed.length > 0) {
+          // 既存データはそのまま使う（勝手に 100 行に padding しない）。
+          // ユーザーが消した行は消えたまま。最低 1 行だけは残す（空のときも編集できるように）。
           const rows = parsed
             .filter((r: any) => r && typeof r.id === "string")
             .map((r: any) => ({
@@ -1217,14 +1219,12 @@ export default function ProjectPage() {
               bars: typeof r.bars === "string" ? r.bars : (typeof r.bars === "number" && Number.isFinite(r.bars) ? String(r.bars) : ""),
               lyric: typeof r.lyric === "string" ? r.lyric : "",
             }));
-          if (rows.length < 100) {
-            rows.push(...buildEmptyScoreRows(100 - rows.length));
-          }
-          setScoreRows(rows);
+          setScoreRows(rows.length > 0 ? rows : buildEmptyScoreRows(1));
         } else {
           setScoreRows(buildEmptyScoreRows(100));
         }
       } else {
+        // 新規プロジェクトのみ 100 行で開く
         setScoreRows(buildEmptyScoreRows(100));
       }
     } catch {
@@ -1259,6 +1259,15 @@ export default function ProjectPage() {
       next.splice(idx, 0, newRow);
       return next;
     });
+  }, []);
+  // 末尾に空行を1行追加
+  const appendScoreRow = useCallback(() => {
+    setScoreRows(prev => [...prev, {
+      id: `add-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+      section: "",
+      bars: "",
+      lyric: "",
+    }]);
   }, []);
 
 
@@ -5742,7 +5751,7 @@ export default function ProjectPage() {
               )}
               {activeRightTab === "score" && (
                 <span className="text-[9px] ml-auto" style={{ color: TS_DESIGN.text3 }}>
-                  ⌘+Return：上に 1 行挿入 / ⌘+Delete：この行削除
+                  Tab：次のセル / ⌘+Return：上に行追加 / ⌘+Delete：この行削除
                 </span>
               )}
             </div>
@@ -6044,7 +6053,20 @@ export default function ProjectPage() {
                           let nextColIdx = colIdx + (e.shiftKey ? -1 : 1);
                           if (nextColIdx >= order.length) { nextRow += 1; nextColIdx = 0; }
                           else if (nextColIdx < 0) { nextRow -= 1; nextColIdx = order.length - 1; }
-                          if (nextRow < 0 || nextRow >= scoreRows.length) return;
+                          // 先頭で Shift+Tab → 何もしない（戻れない）
+                          if (nextRow < 0) return;
+                          // 末尾の LYRIC で Tab → 新しい行を末尾に追加して、その SECTION にフォーカス
+                          if (nextRow >= scoreRows.length) {
+                            appendScoreRow();
+                            // 追加直後は DOM に存在しない → 次フレームでフォーカス
+                            const targetIdx = scoreRows.length;
+                            requestAnimationFrame(() => {
+                              const sel = `[data-testid="score-section-${targetIdx}"]`;
+                              const next = document.querySelector(sel) as HTMLTextAreaElement | null;
+                              if (next) { next.focus(); next.setSelectionRange(0, 0); }
+                            });
+                            return;
+                          }
                           const nextCol = order[nextColIdx];
                           const sel = `[data-testid="score-${nextCol}-${nextRow}"]`;
                           const next = document.querySelector(sel) as HTMLTextAreaElement | null;
@@ -6090,9 +6112,18 @@ export default function ProjectPage() {
                               data-testid={`score-lyric-${idx}`}
                             />
                             <button
-                              onClick={(e) => { e.preventDefault(); e.stopPropagation(); deleteScoreRow(idx); }}
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                const hasContent = !!(row.section.trim() || row.bars.trim() || row.lyric.trim());
+                                if (hasContent) {
+                                  const preview = [row.section, row.bars, row.lyric].filter(Boolean).join(" | ").slice(0, 50);
+                                  if (!window.confirm(`この行を削除しますか？\n${preview}`)) return;
+                                }
+                                deleteScoreRow(idx);
+                              }}
                               tabIndex={-1}
-                              className="absolute right-1 top-1 w-5 h-5 flex items-center justify-center rounded opacity-0 group-hover/score-row:opacity-100 hover:bg-white/10"
+                              className="absolute right-1 top-1 w-5 h-5 flex items-center justify-center rounded opacity-30 hover:opacity-100 hover:bg-white/10 transition-opacity"
                               style={{ color: TS_DESIGN.text3, fontSize: 14 }}
                               title="この行を削除"
                               data-testid={`score-delete-${idx}`}
@@ -6101,6 +6132,15 @@ export default function ProjectPage() {
                         </Fragment>
                       );
                     })}
+                  </div>
+                  <div style={{ padding: "8px 10px", borderTop: `1px solid ${TS_DESIGN.border}` }}>
+                    <button
+                      onClick={appendScoreRow}
+                      className="w-full py-2 rounded text-[11px] hover:bg-white/5 transition-colors"
+                      style={{ color: TS_DESIGN.text3, border: `1px dashed ${TS_DESIGN.border}` }}
+                      data-testid="score-append-row"
+                      title="末尾に空行を 1 行追加"
+                    >+ 行を追加</button>
                   </div>
                 </div>
               </div>
