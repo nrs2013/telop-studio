@@ -5315,106 +5315,110 @@ export default function ProjectPage() {
           </div>
           </div>
           {!isRecording && !minimalMode && (() => {
-            const creditInfoSize = project?.creditLyricsFontSize ?? 36;
+            const titleSize = project?.creditTitleFontSize ?? activePreset.creditTitleFontSize;
+            const creditInfoSize = project?.creditLyricsFontSize ?? activePreset.creditInfoFontSize;
+            const rightTitleSize = project?.creditRightTitleFontSize ?? activePreset.creditRightTitleFontSize;
+            const fields = [
+              { value: localSongTitle !== null ? localSongTitle : songTitle, setValue: setLocalSongTitle, field: "songTitle", testId: "input-song-title-credit", placeholder: "SONG TITLE", sub: "SONG", flex: 2.4, placeholderDark: true },
+              { value: localMembersCredit !== null ? localMembersCredit : membersCredit, setValue: setLocalMembersCredit, field: "membersCredit", testId: "input-members-credit", placeholder: "MEMBER NAME", sub: "MEM", flex: 1.6, placeholderDark: true },
+              { value: effectiveLyricsCredit, setValue: setLocalLyricsCredit, field: "lyricsCredit", testId: "input-lyrics-credit", placeholder: "作詞", sub: "作詞", flex: 1, placeholderDark: false },
+              { value: effectiveMusicCredit, setValue: setLocalMusicCredit, field: "musicCredit", testId: "input-music-credit", placeholder: "作曲", sub: "作曲", flex: 1, placeholderDark: false },
+              { value: effectiveArrangementCredit, setValue: setLocalArrangementCredit, field: "arrangementCredit", testId: "input-arrangement-credit", placeholder: "編曲", sub: "編曲", flex: 1, placeholderDark: false },
+            ];
             return (
-              <div className="mx-2 mt-2 mb-2 shrink-0 relative overflow-hidden" style={{ border: "1px solid hsl(0 0% 20%)", backgroundColor: "hsl(0 0% 8%)" }} data-testid="credit-block">
-                <div
-                  className="flex items-center gap-1.5 px-2 py-1 cursor-grab active:cursor-grabbing select-none"
-                  style={{ borderBottom: "1px solid hsl(0 0% 20%)", background: "hsl(0 0% 11%)", minHeight: 28 }}
-                  onMouseDown={(e) => {
-                    if ((e.target as HTMLElement).closest("button") || (e.target as HTMLElement).closest("input")) return;
-                    e.preventDefault();
-                    startCreditDrag();
-                  }}
-                  data-testid="credit-drag-header"
-                >
-                  <GripVertical style={{ width: 12, height: 12, color: "hsl(0 0% 50%)" }} />
-                  <Music style={{ width: 14, height: 14, color: "hsl(48 100% 50%)" }} />
-                  <span className="text-[12px] font-bold tracking-widest uppercase" style={{ color: "hsl(48 100% 50%)" }}>CREDIT</span>
-                  {[1, 2].map(layoutNum => {
-                    const isActive = project.creditInTime != null && (project.creditTitleLayout ?? 1) === layoutNum;
-                    const isOtherActive = project.creditInTime != null && (project.creditTitleLayout ?? 1) !== layoutNum;
-                    return (
-                      <button
-                        key={layoutNum}
-                        className={`${layoutNum === 1 ? "ml-auto" : "ml-1"} text-[8px] px-1.5 py-0.5 rounded font-bold`}
-                        style={{
-                          backgroundColor: duration <= 0 ? "hsl(0 0% 15%)" : isActive ? "hsl(48 60% 22%)" : "hsl(48 30% 14%)",
-                          color: duration <= 0 ? "hsl(0 0% 35%)" : isActive ? "hsl(48 100% 65%)" : "hsl(48 80% 50%)",
-                          border: `1px solid ${duration <= 0 ? "hsl(0 0% 20%)" : isActive ? "hsl(48 80% 40%)" : "hsl(48 50% 28%)"}`,
-                          cursor: duration <= 0 ? "not-allowed" : "pointer",
-                          opacity: duration <= 0 ? 0.4 : isOtherActive ? 0.5 : 1,
-                        }}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (duration <= 0) return;
-                          if (isActive) {
-                            updateProjectData({ creditInTime: null, creditOutTime: null, creditAnimDuration: null, creditHoldStartMs: null, creditWipeStartMs: null, creditTitleLayout: 1 } as any);
-                          } else {
-                            const inTime = snapTimeToBeat(Math.max(0, currentTime));
-                            const bpm = timelineBpmRef.current || project?.detectedBpm;
-                            const beatMs = bpm && bpm > 0 ? (60 / bpm) * 1000 : null;
-                            const baseAnimDur = beatMs ? beatMs * 16 : 6700;
-                            const defaultWipeMs = beatMs ? beatMs * 12 : baseAnimDur * 3 / 4;
-                            const outTime = calcCreditOutTime(duration, baseAnimDur);
-                            updateProjectData({ creditInTime: inTime, creditOutTime: outTime, creditAnimDuration: baseAnimDur, creditWipeStartMs: defaultWipeMs, creditTitleLayout: layoutNum } as any);
-                          }
-                        }}
-                        disabled={duration <= 0}
-                        data-testid={`btn-title${layoutNum}-in`}
-                        title={duration <= 0 ? "音楽を読み込んでください" : isActive ? `TITLE ${layoutNum === 1 ? "A" : "B"} を削除` : `現在位置に TITLE ${layoutNum === 1 ? "A" : "B"} IN を配置`}
-                      >
-                        {isActive ? `T${layoutNum === 1 ? "A" : "B"} ✕` : `＋ T${layoutNum === 1 ? "A" : "B"}`}
-                      </button>
-                    );
-                  })}
-                </div>
-                <div className="px-2 py-1.5 grid gap-y-1" style={{ gridTemplateColumns: "20px 32px 20px 18px 1fr" }}>
-                  {(() => {
-                    const titleSize = project?.creditTitleFontSize ?? activePreset.creditTitleFontSize;
-                    const rightTitleSize = project?.creditRightTitleFontSize ?? activePreset.creditRightTitleFontSize;
-                    const rows = [
-                      { label: "", sizeField: "creditTitleFontSize", size: titleSize, defaultSize: activePreset.creditTitleFontSize, sizeFields: { creditTitleFontSize: true }, items: [{ value: localSongTitle !== null ? localSongTitle : songTitle, setValue: setLocalSongTitle, field: "songTitle", testId: "input-song-title-credit", placeholder: "SONG TITLE", sub: "SONG", placeholderDark: true }] },
-                      { label: "", sizeField: "creditLyricsFontSize", size: creditInfoSize, defaultSize: activePreset.creditInfoFontSize, sizeFields: { creditLyricsFontSize: true, creditMusicFontSize: true, creditArrangementFontSize: true, creditMembersFontSize: true }, items: [{ value: localMembersCredit !== null ? localMembersCredit : membersCredit, setValue: setLocalMembersCredit, field: "membersCredit", testId: "input-members-credit", placeholder: "MEMBER NAME", sub: "MEM", placeholderDark: true }] },
-                      { label: "", sizeField: null, size: null, defaultSize: null, sizeFields: {}, items: [
-                        { value: effectiveLyricsCredit, setValue: setLocalLyricsCredit, field: "lyricsCredit", testId: "input-lyrics-credit", placeholder: "作詞", sub: "作詞" },
-                        { value: effectiveMusicCredit, setValue: setLocalMusicCredit, field: "musicCredit", testId: "input-music-credit", placeholder: "作曲", sub: "作曲" },
-                        { value: effectiveArrangementCredit, setValue: setLocalArrangementCredit, field: "arrangementCredit", testId: "input-arrangement-credit", placeholder: "編曲", sub: "編曲" },
-                      ]},
-                      { label: "", sizeField: "creditRightTitleFontSize", size: rightTitleSize, defaultSize: activePreset.creditRightTitleFontSize, sizeFields: { creditRightTitleFontSize: true }, items: [{ value: "", setValue: () => {}, field: "_rightTitleDisplay", testId: "display-right-title", sub: "R SONG", readOnly: true }] },
-                    ];
-                    return rows.map((row, ri) => (
-                      <Fragment key={ri}>
-                        {row.sizeField ? (
-                          <>
-                            <button className="self-center flex items-center justify-center rounded border hover:bg-white/15 active:bg-white/25" style={{ width: 20, height: 20, color: "hsl(0 0% 68%)", fontSize: 13, borderColor: "hsl(0 0% 30%)", backgroundColor: "hsla(0, 0%, 18%, 0.4)" }} onClick={() => { const upd: any = {}; Object.keys(row.sizeFields).forEach(k => upd[k] = Math.max(12, row.size! - 2)); updateProjectData(upd); }} data-testid={`btn-size-minus-${row.sizeField}`} tabIndex={-1}>−</button>
-                            <input type="text" inputMode="numeric" className="text-[13px] bg-transparent border-b outline-none text-center self-center" style={{ color: "hsl(0 0% 90%)", borderColor: "hsl(0 0% 32%)", width: 32 }} value={row.size!} onChange={(e) => { const v = parseInt(e.target.value); if (!isNaN(v) && v >= 12 && v <= 200) { const upd: any = {}; Object.keys(row.sizeFields).forEach(k => upd[k] = v); updateProjectData(upd); } }} onFocus={(e) => (e.target as HTMLInputElement).select()} data-testid={`input-size-${row.sizeField}`} />
-                            <button className="self-center flex items-center justify-center rounded border hover:bg-white/15 active:bg-white/25" style={{ width: 20, height: 20, color: "hsl(0 0% 68%)", fontSize: 13, borderColor: "hsl(0 0% 30%)", backgroundColor: "hsla(0, 0%, 18%, 0.4)" }} onClick={() => { const upd: any = {}; Object.keys(row.sizeFields).forEach(k => upd[k] = Math.min(200, row.size! + 2)); updateProjectData(upd); }} data-testid={`btn-size-plus-${row.sizeField}`} tabIndex={-1}>+</button>
-                            <button
-                              className="self-center flex items-center justify-center rounded hover:bg-white/15 active:bg-white/25"
-                              style={{ width: 18, height: 18, color: row.size === row.defaultSize ? "hsl(0 0% 30%)" : "hsl(0 0% 55%)", fontSize: 9, fontFamily: "monospace" }}
-                              onClick={() => { const upd: any = {}; Object.keys(row.sizeFields).forEach(k => upd[k] = row.defaultSize); upd.fontSize = activePreset.fontSize; upd.strokeWidth = activePreset.strokeWidth; upd.strokeBlur = activePreset.strokeBlur; upd.creditTitleFontSize = activePreset.creditTitleFontSize; upd.creditLyricsFontSize = activePreset.creditInfoFontSize; upd.creditMusicFontSize = activePreset.creditInfoFontSize; upd.creditArrangementFontSize = activePreset.creditInfoFontSize; upd.creditMembersFontSize = activePreset.creditInfoFontSize; upd.creditRightTitleFontSize = activePreset.creditRightTitleFontSize; updateProjectData(upd); }}
-                              title="全サイズをデフォルトに戻す"
-                              data-testid={`btn-size-default-${row.sizeField}`}
-                              tabIndex={-1}
-                            >D</button>
-                          </>
-                        ) : (
-                          <div className="col-span-4" style={{ minHeight: 0 }} />
-                        )}
-                        <div className="flex items-center gap-2 min-w-0 ml-1 self-center" style={row.items.length > 1 ? { borderBottom: "1px solid hsl(0 0% 30%)" } : undefined}>
-                          {row.items.map((it: any) => (
-                            <div key={it.field} className="flex items-center gap-1.5 min-w-0" style={{ flex: row.items.length === 1 ? "1 1 auto" : "1 1 0%" }}>
-                              {it.sub && <span className="text-[11px] shrink-0 whitespace-nowrap" style={{ color: "hsl(0 0% 62%)", width: 28, textAlign: "right" }}>{it.sub}</span>}
-                              {it.readOnly ? null : (
-                                <input className={`text-[13px] bg-transparent outline-none flex-1 min-w-0${row.items.length === 1 ? " border-b" : ""}${it.placeholderDark ? " placeholder-dark" : ""}`} style={{ color: "hsl(0 0% 90%)", borderColor: "hsl(0 0% 30%)" }} value={it.value ?? ""} onChange={(e) => { it.setValue(e.target.value); debouncedCreditSave(it.field, e.target.value); }} onBlur={() => { flushCreditSave(it.field).then(() => { it.setValue(null); storage.getProject(id!).then(p => p && setProject(p)); }); }} data-testid={it.testId} placeholder={it.placeholder} />
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      </Fragment>
-                    ));
-                  })()}
+              <div className="mx-2 mt-2 mb-2 shrink-0 relative" style={{ border: `1px solid ${TS_DESIGN.border}`, backgroundColor: TS_DESIGN.bg2, borderRadius: 6 }} data-testid="credit-block">
+                <div className="flex items-stretch" style={{ minHeight: 30 }}>
+                  <div
+                    className="flex items-center gap-1.5 px-2 cursor-grab active:cursor-grabbing select-none shrink-0"
+                    style={{ borderRight: `1px solid ${TS_DESIGN.border}` }}
+                    onMouseDown={(e) => {
+                      if ((e.target as HTMLElement).closest("button") || (e.target as HTMLElement).closest("input")) return;
+                      e.preventDefault();
+                      startCreditDrag();
+                    }}
+                    data-testid="credit-drag-header"
+                    title="ドラッグでタイムラインに TA IN を配置"
+                  >
+                    <GripVertical style={{ width: 11, height: 11, color: TS_DESIGN.text3 }} />
+                    <Music style={{ width: 12, height: 12, color: TS_DESIGN.accent }} />
+                    <span className="text-[10px] font-bold tracking-widest uppercase" style={{ color: TS_DESIGN.accent }}>CREDIT</span>
+                  </div>
+
+                  <div className="flex items-center gap-2 px-2 flex-1 min-w-0 overflow-x-auto">
+                    {fields.map(f => (
+                      <div key={f.field} className="flex items-center gap-1 min-w-0" style={{ flex: `${f.flex} 1 0%` }}>
+                        <span className="text-[9px] shrink-0 whitespace-nowrap font-semibold tracking-wide uppercase" style={{ color: TS_DESIGN.text3 }}>{f.sub}</span>
+                        <input
+                          className={`text-[12px] bg-transparent outline-none flex-1 min-w-0${f.placeholderDark ? " placeholder-dark" : ""}`}
+                          style={{ color: TS_DESIGN.text }}
+                          value={f.value ?? ""}
+                          onChange={(e) => { f.setValue(e.target.value); debouncedCreditSave(f.field, e.target.value); }}
+                          onBlur={() => { flushCreditSave(f.field).then(() => { f.setValue(null); storage.getProject(id!).then(p => p && setProject(p)); }); }}
+                          data-testid={f.testId}
+                          placeholder={f.placeholder}
+                        />
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="flex items-center gap-1 px-2 shrink-0" style={{ borderLeft: `1px solid ${TS_DESIGN.border}` }}>
+                    {[1, 2].map(layoutNum => {
+                      const isActive = project.creditInTime != null && (project.creditTitleLayout ?? 1) === layoutNum;
+                      const isOtherActive = project.creditInTime != null && (project.creditTitleLayout ?? 1) !== layoutNum;
+                      return (
+                        <button
+                          key={layoutNum}
+                          className="text-[8px] px-1.5 py-0.5 rounded font-bold"
+                          style={{
+                            backgroundColor: duration <= 0 ? "hsl(0 0% 15%)" : isActive ? "hsl(48 60% 22%)" : "hsl(48 30% 14%)",
+                            color: duration <= 0 ? "hsl(0 0% 35%)" : isActive ? "hsl(48 100% 65%)" : "hsl(48 80% 50%)",
+                            border: `1px solid ${duration <= 0 ? "hsl(0 0% 20%)" : isActive ? "hsl(48 80% 40%)" : "hsl(48 50% 28%)"}`,
+                            cursor: duration <= 0 ? "not-allowed" : "pointer",
+                            opacity: duration <= 0 ? 0.4 : isOtherActive ? 0.5 : 1,
+                          }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (duration <= 0) return;
+                            if (isActive) {
+                              updateProjectData({ creditInTime: null, creditOutTime: null, creditAnimDuration: null, creditHoldStartMs: null, creditWipeStartMs: null, creditTitleLayout: 1 } as any);
+                            } else {
+                              const inTime = snapTimeToBeat(Math.max(0, currentTime));
+                              const bpm = timelineBpmRef.current || project?.detectedBpm;
+                              const beatMs = bpm && bpm > 0 ? (60 / bpm) * 1000 : null;
+                              const baseAnimDur = beatMs ? beatMs * 16 : 6700;
+                              const defaultWipeMs = beatMs ? beatMs * 12 : baseAnimDur * 3 / 4;
+                              const outTime = calcCreditOutTime(duration, baseAnimDur);
+                              updateProjectData({ creditInTime: inTime, creditOutTime: outTime, creditAnimDuration: baseAnimDur, creditWipeStartMs: defaultWipeMs, creditTitleLayout: layoutNum } as any);
+                            }
+                          }}
+                          disabled={duration <= 0}
+                          data-testid={`btn-title${layoutNum}-in`}
+                          title={duration <= 0 ? "音楽を読み込んでください" : isActive ? `TITLE ${layoutNum === 1 ? "A" : "B"} を削除` : `現在位置に TITLE ${layoutNum === 1 ? "A" : "B"} IN を配置`}
+                        >
+                          {isActive ? `T${layoutNum === 1 ? "A" : "B"} ✕` : `＋ T${layoutNum === 1 ? "A" : "B"}`}
+                        </button>
+                      );
+                    })}
+
+                    <details className="relative ml-1" data-testid="credit-size-toggle">
+                      <summary className="cursor-pointer text-[10px] w-5 h-5 flex items-center justify-center rounded list-none" style={{ color: TS_DESIGN.text2, border: `1px solid ${TS_DESIGN.border}` }} title="文字サイズ調整">⚙</summary>
+                      <div className="absolute right-0 top-full mt-1 z-30 p-2 rounded shadow-lg" style={{ background: TS_DESIGN.surface, border: `1px solid ${TS_DESIGN.border}`, minWidth: 220 }}>
+                        {[
+                          { label: "SONG", value: titleSize, fields: ["creditTitleFontSize"], def: activePreset.creditTitleFontSize },
+                          { label: "STAFF", value: creditInfoSize, fields: ["creditLyricsFontSize", "creditMusicFontSize", "creditArrangementFontSize", "creditMembersFontSize"], def: activePreset.creditInfoFontSize },
+                          { label: "R SONG", value: rightTitleSize, fields: ["creditRightTitleFontSize"], def: activePreset.creditRightTitleFontSize },
+                        ].map(row => (
+                          <div key={row.label} className="flex items-center gap-1 mb-1.5">
+                            <span className="text-[10px] w-14 font-semibold tracking-wide uppercase" style={{ color: TS_DESIGN.text2 }}>{row.label}</span>
+                            <button className="w-5 h-5 rounded text-xs flex items-center justify-center" style={{ color: TS_DESIGN.text, border: `1px solid ${TS_DESIGN.border}`, background: "transparent" }} onClick={() => { const upd: any = {}; row.fields.forEach(k => upd[k] = Math.max(12, row.value - 2)); updateProjectData(upd); }} tabIndex={-1}>−</button>
+                            <input type="text" inputMode="numeric" className="w-10 text-[12px] bg-transparent border-b text-center outline-none tabular-nums" style={{ color: TS_DESIGN.text, borderColor: TS_DESIGN.border }} value={row.value} onChange={(e) => { const v = parseInt(e.target.value); if (!isNaN(v) && v >= 12 && v <= 200) { const upd: any = {}; row.fields.forEach(k => upd[k] = v); updateProjectData(upd); } }} onFocus={(e) => (e.target as HTMLInputElement).select()} />
+                            <button className="w-5 h-5 rounded text-xs flex items-center justify-center" style={{ color: TS_DESIGN.text, border: `1px solid ${TS_DESIGN.border}`, background: "transparent" }} onClick={() => { const upd: any = {}; row.fields.forEach(k => upd[k] = Math.min(200, row.value + 2)); updateProjectData(upd); }} tabIndex={-1}>+</button>
+                          </div>
+                        ))}
+                        <button className="w-full text-[10px] mt-1 py-1 rounded font-medium tracking-wider uppercase" style={{ color: TS_DESIGN.text2, border: `1px solid ${TS_DESIGN.border}`, background: "transparent" }} onClick={() => { updateProjectData({ creditTitleFontSize: activePreset.creditTitleFontSize, creditLyricsFontSize: activePreset.creditInfoFontSize, creditMusicFontSize: activePreset.creditInfoFontSize, creditArrangementFontSize: activePreset.creditInfoFontSize, creditMembersFontSize: activePreset.creditInfoFontSize, creditRightTitleFontSize: activePreset.creditRightTitleFontSize }); }} tabIndex={-1}>Default</button>
+                      </div>
+                    </details>
+                  </div>
                 </div>
               </div>
             );
