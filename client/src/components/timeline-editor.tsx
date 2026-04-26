@@ -3022,9 +3022,9 @@ export const TimelineEditor = memo(function TimelineEditor({
                         return (
                           <div
                             key={b.id}
-                            className="absolute group"
-                            style={{ left: Math.max(0, x), top: 4, width: w, height: SECTION_BAND_H - 8, background: c.bg, border: `1px ${isDerived ? "dashed" : "solid"} ${c.border}`, borderRadius: 3, color: c.text, cursor: "move", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", userSelect: "none", padding: "0 8px", opacity: isDerived ? 0.9 : 1 }}
-                            onMouseDown={(e) => onBlockMouseDown(e, b, "move")}
+                            className="absolute flex items-center justify-center group"
+                            style={{ left: Math.max(0, x), top: 4, width: w, height: SECTION_BAND_H - 8, color: c.text, userSelect: "none", cursor: "move", opacity: isDerived ? 0.9 : 1 }}
+                            data-testid={`tl-section-${b.id}`}
                             onClick={(e) => {
                               // ドラッグ後の click は無視（誤発火防止）
                               if (sectionBlockDidMove.current) {
@@ -3043,9 +3043,28 @@ export const TimelineEditor = memo(function TimelineEditor({
                               }
                             }}
                             title={isDerived ? "譜割タブから派生中。ドラッグで編集モードに切り替え。ダブルクリックで名前編集。" : "ダブルクリックで名前編集"}
-                            data-testid={`tl-section-${b.id}`}
                           >
-                            <div style={{ display: "flex", alignItems: "baseline", gap: 6, pointerEvents: "none", whiteSpace: "nowrap" }}>
+                            <div
+                              className="absolute inset-0 rounded-sm overflow-hidden"
+                              style={{
+                                backgroundColor: c.bg,
+                                border: `1px ${isDerived ? "dashed" : "solid"} ${c.border}`,
+                              }}
+                              onMouseDown={(e) => onBlockMouseDown(e, b, "move")}
+                            />
+                            <div
+                              data-handle="left"
+                              className="absolute top-0 bottom-0 cursor-col-resize z-30 hover:bg-white/20 rounded-l-sm"
+                              style={{ left: "-4px", width: "8px" }}
+                              onMouseDown={(e) => { e.stopPropagation(); onBlockMouseDown(e, b, "left"); }}
+                            />
+                            <div
+                              data-handle="right"
+                              className="absolute top-0 bottom-0 cursor-col-resize z-30 hover:bg-white/20 rounded-r-sm"
+                              style={{ right: "-4px", width: "8px" }}
+                              onMouseDown={(e) => { e.stopPropagation(); onBlockMouseDown(e, b, "right"); }}
+                            />
+                            <div className="relative z-5 pointer-events-none" style={{ display: "flex", alignItems: "baseline", gap: 6, whiteSpace: "nowrap", padding: "0 8px" }}>
                               <span style={{ fontSize: w < 50 ? 10 : 11, fontWeight: 700, letterSpacing: "0.04em" }}>{b.label}</span>
                               {w >= 50 && (
                                 <span style={{ fontSize: 8, opacity: 0.7, fontWeight: 500 }}>
@@ -3053,18 +3072,6 @@ export const TimelineEditor = memo(function TimelineEditor({
                                 </span>
                               )}
                             </div>
-                            <div
-                              data-handle="left"
-                              className="absolute top-0 bottom-0 cursor-col-resize z-30 hover:bg-white/20 rounded-l-sm"
-                              style={{ left: 0, width: 8 }}
-                              onMouseDown={(e) => { e.stopPropagation(); onBlockMouseDown(e, b, "left"); }}
-                            />
-                            <div
-                              data-handle="right"
-                              className="absolute top-0 bottom-0 cursor-col-resize z-30 hover:bg-white/20 rounded-r-sm"
-                              style={{ right: 0, width: 8 }}
-                              onMouseDown={(e) => { e.stopPropagation(); onBlockMouseDown(e, b, "right"); }}
-                            />
                             <button
                               data-del="1"
                               onClick={(e) => { e.stopPropagation(); onSectionBlocksChange?.(blocks.filter(x => x.id !== b.id)); }}
