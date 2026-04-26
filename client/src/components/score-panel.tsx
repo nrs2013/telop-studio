@@ -14,7 +14,7 @@
 //   - 全曲分の歌詞は useScoreFullText（telop-score-fulltext-{id}）に保存
 //   - 既存の telop-score-v3（旧手入力データ）は読み取りのみ。書き戻しなし
 
-import { useMemo } from "react";
+import { useLayoutEffect, useMemo, useRef } from "react";
 import type { ScoreRow } from "@/hooks/useScoreRows";
 import type { LyricLine } from "@shared/schema";
 import { TS_DESIGN } from "@/lib/designTokens";
@@ -73,7 +73,9 @@ type SectionView = {
 };
 
 /** 入力テキストを「各 section の content 行 + 区切り空行」に整列する。
- *  区切り行に文字があれば、その文字を次セクションの先頭に持ち越す。 */
+ *  行数は totalRows 固定。区切り行は強制的に空行になる。
+ *  入力の行数が totalRows より少ない / 多い場合は、先頭から詰めて足りないぶんは空行、
+ *  余ったぶんは末尾を切り捨てる。 */
 function reflowLyricText(input: string, sections: SectionView[]): string {
   const inputLines = input.split("\n");
   const result: string[] = [];
@@ -84,15 +86,30 @@ function reflowLyricText(input: string, sections: SectionView[]): string {
       result.push(inputLines[cursor] ?? "");
       cursor++;
     }
-    // 区切り行：強制空行
-    const dividerLine = inputLines[cursor];
-    if (dividerLine === undefined || dividerLine.trim() === "") {
-      cursor++;
-    }
-    // else: 持ち越し（cursor 進めず、次セクションの先頭で消化）
+    // 区切り行：強制空行（cursor は常に進める = 入力の区切り行は捨てる）
+    cursor++;
     result.push("");
   }
   return result.join("\n");
+}
+
+/** pos（文字 index）を line/col に変換 */
+function posToLineCol(text: string, pos: number): { line: number; col: number } {
+  const before = text.slice(0, pos);
+  const lines = before.split("\n");
+  return { line: lines.length - 1, col: lines[lines.length - 1].length };
+}
+
+/** line/col を pos（文字 index）に変換。範囲外なら最寄りに丸める */
+function lineColToPos(text: string, line: number, col: number): number {
+  const lines = text.split("\n");
+  const cappedLine = Math.max(0, Math.min(line, lines.length - 1));
+  let pos = 0;
+  for (let i = 0; i < cappedLine; i++) {
+    pos += lines[i].length + 1;
+  }
+  pos += Math.max(0, Math.min(col, lines[cappedLine]?.length ?? 0));
+  return pos;
 }
 
 export function ScorePanel({
@@ -157,7 +174,25 @@ export function ScorePanel({
   const rawDisplay = fullText !== null ? fullText : initialFullText;
   const displayLyric = useMemo(() => reflowLyricText(rawDisplay, sections), [rawDisplay, sections]);
 
-  const handleLyricChange = (value: string) => {
+  // cursor 位置を保存・復元するための ref
+  const lyricRef = useRef<HTMLTextAreaElement>(null);
+  const pendingCursor = useRef<{ line: number; col: number } | null>(null);
+
+  // displayLyric が変わった直後に cursor 位置を復元する
+  useLayoutEffect(() => {
+    if (pendingCursor.current && lyricRef.current) {
+      const { line, col } = pendingCursor.current;
+      const newPos = lineColToPos(displayLyric, line, col);
+      lyricRef.current.setSelectionRange(newPos, newPos);
+      pendingCursor.current = null;
+    }
+  }, [displayLyric]);
+
+  const handleLyricChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const value = e.target.value;
+    const cursorPos = e.target.selectionStart ?? 0;
+    // 入力後の line/col を保存（reflow 後の displayLyric でも同じ line/col に置く）
+    pendingCursor.current = posToLineCol(value, cursorPos);
     onFullTextChange(reflowLyricText(value, sections));
   };
 
@@ -241,7 +276,7 @@ export function ScorePanel({
                   borderRightColor: TS_DESIGN.border,
                   outline: "none",
                   background: "transparent",
-                  color: TS_DESIGN.text3,
+                  color: TS_DESIGN.text,
                   fontFamily: "inherit",
                   fontSize: FONT_SIZE,
                   lineHeight: `${LINE_H}px`,
@@ -310,8 +345,9 @@ export function ScorePanel({
               />
             ))}
             <textarea
+              ref={lyricRef}
               value={displayLyric}
-              onChange={(e) => handleLyricChange(e.target.value)}
+              onChange={handleLyricChange}
               spellCheck={false}
               style={{
                 position: "relative",
