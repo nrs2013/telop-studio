@@ -138,6 +138,7 @@ import { safeSetItem } from "@/lib/safeStorage";
 import { useScoreRows } from "@/hooks/useScoreRows";
 import { useSectionBlocks } from "@/hooks/useSectionBlocks";
 import { useLyricOverrides } from "@/hooks/useLyricOverrides";
+import { useScoreFullText } from "@/hooks/useScoreFullText";
 import { deriveBlocksFromScoreRows } from "@/lib/sectionBlockDerivation";
 import { SamplerPanel } from "@/components/sampler-panel";
 import { ScorePanel } from "@/components/score-panel";
@@ -553,6 +554,8 @@ export default function ProjectPage() {
   const { scoreRows, setScoreRows, updateScoreRow } = useScoreRows(id);
   // 譜割タブ LYRIC 列のユーザー上書き
   const { overrides: lyricOverrides, setOverride: setLyricOverride } = useLyricOverrides(id);
+  // 譜割タブ全曲分の歌詞テキスト（1 つの大きい textarea 用）
+  const { fullText: scoreFullText, setFullText: setScoreFullText } = useScoreFullText(id);
   // 譜割タブで使う「実効 SECTION ブロック」：手動配置（sectionBlocks）が空なら scoreRows から派生
   const effectiveSectionBlocks = useMemo(
     () => (sectionBlocks.length > 0 ? sectionBlocks : deriveBlocksFromScoreRows(scoreRows)),
@@ -5356,8 +5359,8 @@ export default function ProjectPage() {
                 bpm={project?.detectedBpm}
                 bpmGridOffset={project?.bpmGridOffset ?? 0}
                 lyrics={lyrics || []}
-                overrides={lyricOverrides}
-                onLyricOverrideChange={setLyricOverride}
+                fullText={scoreFullText}
+                onFullTextChange={setScoreFullText}
               />
             )}
           </div>
