@@ -3037,37 +3037,97 @@ export const TimelineEditor = memo(function TimelineEditor({
                     sectionBlockDidMove.current = true;
                     const barsDx = dx / (secPerBar * pixelsPerSecond);
                     const breakLinked = me.metaKey || me.ctrlKey;
-                    pendingNext = snapshot.map(x => {
-                      // 自分自身の更新
-                      if (x.id === b.id) {
-                        if (mode === "left") {
-                          let n = snapBar(origStart + barsDx, me);
-                          n = Math.max(0, Math.min(b.endBar - 0.25, n));
-                          return { ...x, startBar: n };
-                        } else if (mode === "right") {
-                          let n = snapBar(origEnd + barsDx, me);
-                          n = Math.max(b.startBar + 0.25, n);
-                          return { ...x, endBar: n };
-                        } else {
+
+                    // 動かす対象（自分 + linked が連動するなら linked）。これら以外を「壁」として扱う。
+                    const movingIds = new Set<string>([b.id]);
+                    if (linkedId && !breakLinked) movingIds.add(linkedId);
+                    const wallBlocks = snapshot.filter(x => !movingIds.has(x.id));
+
+                    // ① 自分の暫定位置を計算（既存ロジック）
+                    let newSelfStart = origStart;
+                    let newSelfEnd = origEnd;
+                    if (mode === "left") {
+                      let n = snapBar(origStart + barsDx, me);
+                      n = Math.max(0, Math.min(b.endBar - 0.25, n));
+                      newSelfStart = n;
+                    } else if (mode === "right") {
+                      let n = snapBar(origEnd + barsDx, me);
+                      n = Math.max(b.startBar + 0.25, n);
+                      newSelfEnd = n;
+                    } else {
+                      const len = origEnd - origStart;
+                      let n = snapBar(origStart + barsDx, me);
+                      n = Math.max(0, n);
+                      newSelfStart = n;
+                      newSelfEnd = n + len;
+                    }
+
+                    // ② 重なり防止クランプ（歌詞ブロックと同じ思想：他ブロックの境界が壁になって止まる）
+                    for (const o of wallBlocks) {
+                      if (mode === "left") {
+                        // 左端を動かす：左にある他ブロックの endBar より下には行けない
+                        if (newSelfStart < o.endBar && o.endBar <= origStart) {
+                          newSelfStart = Math.max(newSelfStart, o.endBar);
+                        }
+                      } else if (mode === "right") {
+                        // 右端を動かす：右にある他ブロックの startBar より上には行けない
+                        if (newSelfEnd > o.startBar && o.startBar >= origEnd) {
+                          newSelfEnd = Math.min(newSelfEnd, o.startBar);
+                        }
+                      } else {
+                        // 全体移動：自分の範囲が他と重なるなら、近い側の境界に寄せて押し戻す
+                        if (newSelfStart < o.endBar && newSelfEnd > o.startBar) {
                           const len = origEnd - origStart;
-                          let n = snapBar(origStart + barsDx, me);
-                          n = Math.max(0, n);
-                          return { ...x, startBar: n, endBar: n + len };
+                          const overlapLeft = o.endBar - newSelfStart;
+                          const overlapRight = newSelfEnd - o.startBar;
+                          if (overlapLeft < overlapRight) {
+                            newSelfStart = o.endBar;
+                            newSelfEnd = newSelfStart + len;
+                          } else {
+                            newSelfEnd = o.startBar;
+                            newSelfStart = newSelfEnd - len;
+                          }
                         }
                       }
-                      // 隣接ブロックの追従（Cmd 押下時はリンク解除）
-                      if (linkedId === x.id && !breakLinked) {
+                    }
+
+                    // ③ linked（隣接連動）の暫定位置を計算
+                    let newLinkedStart = linkedOrigStart;
+                    let newLinkedEnd = linkedOrigEnd;
+                    if (linkedId && !breakLinked) {
+                      if (mode === "right") {
+                        // 自分の右端と一緒に隣接の左端（startBar）が動く
+                        // ただし、自分の右端が壁で止まったなら linked も同じ位置で止まる
+                        let n = newSelfEnd;
+                        n = Math.max(0, Math.min(linkedOrigEnd - 0.25, n));
+                        newLinkedStart = n;
+                      } else if (mode === "left") {
+                        // 自分の左端と一緒に隣接の右端（endBar）が動く
+                        let n = newSelfStart;
+                        n = Math.max(linkedOrigStart + 0.25, n);
+                        newLinkedEnd = n;
+                      }
+                      // linked の側も他のブロック（移動対象以外）と重ならないようにクランプ
+                      for (const o of wallBlocks) {
                         if (mode === "right") {
-                          // 自分の右端と一緒に隣接の左端（startBar）が動く
-                          let n = snapBar(origEnd + barsDx, me);
-                          n = Math.max(0, Math.min(linkedOrigEnd - 0.25, n));
-                          return { ...x, startBar: n };
+                          if (newLinkedStart < o.endBar && o.endBar <= linkedOrigStart) {
+                            newLinkedStart = Math.max(newLinkedStart, o.endBar);
+                          }
                         } else if (mode === "left") {
-                          // 自分の左端と一緒に隣接の右端（endBar）が動く
-                          let n = snapBar(origStart + barsDx, me);
-                          n = Math.max(linkedOrigStart + 0.25, n);
-                          return { ...x, endBar: n };
+                          if (newLinkedEnd > o.startBar && o.startBar >= linkedOrigEnd) {
+                            newLinkedEnd = Math.min(newLinkedEnd, o.startBar);
+                          }
                         }
+                      }
+                    }
+
+                    // ④ 結果を pendingNext に反映
+                    pendingNext = snapshot.map(x => {
+                      if (x.id === b.id) {
+                        return { ...x, startBar: newSelfStart, endBar: newSelfEnd };
+                      }
+                      if (linkedId === x.id && !breakLinked) {
+                        return { ...x, startBar: newLinkedStart, endBar: newLinkedEnd };
                       }
                       return x;
                     });
