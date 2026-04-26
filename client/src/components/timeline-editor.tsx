@@ -1298,12 +1298,16 @@ export const TimelineEditor = memo(function TimelineEditor({
   const rawCreditAnimDur = creditAnimDuration ?? DEFAULT_CREDIT_ANIM_MS;
   const rtAnimMs = rightTitleAnimDurMs ?? 0;
   const effectiveCreditAnimDur = rawCreditAnimDur;
+  // 右タイトル文字アニメの素の値（preset と統一）。preview 側と同じ値を使うことで、
+  // TITLE B 帯の終端 = アニメ完了タイミングが一致するようにする。
+  const RT_CHAR_DELAY_BASE = 100;
+  const RT_CHAR_ANIM_DUR_BASE = 500;
   const calcBarEndMs = useCallback((animDur: number, wipeMs: number) => {
     const wipeDurMs = Math.round(animDur * 0.5);
     const animScale = animDur / DEFAULT_CREDIT_ANIM_MS;
     const rtLen = (rightTitleText ?? "").trim().length;
-    const rtCharDelay = 80 * animScale;
-    const rtCharAnimDur = 800 * animScale;
+    const rtCharDelay = RT_CHAR_DELAY_BASE * animScale;
+    const rtCharAnimDur = RT_CHAR_ANIM_DUR_BASE * animScale;
     const rtTotalDur = rtLen > 0 ? ((rtLen - 1) * rtCharDelay + rtCharAnimDur + 500) : 0;
     return wipeMs + wipeDurMs + rtTotalDur;
   }, [rightTitleText]);
@@ -1473,7 +1477,9 @@ export const TimelineEditor = memo(function TimelineEditor({
     const origWipeMs = latestLocalWipeStartMs.current ?? effectiveWipeStartMs;
     const origBarEndMs = calcBarEndMs(origAnimDur, origWipeMs);
     const rtLen = (rightTitleText ?? "").trim().length;
-    const K = rtLen > 0 ? (0.5 + ((rtLen - 1) * 80 + 800) / DEFAULT_CREDIT_ANIM_MS) : 0.5;
+    // K：barEnd の変化量から animDur の変化量を逆算するための係数。
+    // calcBarEndMs と同じ素の値を使うことで preview とズレない。
+    const K = rtLen > 0 ? (0.5 + ((rtLen - 1) * RT_CHAR_DELAY_BASE + RT_CHAR_ANIM_DUR_BASE) / DEFAULT_CREDIT_ANIM_MS) : 0.5;
     const onMouseMove = (e: MouseEvent) => {
       const dx = e.clientX - animDurDragStartX.current;
       const dtMs = (dx / pps) * 1000;
