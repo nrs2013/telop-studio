@@ -2956,15 +2956,13 @@ export const TimelineEditor = memo(function TimelineEditor({
                   if (/^[3３]/.test(l)) return { bg: "#5c1f3d", border: "#8e2f5c", text: "#ecb3cd" };
                   return { bg: "#2c2c2a", border: "#46463f", text: "#ece6d8" };
                 };
+                // TELOP と同じ snapToBeat を使う：BPM × quantizeDiv で見えてるグリッドにスナップ。
+                // Alt キーで一時的にスナップ無効（自由配置）にできる。
                 const snapBar = (bar: number, e: MouseEvent) => {
-                  const meta = e.metaKey || e.ctrlKey;
-                  const shift = e.shiftKey;
-                  let step;
-                  if (meta && shift) step = 0.25;
-                  else if (meta) step = 1;
-                  else if (shift) step = 2;
-                  else step = 4;
-                  return Math.round(bar / step) * step;
+                  if (e.altKey) return bar;
+                  const time = offset + bar * secPerBar;
+                  const snappedTime = snapToBeat(time, true);
+                  return Math.max(0, (snappedTime - offset) / secPerBar);
                 };
                 const onBlockMouseDown = (ev: React.MouseEvent, b: any, mode: "move" | "left" | "right") => {
                   ev.preventDefault();
@@ -3025,6 +3023,7 @@ export const TimelineEditor = memo(function TimelineEditor({
                             className="absolute flex items-center justify-center group"
                             style={{ left: Math.max(0, x), top: 4, width: w, height: SECTION_BAND_H - 8, color: c.text, userSelect: "none", cursor: "move", opacity: isDerived ? 0.9 : 1 }}
                             data-testid={`tl-section-${b.id}`}
+                            onMouseDown={(e) => onBlockMouseDown(e, b, "move")}
                             onClick={(e) => {
                               // ドラッグ後の click は無視（誤発火防止）
                               if (sectionBlockDidMove.current) {
@@ -3042,15 +3041,14 @@ export const TimelineEditor = memo(function TimelineEditor({
                                 onSectionBlocksChange?.(blocks.map(x => x.id === b.id ? { ...x, label: newName } : x));
                               }
                             }}
-                            title={isDerived ? "譜割タブから派生中。ドラッグで編集モードに切り替え。ダブルクリックで名前編集。" : "ダブルクリックで名前編集"}
+                            title={isDerived ? "譜割タブから派生中。ドラッグで編集モードに切り替え。ダブルクリックで名前編集。Alt でフリー配置。" : "ダブルクリックで名前編集。Alt でフリー配置。"}
                           >
                             <div
-                              className="absolute inset-0 rounded-sm overflow-hidden"
+                              className="absolute inset-0 rounded-sm overflow-hidden pointer-events-none"
                               style={{
                                 backgroundColor: c.bg,
                                 border: `1px ${isDerived ? "dashed" : "solid"} ${c.border}`,
                               }}
-                              onMouseDown={(e) => onBlockMouseDown(e, b, "move")}
                             />
                             <div
                               data-handle="left"
@@ -3074,6 +3072,7 @@ export const TimelineEditor = memo(function TimelineEditor({
                             </div>
                             <button
                               data-del="1"
+                              onMouseDown={(e) => e.stopPropagation()}
                               onClick={(e) => { e.stopPropagation(); onSectionBlocksChange?.(blocks.filter(x => x.id !== b.id)); }}
                               className="opacity-0 group-hover:opacity-100 transition-opacity"
                               style={{ position: "absolute", top: 2, right: 4, background: "rgba(0,0,0,0.55)", color: "rgba(255,255,255,0.85)", border: 0, width: 14, height: 14, borderRadius: "50%", cursor: "pointer", fontSize: 10, lineHeight: "12px", padding: 0, zIndex: 31 }}
