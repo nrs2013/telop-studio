@@ -137,6 +137,8 @@ import { useToast } from "@/hooks/use-toast";
 import { safeSetItem } from "@/lib/safeStorage";
 import { useScoreRows } from "@/hooks/useScoreRows";
 import { useSectionBlocks } from "@/hooks/useSectionBlocks";
+import { useLyricOverrides } from "@/hooks/useLyricOverrides";
+import { deriveBlocksFromScoreRows } from "@/lib/sectionBlockDerivation";
 import { SamplerPanel } from "@/components/sampler-panel";
 import { ScorePanel } from "@/components/score-panel";
 import { FullscreenPreview } from "@/components/fullscreen-preview";
@@ -549,6 +551,13 @@ export default function ProjectPage() {
   // 安全装置：データ加工なし／自動振り分けなし／マイグレーションなし。
   const [activeRightTab, setActiveRightTab] = useState<"lyrics" | "score">("lyrics");
   const { scoreRows, setScoreRows, updateScoreRow } = useScoreRows(id);
+  // 譜割タブ LYRIC 列のユーザー上書き
+  const { overrides: lyricOverrides, setOverride: setLyricOverride } = useLyricOverrides(id);
+  // 譜割タブで使う「実効 SECTION ブロック」：手動配置（sectionBlocks）が空なら scoreRows から派生
+  const effectiveSectionBlocks = useMemo(
+    () => (sectionBlocks.length > 0 ? sectionBlocks : deriveBlocksFromScoreRows(scoreRows)),
+    [sectionBlocks, scoreRows],
+  );
 
 
 
@@ -5342,9 +5351,13 @@ export default function ProjectPage() {
             ))}
             {activeRightTab === "score" && (
               <ScorePanel
+                sectionBlocks={effectiveSectionBlocks}
                 scoreRows={scoreRows}
-                setScoreRows={setScoreRows}
-                updateScoreRow={updateScoreRow}
+                bpm={project?.detectedBpm}
+                bpmGridOffset={project?.bpmGridOffset ?? 0}
+                lyrics={lyrics || []}
+                overrides={lyricOverrides}
+                onLyricOverrideChange={setLyricOverride}
               />
             )}
           </div>
