@@ -868,6 +868,7 @@ export const TimelineEditor = memo(function TimelineEditor({
 
   const dragDidMove = useRef(false);
   const dragCleanupRef = useRef<(() => void) | null>(null);
+  const sectionBlockDidMove = useRef(false);
 
   const snapEnabledRef = useRef(snapEnabled);
   snapEnabledRef.current = snapEnabled;
@@ -2974,8 +2975,11 @@ export const TimelineEditor = memo(function TimelineEditor({
                   // 派生表示中に編集が始まったら、その時点で表示中の全ブロックを手動データへ昇格させる
                   // （以降の onMove はこの snapshot をベースに差分を適用する）
                   const snapshot = blocks;
+                  sectionBlockDidMove.current = false;
                   const onMove = (me: MouseEvent) => {
                     const dx = me.clientX - startMouseX;
+                    if (!sectionBlockDidMove.current && Math.abs(dx) < 3) return;
+                    sectionBlockDidMove.current = true;
                     const barsDx = dx / (secPerBar * pixelsPerSecond);
                     const next = snapshot.map(x => {
                       if (x.id !== b.id) return x;
@@ -3018,18 +3022,27 @@ export const TimelineEditor = memo(function TimelineEditor({
                         return (
                           <div
                             key={b.id}
-                            className="absolute"
+                            className="absolute group"
                             style={{ left: Math.max(0, x), top: 4, width: w, height: SECTION_BAND_H - 8, background: c.bg, border: `1px ${isDerived ? "dashed" : "solid"} ${c.border}`, borderRadius: 3, color: c.text, cursor: "move", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", userSelect: "none", padding: "0 8px", opacity: isDerived ? 0.9 : 1 }}
                             onMouseDown={(e) => onBlockMouseDown(e, b, "move")}
                             onClick={(e) => {
+                              // ドラッグ後の click は無視（誤発火防止）
+                              if (sectionBlockDidMove.current) {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                sectionBlockDidMove.current = false;
+                              }
+                            }}
+                            onDoubleClick={(e) => {
                               const t = e.target as HTMLElement;
                               if (t.dataset.handle || t.dataset.del) return;
+                              e.stopPropagation();
                               const newName = window.prompt("SECTION 名を編集", b.label);
                               if (newName !== null) {
                                 onSectionBlocksChange?.(blocks.map(x => x.id === b.id ? { ...x, label: newName } : x));
                               }
                             }}
-                            title={isDerived ? "譜割タブから派生中。ドラッグすると編集モードに切り替わります。" : undefined}
+                            title={isDerived ? "譜割タブから派生中。ドラッグで編集モードに切り替え。ダブルクリックで名前編集。" : "ダブルクリックで名前編集"}
                             data-testid={`tl-section-${b.id}`}
                           >
                             <div style={{ display: "flex", alignItems: "baseline", gap: 6, pointerEvents: "none", whiteSpace: "nowrap" }}>
@@ -3040,12 +3053,23 @@ export const TimelineEditor = memo(function TimelineEditor({
                                 </span>
                               )}
                             </div>
-                            <div data-handle="left" style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 6, cursor: "ew-resize" }} onMouseDown={(e) => { e.stopPropagation(); onBlockMouseDown(e, b, "left"); }} />
-                            <div data-handle="right" style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: 6, cursor: "ew-resize" }} onMouseDown={(e) => { e.stopPropagation(); onBlockMouseDown(e, b, "right"); }} />
+                            <div
+                              data-handle="left"
+                              className="absolute top-0 bottom-0 cursor-col-resize z-30 hover:bg-white/20 rounded-l-sm"
+                              style={{ left: 0, width: 8 }}
+                              onMouseDown={(e) => { e.stopPropagation(); onBlockMouseDown(e, b, "left"); }}
+                            />
+                            <div
+                              data-handle="right"
+                              className="absolute top-0 bottom-0 cursor-col-resize z-30 hover:bg-white/20 rounded-r-sm"
+                              style={{ right: 0, width: 8 }}
+                              onMouseDown={(e) => { e.stopPropagation(); onBlockMouseDown(e, b, "right"); }}
+                            />
                             <button
                               data-del="1"
                               onClick={(e) => { e.stopPropagation(); onSectionBlocksChange?.(blocks.filter(x => x.id !== b.id)); }}
-                              style={{ position: "absolute", top: 2, right: 4, background: "rgba(0,0,0,0.4)", color: "rgba(255,255,255,0.7)", border: 0, width: 14, height: 14, borderRadius: "50%", cursor: "pointer", fontSize: 10, lineHeight: "12px", padding: 0 }}
+                              className="opacity-0 group-hover:opacity-100 transition-opacity"
+                              style={{ position: "absolute", top: 2, right: 4, background: "rgba(0,0,0,0.55)", color: "rgba(255,255,255,0.85)", border: 0, width: 14, height: 14, borderRadius: "50%", cursor: "pointer", fontSize: 10, lineHeight: "12px", padding: 0, zIndex: 31 }}
                               title="削除"
                             >×</button>
                           </div>
