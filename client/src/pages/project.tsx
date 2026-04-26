@@ -5391,6 +5391,7 @@ export default function ProjectPage() {
         {/* SAMPLER 欄（一番右）：実装は client/src/components/sampler-panel.tsx */}
         <SamplerPanel
           scoreRows={scoreRows}
+          sectionBlocks={effectiveSectionBlocks}
           bpm={project?.detectedBpm}
           bpmGridOffset={project?.bpmGridOffset ?? 0}
           currentTime={currentTime}

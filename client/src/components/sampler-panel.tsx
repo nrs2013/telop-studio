@@ -1,13 +1,20 @@
-// SAMPLER パネル：譜割タブの SECTION 名から自動生成されるボタン群。
+// SAMPLER パネル：タイムラインの SECTION ブロック（リハーサルマーク）から自動生成されるボタン群。
 // クリックすると該当 SECTION の 2 小節前から再生。
 // 再生位置に応じて該当ボタンが黄色く光る（追従ハイライト）。
+//
+// データソース：
+//   - sectionBlocks（タイムライン側のリハーサルマーク）が優先
+//   - sectionBlocks が空のときは scoreRows（旧手入力データ）から派生して表示
 
 import type { MutableRefObject } from "react";
 import type { ScoreRow } from "@/hooks/useScoreRows";
 import { TS_DESIGN } from "@/lib/designTokens";
 
+export type SamplerSectionBlock = { id: string; label: string; startBar: number; endBar: number };
+
 type Props = {
   scoreRows: ScoreRow[];
+  sectionBlocks: SamplerSectionBlock[];
   bpm: number | null | undefined;
   bpmGridOffset: number;
   currentTime: number;
@@ -18,6 +25,7 @@ type Props = {
 
 export function SamplerPanel({
   scoreRows,
+  sectionBlocks,
   bpm,
   bpmGridOffset,
   currentTime,
@@ -45,20 +53,34 @@ export function SamplerPanel({
           const secPerBar = (60 / bpm) * beatsPerBar;
           // 1 パス目：全 SECTION の時間を集める
           const sectionItems: { id: string; label: string; sectionTime: number; cueTime: number }[] = [];
-          let cumBars = 0;
-          for (const row of scoreRows) {
-            const secLines = row.section.split("\n");
-            const barLines = row.bars.split("\n");
-            const maxLines = Math.max(secLines.length, barLines.length);
-            for (let i = 0; i < maxLines; i++) {
-              const label = (secLines[i] || "").trim();
-              if (label) {
-                const sectionTime = offset + cumBars * secPerBar;
-                sectionItems.push({ id: `${row.id}-${i}`, label, sectionTime, cueTime: Math.max(0, sectionTime - 2 * secPerBar) });
+          if (sectionBlocks.length > 0) {
+            // 優先：タイムラインのリハーサルマークから時間を計算
+            for (const block of sectionBlocks) {
+              const sectionTime = offset + block.startBar * secPerBar;
+              sectionItems.push({
+                id: block.id,
+                label: block.label,
+                sectionTime,
+                cueTime: Math.max(0, sectionTime - 2 * secPerBar),
+              });
+            }
+          } else {
+            // フォールバック：旧手入力 scoreRows から派生
+            let cumBars = 0;
+            for (const row of scoreRows) {
+              const secLines = row.section.split("\n");
+              const barLines = row.bars.split("\n");
+              const maxLines = Math.max(secLines.length, barLines.length);
+              for (let i = 0; i < maxLines; i++) {
+                const label = (secLines[i] || "").trim();
+                if (label) {
+                  const sectionTime = offset + cumBars * secPerBar;
+                  sectionItems.push({ id: `${row.id}-${i}`, label, sectionTime, cueTime: Math.max(0, sectionTime - 2 * secPerBar) });
+                }
+                const barText = barLines[i] || "";
+                const nums = barText.match(/\d+/g) || [];
+                cumBars += nums.reduce((s, n) => s + parseInt(n, 10), 0);
               }
-              const barText = barLines[i] || "";
-              const nums = barText.match(/\d+/g) || [];
-              cumBars += nums.reduce((s, n) => s + parseInt(n, 10), 0);
             }
           }
           if (sectionItems.length === 0) {
