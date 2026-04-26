@@ -2945,7 +2945,8 @@ export const TimelineEditor = memo(function TimelineEditor({
                 const manualBlocks = sectionBlocks || [];
                 const isDerived = manualBlocks.length === 0;
                 const blocks = isDerived ? deriveBlocksFromScore() : manualBlocks;
-                const colorFor = (label: string) => {
+                // SECTION 名から基本色を返す（カテゴリ別）
+                const baseColorFor = (label: string) => {
                   const l = (label || "").trim().toUpperCase();
                   if (l === "INTRO") return { bg: "#1d4d63", border: "#2a6b87", text: "#b6e2f5" };
                   if (l === "INTER" || l === "インター") return { bg: "#5f3a1f", border: "#8b5b2c", text: "#f0c490" };
@@ -2956,6 +2957,29 @@ export const TimelineEditor = memo(function TimelineEditor({
                   if (/^[3３]/.test(l)) return { bg: "#5c1f3d", border: "#8e2f5c", text: "#ecb3cd" };
                   return { bg: "#2c2c2a", border: "#46463f", text: "#ece6d8" };
                 };
+                // 16 進色を少し明るく（隣接同色を見分けるための差分）
+                const liftColor = (hex: string, amount = 24) => {
+                  const m = hex.match(/^#([0-9a-f]{6})$/i);
+                  if (!m) return hex;
+                  const n = parseInt(m[1], 16);
+                  const r = Math.min(255, ((n >> 16) & 0xff) + amount);
+                  const g = Math.min(255, ((n >> 8) & 0xff) + amount);
+                  const bch = Math.min(255, (n & 0xff) + amount);
+                  return "#" + [r, g, bch].map(v => v.toString(16).padStart(2, "0")).join("");
+                };
+                // 隣接ブロックの色が一致したら「明るい変種」に切り替えて境目を視認できるようにする
+                const blockColors = blocks.map((bb, i) => {
+                  let c = baseColorFor(bb.label);
+                  if (i > 0) {
+                    const prev = baseColorFor(blocks[i - 1].label);
+                    // 直前と同カテゴリ → 1 段階ずらす（直前が「素」なら今度は「明」、逆も同じ）
+                    if (prev.bg === c.bg) {
+                      c = { bg: liftColor(c.bg), border: liftColor(c.border), text: c.text };
+                    }
+                  }
+                  return c;
+                });
+                const colorFor = (_label: string, idx: number) => blockColors[idx];
                 // TELOP と同じ snapToBeat を使う：BPM × quantizeDiv で見えてるグリッドにスナップ。
                 // Alt キーで一時的にスナップ無効（自由配置）にできる。
                 const snapBar = (bar: number, e: MouseEvent) => {
@@ -2971,15 +2995,24 @@ export const TimelineEditor = memo(function TimelineEditor({
                   const origStart = b.startBar;
                   const origEnd = b.endBar;
                   // 派生表示中に編集が始まったら、その時点で表示中の全ブロックを手動データへ昇格させる
-                  // （以降の onMove はこの snapshot をベースに差分を適用する）
                   const snapshot = blocks;
                   sectionBlockDidMove.current = false;
+                  // RAF バッチ：mousemove ごとに setState せず、次の frame 直前に最新値だけ反映
+                  let rafId: number | null = null;
+                  let pendingNext: typeof snapshot | null = null;
+                  const flush = () => {
+                    rafId = null;
+                    if (pendingNext) {
+                      onSectionBlocksChange?.(pendingNext);
+                      pendingNext = null;
+                    }
+                  };
                   const onMove = (me: MouseEvent) => {
                     const dx = me.clientX - startMouseX;
                     if (!sectionBlockDidMove.current && Math.abs(dx) < 3) return;
                     sectionBlockDidMove.current = true;
                     const barsDx = dx / (secPerBar * pixelsPerSecond);
-                    const next = snapshot.map(x => {
+                    pendingNext = snapshot.map(x => {
                       if (x.id !== b.id) return x;
                       if (mode === "left") {
                         let n = snapBar(origStart + barsDx, me);
@@ -2996,11 +3029,20 @@ export const TimelineEditor = memo(function TimelineEditor({
                         return { ...x, startBar: n, endBar: n + len };
                       }
                     });
-                    onSectionBlocksChange?.(next);
+                    if (rafId == null) rafId = requestAnimationFrame(flush);
                   };
                   const onUp = () => {
                     window.removeEventListener("mousemove", onMove);
                     window.removeEventListener("mouseup", onUp);
+                    // 最後の保留分を flush
+                    if (rafId != null) {
+                      cancelAnimationFrame(rafId);
+                      rafId = null;
+                    }
+                    if (pendingNext) {
+                      onSectionBlocksChange?.(pendingNext);
+                      pendingNext = null;
+                    }
                   };
                   window.addEventListener("mousemove", onMove);
                   window.addEventListener("mouseup", onUp);
@@ -3011,11 +3053,11 @@ export const TimelineEditor = memo(function TimelineEditor({
                       {bpmGridLines}
                     </div>
                     <div className="absolute top-0 bottom-0" style={{ left: -tlScrollLeft }}>
-                      {blocks.map(b => {
+                      {blocks.map((b, idx) => {
                         const startTime = offset + b.startBar * secPerBar;
                         const x = startTime * pixelsPerSecond;
                         const w = (b.endBar - b.startBar) * secPerBar * pixelsPerSecond;
-                        const c = colorFor(b.label);
+                        const c = colorFor(b.label, idx);
                         const len = b.endBar - b.startBar;
                         return (
                           <div
