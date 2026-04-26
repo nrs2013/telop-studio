@@ -1,20 +1,18 @@
-// 譜割（SCORE）タブのスプレッドシート UI（派生モード、左で高さ決定 / 右は 1 つの textarea）。
+// 譜割（SCORE）タブのスプレッドシート UI（派生モード、BAR が行高のマスター / LYRIC は 1 つの textarea）。
 //
 // 設計：
 //   - 全列を同じフォント（13px）と同じ行高（24px）で揃える
-//   - 左側（SECTION + BAR）：各 SECTION の高さは BAR トークン数 + 1（区切り行）で決まる
-//     SECTION 列は先頭に名前（上合わせ）、残りは空セル
-//     BAR 列は 1 トークン 1 行で縦積み
-//     区切り行は 3 列に薄い横線
-//   - 右側（LYRIC）：1 つの textarea で全曲分の歌詞を保持
-//     高さ全体 = 左の合計行数 × 24px。一気にペーストして自由に流せる
-//     横線は左の区切り行と同じ Y 位置に薄く描画。歌詞テキストは線を跨いで自由配置
+//   - BAR 列：各 SECTION 1 個の textarea。改行で行数を増やせて、その SECTION の高さが決まる
+//     初期値は tokenizeBars()（4 拍子に基づく自動計算）。手動編集はオーバーライドとして保存
+//   - SECTION 列：先頭行に名前（上合わせ）、残りはセル分の縦線のみ
+//   - LYRIC 列：1 個の textarea で全曲分の歌詞を保持（一気にペースト可能）
+//     区切り行（各 SECTION の終わり）は強制的に空行になる（A 案）
+//     ユーザーが区切り行に文字を打っても、自動で次の SECTION の先頭に押し出される
 //
 // データ：
-//   - 全曲分の歌詞は useScoreFullText（telop-score-fulltext-{id}）に 1 つの文字列として保存
+//   - BAR の手動編集は useScoreBarOverrides（telop-score-bars-{id}）に保存
+//   - 全曲分の歌詞は useScoreFullText（telop-score-fulltext-{id}）に保存
 //   - 既存の telop-score-v3（旧手入力データ）は読み取りのみ。書き戻しなし
-//   - ユーザーが未編集（fullText === null）の場合はセクションごとの初期値を計算して
-//     1 つの文字列に組み立てて表示
 
 import { useMemo } from "react";
 import type { ScoreRow } from "@/hooks/useScoreRows";
@@ -31,6 +29,8 @@ type Props = {
   lyrics: LyricLine[];
   fullText: string | null;
   onFullTextChange: (value: string) => void;
+  barOverrides: Record<string, string>;
+  onBarChange: (sectionId: string, value: string) => void;
 };
 
 const LINE_H = 24;
@@ -52,7 +52,7 @@ function tokenizeBars(totalBars: number): string[] {
 function buildLegacyLyricMap(scoreRows: ScoreRow[]): Record<string, string> {
   const map: Record<string, string> = {};
   for (const sr of scoreRows) {
-    const firstSection = sr.section.split("\n").map(s => s.trim()).find(s => s) || "";
+    const firstSection = sr.section.split("\n").map((s) => s.trim()).find((s) => s) || "";
     if (firstSection && !map[firstSection] && sr.lyric) {
       map[firstSection] = sr.lyric;
     }
@@ -63,60 +63,103 @@ function buildLegacyLyricMap(scoreRows: ScoreRow[]): Record<string, string> {
 type SectionView = {
   id: string;
   label: string;
-  barsTokens: string[];
+  barText: string;
   /** SECTION の開始 grid 行（1-based）*/
   rowStart: number;
-  /** content 行数 = barsTokens.length（最低 1）*/
+  /** content 行数 = barText の改行数 + 1（最低 1）*/
   contentLines: number;
   /** SECTION 全体の行数 = contentLines + 1（区切り）*/
   totalLines: number;
 };
 
-export function ScorePanel({ sectionBlocks, scoreRows, bpm, bpmGridOffset, lyrics, fullText, onFullTextChange }: Props) {
+/** 入力テキストを「各 section の content 行 + 区切り空行」に整列する。
+ *  区切り行に文字があれば、その文字を次セクションの先頭に持ち越す。 */
+function reflowLyricText(input: string, sections: SectionView[]): string {
+  const inputLines = input.split("\n");
+  const result: string[] = [];
+  let cursor = 0;
+  for (let secIdx = 0; secIdx < sections.length; secIdx++) {
+    const s = sections[secIdx];
+    for (let i = 0; i < s.contentLines; i++) {
+      result.push(inputLines[cursor] ?? "");
+      cursor++;
+    }
+    // 区切り行：強制空行
+    const dividerLine = inputLines[cursor];
+    if (dividerLine === undefined || dividerLine.trim() === "") {
+      cursor++;
+    }
+    // else: 持ち越し（cursor 進めず、次セクションの先頭で消化）
+    result.push("");
+  }
+  return result.join("\n");
+}
+
+export function ScorePanel({
+  sectionBlocks,
+  scoreRows,
+  bpm,
+  bpmGridOffset,
+  lyrics,
+  fullText,
+  onFullTextChange,
+  barOverrides,
+  onBarChange,
+}: Props) {
   const { sections, totalRows } = useMemo(() => {
     const sec: SectionView[] = [];
     let cursor = 1;
     for (const block of sectionBlocks) {
       const totalBars = block.endBar - block.startBar;
-      const tokens = tokenizeBars(totalBars);
-      const contentLines = Math.max(1, tokens.length);
+      const autoBarText = tokenizeBars(totalBars).join("\n");
+      const barText = barOverrides[block.id] ?? autoBarText;
+      const lines = barText.split("\n");
+      const contentLines = Math.max(1, lines.length);
       sec.push({
         id: block.id,
         label: block.label,
-        barsTokens: tokens,
+        barText,
         rowStart: cursor,
         contentLines,
-        totalLines: contentLines + 1, // +1 = 区切り
+        totalLines: contentLines + 1,
       });
       cursor += contentLines + 1;
     }
     return { sections: sec, totalRows: cursor - 1 };
-  }, [sectionBlocks]);
+  }, [sectionBlocks, barOverrides]);
 
   // 初期値（fullText === null のときに使う）
   const initialFullText = useMemo(() => {
-    if (!bpm || bpm <= 0 || sectionBlocks.length === 0) return "";
+    if (!bpm || bpm <= 0 || sections.length === 0) return "";
     const beatsPerBar = 4;
     const secPerBar = (60 / bpm) * beatsPerBar;
     const legacyLyricMap = buildLegacyLyricMap(scoreRows);
     const allLines: string[] = [];
-    for (const block of sectionBlocks) {
-      const startTime = bpmGridOffset + block.startBar * secPerBar;
-      const endTime = bpmGridOffset + block.endBar * secPerBar;
-      const matched = lyrics
-        .filter(l => l.startTime != null && l.startTime >= startTime && l.startTime < endTime)
-        .sort((a, b) => (a.startTime ?? 0) - (b.startTime ?? 0));
-      const telopText = matched.map(l => l.text).join("\n");
-      const baseText = telopText || legacyLyricMap[block.label] || "";
+    for (const s of sections) {
+      const block = sectionBlocks.find((b) => b.id === s.id);
+      let baseText = "";
+      if (block) {
+        const startTime = bpmGridOffset + block.startBar * secPerBar;
+        const endTime = bpmGridOffset + block.endBar * secPerBar;
+        const matched = lyrics
+          .filter((l) => l.startTime != null && l.startTime >= startTime && l.startTime < endTime)
+          .sort((a, b) => (a.startTime ?? 0) - (b.startTime ?? 0));
+        const telopText = matched.map((l) => l.text).join("\n");
+        baseText = telopText || legacyLyricMap[block.label] || "";
+      }
       const lines = baseText ? baseText.split("\n") : [];
-      const targetContentLines = Math.max(1, tokenizeBars(block.endBar - block.startBar).length);
-      while (lines.length < targetContentLines) lines.push("");
-      allLines.push(...lines, ""); // content + 区切り行
+      while (lines.length < s.contentLines) lines.push("");
+      allLines.push(...lines.slice(0, s.contentLines), "");
     }
     return allLines.join("\n");
-  }, [sectionBlocks, scoreRows, bpm, bpmGridOffset, lyrics]);
+  }, [sectionBlocks, scoreRows, bpm, bpmGridOffset, lyrics, sections]);
 
-  const displayLyric = fullText !== null ? fullText : initialFullText;
+  const rawDisplay = fullText !== null ? fullText : initialFullText;
+  const displayLyric = useMemo(() => reflowLyricText(rawDisplay, sections), [rawDisplay, sections]);
+
+  const handleLyricChange = (value: string) => {
+    onFullTextChange(reflowLyricText(value, sections));
+  };
 
   if (!bpm || bpm <= 0) {
     return (
@@ -141,7 +184,7 @@ export function ScorePanel({ sectionBlocks, scoreRows, bpm, bpmGridOffset, lyric
   }
 
   // 区切り行の Y 位置（content の終わり）
-  const dividerYs = sections.map(s => (s.rowStart - 1 + s.contentLines) * LINE_H);
+  const dividerYs = sections.map((s) => (s.rowStart - 1 + s.contentLines) * LINE_H);
   const totalHeight = totalRows * LINE_H;
 
   return (
@@ -160,10 +203,9 @@ export function ScorePanel({ sectionBlocks, scoreRows, bpm, bpmGridOffset, lyric
             minHeight: totalHeight,
           }}
         >
-          {/* 左：SECTION + BAR cells */}
           {sections.flatMap((s) => {
             const cells: React.ReactNode[] = [];
-            // SECTION 列：先頭行に名前、span = contentLines
+            // SECTION 列：上合わせ、span = contentLines
             cells.push(
               <div
                 key={`${s.id}-sec`}
@@ -182,29 +224,40 @@ export function ScorePanel({ sectionBlocks, scoreRows, bpm, bpmGridOffset, lyric
                 <span style={{ height: LINE_H, lineHeight: `${LINE_H}px` }}>{s.label}</span>
               </div>,
             );
-            // BAR 列：トークンを 1 行 1 個
-            for (let i = 0; i < s.contentLines; i++) {
-              const tok = s.barsTokens[i] || "";
-              cells.push(
-                <div
-                  key={`${s.id}-bar-${i}`}
-                  style={{
-                    gridColumn: 2,
-                    gridRow: s.rowStart + i,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    borderRight: `1px solid ${TS_DESIGN.border}`,
-                    color: TS_DESIGN.text3,
-                    fontVariantNumeric: "tabular-nums",
-                    letterSpacing: "0.04em",
-                  }}
-                >
-                  {tok}
-                </div>,
-              );
-            }
-            // 区切り行：SECTION 列・BAR 列に縦線維持しつつ、横線を中央に
+            // BAR 列：1 個の textarea で行数を編集可能に
+            cells.push(
+              <textarea
+                key={`${s.id}-bar`}
+                value={s.barText}
+                onChange={(e) => onBarChange(s.id, e.target.value)}
+                spellCheck={false}
+                rows={s.contentLines}
+                style={{
+                  gridColumn: 2,
+                  gridRow: `${s.rowStart} / span ${s.contentLines}`,
+                  border: 0,
+                  borderRightWidth: 1,
+                  borderRightStyle: "solid",
+                  borderRightColor: TS_DESIGN.border,
+                  outline: "none",
+                  background: "transparent",
+                  color: TS_DESIGN.text3,
+                  fontFamily: "inherit",
+                  fontSize: FONT_SIZE,
+                  lineHeight: `${LINE_H}px`,
+                  fontVariantNumeric: "tabular-nums",
+                  letterSpacing: "0.04em",
+                  textAlign: "center",
+                  resize: "none",
+                  padding: 0,
+                  height: `${s.contentLines * LINE_H}px`,
+                  overflow: "hidden",
+                  display: "block",
+                }}
+                data-testid={`score-bar-${s.id}`}
+              />,
+            );
+            // 区切り行：縦線維持 + 横線中央
             const dividerRow = s.rowStart + s.contentLines;
             const dividerBg = `linear-gradient(to bottom, transparent 0, transparent ${LINE_H / 2 - 1}px, ${TS_DESIGN.border} ${LINE_H / 2 - 1}px, ${TS_DESIGN.border} ${LINE_H / 2}px, transparent ${LINE_H / 2}px, transparent ${LINE_H}px)`;
             cells.push(
@@ -258,7 +311,7 @@ export function ScorePanel({ sectionBlocks, scoreRows, bpm, bpmGridOffset, lyric
             ))}
             <textarea
               value={displayLyric}
-              onChange={(e) => onFullTextChange(e.target.value)}
+              onChange={(e) => handleLyricChange(e.target.value)}
               spellCheck={false}
               style={{
                 position: "relative",
