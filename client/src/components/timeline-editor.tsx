@@ -2903,12 +2903,47 @@ export const TimelineEditor = memo(function TimelineEditor({
               </div>
 
               <div className="flex-1 relative">
-              {/* SECTION ブロック帯：sectionBlocks がマスター、ドラッグで配置・移動・リサイズ */}
+              {/* SECTION ブロック帯：sectionBlocks がマスター。空の時は譜割タブから派生表示（読み取り専用、破線） */}
               {bpm && bpm > 0 && (() => {
                 const beatsPerBar = 4;
                 const secPerBar = (60 / bpm) * beatsPerBar;
                 const offset = gridOffsetRef.current || 0;
-                const blocks = sectionBlocks || [];
+                // 譜割タブからの派生：scoreRows の各行を順に走査し、SECTION 名が現れた位置から
+                // 次の SECTION 名（または曲末尾）までを 1 ブロックとして扱う。bars 列の数字を
+                // 累積して開始小節 / 終了小節を計算する。データ加工なし、読み取り専用。
+                const deriveBlocksFromScore = (): { id: string; label: string; startBar: number; endBar: number }[] => {
+                  if (!scoreRows || scoreRows.length === 0) return [];
+                  const result: { id: string; label: string; startBar: number; endBar: number }[] = [];
+                  let cumBars = 0;
+                  let current: { id: string; label: string; startBar: number; endBar: number } | null = null;
+                  for (const row of scoreRows) {
+                    const secLines = row.section.split("\n");
+                    const barLines = row.bars.split("\n");
+                    const maxLines = Math.max(secLines.length, barLines.length);
+                    for (let i = 0; i < maxLines; i++) {
+                      const label = (secLines[i] || "").trim();
+                      if (label) {
+                        if (current) {
+                          current.endBar = cumBars;
+                          if (current.endBar > current.startBar) result.push(current);
+                        }
+                        current = { id: `derived-${row.id}-${i}`, label, startBar: cumBars, endBar: cumBars };
+                      }
+                      const barText = barLines[i] || "";
+                      const nums = barText.match(/\d+/g) || [];
+                      const barSum = nums.reduce((s, n) => s + parseInt(n, 10), 0);
+                      cumBars += barSum;
+                    }
+                  }
+                  if (current) {
+                    current.endBar = cumBars;
+                    if (current.endBar > current.startBar) result.push(current);
+                  }
+                  return result;
+                };
+                const manualBlocks = sectionBlocks || [];
+                const isDerived = manualBlocks.length === 0;
+                const blocks = isDerived ? deriveBlocksFromScore() : manualBlocks;
                 const colorFor = (label: string) => {
                   const l = (label || "").trim().toUpperCase();
                   if (l === "INTRO") return { bg: "#1d4d63", border: "#2a6b87", text: "#b6e2f5" };
@@ -2981,9 +3016,9 @@ export const TimelineEditor = memo(function TimelineEditor({
                           <div
                             key={b.id}
                             className="absolute"
-                            style={{ left: Math.max(0, x), top: 4, width: w, height: SECTION_BAND_H - 8, background: c.bg, border: `1px solid ${c.border}`, borderRadius: 3, color: c.text, cursor: "move", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", userSelect: "none", padding: "0 8px" }}
-                            onMouseDown={(e) => onBlockMouseDown(e, b, "move")}
-                            onClick={(e) => {
+                            style={{ left: Math.max(0, x), top: 4, width: w, height: SECTION_BAND_H - 8, background: c.bg, border: `1px ${isDerived ? "dashed" : "solid"} ${c.border}`, borderRadius: 3, color: c.text, cursor: isDerived ? "default" : "move", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", userSelect: "none", padding: "0 8px", opacity: isDerived ? 0.85 : 1 }}
+                            onMouseDown={isDerived ? undefined : (e) => onBlockMouseDown(e, b, "move")}
+                            onClick={isDerived ? undefined : (e) => {
                               const t = e.target as HTMLElement;
                               if (t.dataset.handle || t.dataset.del) return;
                               const newName = window.prompt("SECTION 名を編集", b.label);
@@ -2991,6 +3026,7 @@ export const TimelineEditor = memo(function TimelineEditor({
                                 onSectionBlocksChange?.((sectionBlocks || []).map(x => x.id === b.id ? { ...x, label: newName } : x));
                               }
                             }}
+                            title={isDerived ? "譜割タブから自動派生（編集は譜割タブで）" : undefined}
                             data-testid={`tl-section-${b.id}`}
                           >
                             <div style={{ display: "flex", alignItems: "baseline", gap: 6, pointerEvents: "none", whiteSpace: "nowrap" }}>
@@ -3001,27 +3037,38 @@ export const TimelineEditor = memo(function TimelineEditor({
                                 </span>
                               )}
                             </div>
-                            <div data-handle="left" style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 6, cursor: "ew-resize" }} onMouseDown={(e) => { e.stopPropagation(); onBlockMouseDown(e, b, "left"); }} />
-                            <div data-handle="right" style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: 6, cursor: "ew-resize" }} onMouseDown={(e) => { e.stopPropagation(); onBlockMouseDown(e, b, "right"); }} />
-                            <button
-                              data-del="1"
-                              onClick={(e) => { e.stopPropagation(); onSectionBlocksChange?.((sectionBlocks || []).filter(x => x.id !== b.id)); }}
-                              style={{ position: "absolute", top: 2, right: 4, background: "rgba(0,0,0,0.4)", color: "rgba(255,255,255,0.7)", border: 0, width: 14, height: 14, borderRadius: "50%", cursor: "pointer", fontSize: 10, lineHeight: "12px", padding: 0 }}
-                              title="削除"
-                            >×</button>
+                            {!isDerived && (
+                              <>
+                                <div data-handle="left" style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 6, cursor: "ew-resize" }} onMouseDown={(e) => { e.stopPropagation(); onBlockMouseDown(e, b, "left"); }} />
+                                <div data-handle="right" style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: 6, cursor: "ew-resize" }} onMouseDown={(e) => { e.stopPropagation(); onBlockMouseDown(e, b, "right"); }} />
+                                <button
+                                  data-del="1"
+                                  onClick={(e) => { e.stopPropagation(); onSectionBlocksChange?.((sectionBlocks || []).filter(x => x.id !== b.id)); }}
+                                  style={{ position: "absolute", top: 2, right: 4, background: "rgba(0,0,0,0.4)", color: "rgba(255,255,255,0.7)", border: 0, width: 14, height: 14, borderRadius: "50%", cursor: "pointer", fontSize: 10, lineHeight: "12px", padding: 0 }}
+                                  title="削除"
+                                >×</button>
+                              </>
+                            )}
                           </div>
                         );
                       })}
                     </div>
-                    <button
-                      onClick={() => {
-                        const last = (sectionBlocks || []).reduce((m, b) => Math.max(m, b.endBar), 0);
-                        const id = `b-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,5)}`;
-                        onSectionBlocksChange?.([...(sectionBlocks || []), { id, label: "NEW", startBar: last, endBar: last + 4 }]);
-                      }}
-                      style={{ position: "absolute", top: 4, right: 6, background: "rgba(229,191,61,0.15)", color: "hsl(48 100% 60%)", border: "1px solid hsl(48 70% 35%)", borderRadius: 3, padding: "2px 8px", fontSize: 10, cursor: "pointer", zIndex: 5 }}
-                      title="末尾に SECTION を追加（4 小節）"
-                    >+ 追加</button>
+                    {isDerived ? (
+                      <span
+                        style={{ position: "absolute", top: 6, right: 8, color: "hsl(0 0% 50%)", fontSize: 9, letterSpacing: "0.06em", pointerEvents: "none", zIndex: 5 }}
+                        title="譜割タブのデータから自動表示しています。編集は譜割タブで。"
+                      >譜割タブから派生</span>
+                    ) : (
+                      <button
+                        onClick={() => {
+                          const last = (sectionBlocks || []).reduce((m, b) => Math.max(m, b.endBar), 0);
+                          const id = `b-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,5)}`;
+                          onSectionBlocksChange?.([...(sectionBlocks || []), { id, label: "NEW", startBar: last, endBar: last + 4 }]);
+                        }}
+                        style={{ position: "absolute", top: 4, right: 6, background: "rgba(229,191,61,0.15)", color: "hsl(48 100% 60%)", border: "1px solid hsl(48 70% 35%)", borderRadius: 3, padding: "2px 8px", fontSize: 10, cursor: "pointer", zIndex: 5 }}
+                        title="末尾に SECTION を追加（4 小節）"
+                      >+ 追加</button>
+                    )}
                   </div>
                 );
               })()}
