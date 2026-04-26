@@ -2967,7 +2967,9 @@ export const TimelineEditor = memo(function TimelineEditor({
                 };
                 return (
                   <div className="absolute left-0 right-0 z-30 overflow-hidden" style={{ top: blocksZoneH + TRACK_GAP, height: SECTION_BAND_H, borderTop: "1px solid hsl(0 0% 14%)", borderBottom: "1px solid hsl(0 0% 14%)" }}>
-                    <div className="absolute inset-0 pointer-events-none" />
+                    <div className="absolute top-0 bottom-0 pointer-events-none" style={{ left: -tlScrollLeft, zIndex: 0 }}>
+                      {bpmGridLines}
+                    </div>
                     <div className="absolute top-0 bottom-0" style={{ left: -tlScrollLeft }}>
                       {blocks.map(b => {
                         const startTime = offset + b.startBar * secPerBar;
