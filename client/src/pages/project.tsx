@@ -3040,8 +3040,23 @@ export default function ProjectPage() {
     const creditOut = project?.creditOutTime ?? null;
     const DEFAULT_CREDIT_ANIM_MS = 6700;
     const rawCreditAnimDurMs = project?.creditAnimDuration ?? DEFAULT_CREDIT_ANIM_MS;
+    // OUT 段階用スケール（既存）。TITLE B 帯（ワイプ + 右タイトル）の長さで決まる。
     const animScale = rawCreditAnimDurMs / DEFAULT_CREDIT_ANIM_MS;
     const outAnimDur = 1.5 * animScale;
+    // IN 段階用スケール（新規）。TITLE A 帯の幅（creditHoldStartMs）でスケールを逆算する。
+    // 素の IN 所要時間 = タイトル文字アニメ + 100ms 余白 + クレジット類フェードイン 1200ms
+    const songTitleForInScale = (songTitle || "").trim();
+    const baseInDurMs = (() => {
+      const titleAnim = songTitleForInScale.length > 0
+        ? (songTitleForInScale.length - 1) * activePreset.creditCharDelay + activePreset.creditCharAnimDur
+        : 0;
+      return Math.max(100, titleAnim + 100 + 1200);
+    })();
+    const bpmForFallback = project?.detectedBpm || 120;
+    const barMsForFallback = (60 / bpmForFallback) * 4000;
+    const defaultHoldStartMsForTiming = Math.round(barMsForFallback * 2);
+    const effectiveHoldStartMsForTiming = project?.creditHoldStartMs ?? defaultHoldStartMsForTiming;
+    const inAnimScale = effectiveHoldStartMsForTiming / baseInDurMs;
     const currentLayoutForTiming = project?.creditTitleLayout ?? 1;
     const customWipeStartMsForTiming = project?.creditWipeStartMs;
     const wipeStartForTiming = customWipeStartMsForTiming ?? Math.round(rawCreditAnimDurMs * 3 / 4);
@@ -3245,7 +3260,7 @@ export default function ProjectPage() {
         const isHolding = !barActive && creditOut !== null && now < creditOut;
         if (barActive || isHolding || isOutAnimating) {
 
-        const lineDrawn = easeOut(clamp01(elapsedMs / (2000 * animScale)));
+        const lineDrawn = easeOut(clamp01(elapsedMs / (2000 * inAnimScale)));
         const lineRight = outputW * lineDrawn;
         const lineLeft = outputW * outWipeP;
         if (lineRight > lineLeft) {
@@ -3282,8 +3297,9 @@ export default function ProjectPage() {
           const gap = cTitleSize * 0.6;
           const rightX = creditBaseX + titleWidth + gap;
 
-          const charDelay = activePreset.creditCharDelay * animScale;
-          const charAnimDur = activePreset.creditCharAnimDur * animScale;
+          // IN 段階：TITLE A 帯の幅（holdStart）に合わせてスケール
+          const charDelay = activePreset.creditCharDelay * inAnimScale;
+          const charAnimDur = activePreset.creditCharAnimDur * inAnimScale;
           const titleStart = 0;
 
           if (grp1Visible) {
@@ -3301,8 +3317,8 @@ export default function ProjectPage() {
             }
 
             const titleEndTime = titleStart + (titleText.length - 1) * charDelay + charAnimDur;
-            const creditsStart = titleEndTime + 100 * animScale;
-            const creditsFillDur = 1200 * animScale;
+            const creditsStart = titleEndTime + 100 * inAnimScale;
+            const creditsFillDur = 1200 * inAnimScale;
             const creditsFadeP = easeOut(clamp01((elapsedMs - creditsStart) / creditsFillDur));
 
             if (creditsFadeP > 0) {
@@ -3346,8 +3362,9 @@ export default function ProjectPage() {
             }
           }
         } else {
-          const charDelay = activePreset.creditCharDelay * animScale;
-          const charAnimDur = activePreset.creditCharAnimDur * animScale;
+          // IN 段階：TITLE A 帯の幅（holdStart）に合わせてスケール
+          const charDelay = activePreset.creditCharDelay * inAnimScale;
+          const charAnimDur = activePreset.creditCharAnimDur * inAnimScale;
           const titleStart = 0;
 
           const bigFont = `bold ${cTitleSize}px "${fontFamily}", "Noto Sans JP", sans-serif`;
@@ -3367,8 +3384,8 @@ export default function ProjectPage() {
           }
 
           const titleEndTime = titleStart + (titleText.length - 1) * charDelay + charAnimDur;
-          const creditsStart = titleEndTime + 100 * animScale;
-          const creditsFillDur = 1200 * animScale;
+          const creditsStart = titleEndTime + 100 * inAnimScale;
+          const creditsFillDur = 1200 * inAnimScale;
           const creditsFadeP = easeOut(clamp01((elapsedMs - creditsStart) / creditsFillDur));
 
           if (creditsFadeP > 0) {

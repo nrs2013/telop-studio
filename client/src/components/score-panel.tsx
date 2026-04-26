@@ -74,8 +74,9 @@ type SectionView = {
 
 /** 入力テキストを「各 section の content 行 + 区切り空行」に整列する。
  *  行数は totalRows 固定。区切り行は強制的に空行になる。
- *  入力の行数が totalRows より少ない / 多い場合は、先頭から詰めて足りないぶんは空行、
- *  余ったぶんは末尾を切り捨てる。 */
+ *  区切り行の位置に文字があった場合（ユーザーが入力した、または改行が消えて前詰めされた）、
+ *  その行は捨てずに次セクションの先頭で消化する（持ち越し）。これにより、
+ *  Backspace/Delete で改行を消した時に、別の行が消失するバグを防ぐ。 */
 function reflowLyricText(input: string, sections: SectionView[]): string {
   const inputLines = input.split("\n");
   const result: string[] = [];
@@ -86,8 +87,13 @@ function reflowLyricText(input: string, sections: SectionView[]): string {
       result.push(inputLines[cursor] ?? "");
       cursor++;
     }
-    // 区切り行：強制空行（cursor は常に進める = 入力の区切り行は捨てる）
-    cursor++;
+    // 区切り行：原則空行に強制。
+    // 元々空 or 範囲外なら cursor を進める。
+    // 文字が入っていたら cursor を進めず、次セクションの先頭で読まれるようにする（持ち越し）。
+    const dividerLine = inputLines[cursor];
+    if (dividerLine === undefined || dividerLine === "") {
+      cursor++;
+    }
     result.push("");
   }
   return result.join("\n");
