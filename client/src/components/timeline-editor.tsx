@@ -3974,7 +3974,7 @@ export const TimelineEditor = memo(function TimelineEditor({
 
                   <div
                     ref={playheadTlRef}
-                    className="absolute top-0 bottom-0 w-4 z-20 cursor-col-resize -translate-x-[7px]"
+                    className="absolute top-0 bottom-0 w-4 z-40 cursor-col-resize -translate-x-[7px]"
                     style={{ left: "0px" }}
                     data-playhead-tl
                     onMouseDown={(e) => {
