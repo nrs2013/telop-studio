@@ -3001,6 +3001,26 @@ export const TimelineEditor = memo(function TimelineEditor({
                   // 派生表示中に編集が始まったら、その時点で表示中の全ブロックを手動データへ昇格させる
                   const snapshot = blocks;
                   sectionBlockDidMove.current = false;
+                  // 隣接ブロック検出（TELOP と同じ：右端ドラッグなら次の startBar 一致、左端ドラッグなら前の endBar 一致）
+                  // Cmd/Ctrl で「リンク解除」＝隣接が連動せず単独で動く（隙間が開く）
+                  let linkedId: string | null = null;
+                  let linkedOrigStart = 0;
+                  let linkedOrigEnd = 0;
+                  if (mode === "right") {
+                    const linked = snapshot.find(x => x.id !== b.id && Math.abs(x.startBar - origEnd) < 0.01);
+                    if (linked) {
+                      linkedId = linked.id;
+                      linkedOrigStart = linked.startBar;
+                      linkedOrigEnd = linked.endBar;
+                    }
+                  } else if (mode === "left") {
+                    const linked = snapshot.find(x => x.id !== b.id && Math.abs(x.endBar - origStart) < 0.01);
+                    if (linked) {
+                      linkedId = linked.id;
+                      linkedOrigStart = linked.startBar;
+                      linkedOrigEnd = linked.endBar;
+                    }
+                  }
                   // RAF バッチ：mousemove ごとに setState せず、次の frame 直前に最新値だけ反映
                   let rafId: number | null = null;
                   let pendingNext: typeof snapshot | null = null;
@@ -3016,22 +3036,40 @@ export const TimelineEditor = memo(function TimelineEditor({
                     if (!sectionBlockDidMove.current && Math.abs(dx) < 3) return;
                     sectionBlockDidMove.current = true;
                     const barsDx = dx / (secPerBar * pixelsPerSecond);
+                    const breakLinked = me.metaKey || me.ctrlKey;
                     pendingNext = snapshot.map(x => {
-                      if (x.id !== b.id) return x;
-                      if (mode === "left") {
-                        let n = snapBar(origStart + barsDx, me);
-                        n = Math.max(0, Math.min(b.endBar - 0.25, n));
-                        return { ...x, startBar: n };
-                      } else if (mode === "right") {
-                        let n = snapBar(origEnd + barsDx, me);
-                        n = Math.max(b.startBar + 0.25, n);
-                        return { ...x, endBar: n };
-                      } else {
-                        const len = origEnd - origStart;
-                        let n = snapBar(origStart + barsDx, me);
-                        n = Math.max(0, n);
-                        return { ...x, startBar: n, endBar: n + len };
+                      // 自分自身の更新
+                      if (x.id === b.id) {
+                        if (mode === "left") {
+                          let n = snapBar(origStart + barsDx, me);
+                          n = Math.max(0, Math.min(b.endBar - 0.25, n));
+                          return { ...x, startBar: n };
+                        } else if (mode === "right") {
+                          let n = snapBar(origEnd + barsDx, me);
+                          n = Math.max(b.startBar + 0.25, n);
+                          return { ...x, endBar: n };
+                        } else {
+                          const len = origEnd - origStart;
+                          let n = snapBar(origStart + barsDx, me);
+                          n = Math.max(0, n);
+                          return { ...x, startBar: n, endBar: n + len };
+                        }
                       }
+                      // 隣接ブロックの追従（Cmd 押下時はリンク解除）
+                      if (linkedId === x.id && !breakLinked) {
+                        if (mode === "right") {
+                          // 自分の右端と一緒に隣接の左端（startBar）が動く
+                          let n = snapBar(origEnd + barsDx, me);
+                          n = Math.max(0, Math.min(linkedOrigEnd - 0.25, n));
+                          return { ...x, startBar: n };
+                        } else if (mode === "left") {
+                          // 自分の左端と一緒に隣接の右端（endBar）が動く
+                          let n = snapBar(origStart + barsDx, me);
+                          n = Math.max(linkedOrigStart + 0.25, n);
+                          return { ...x, endBar: n };
+                        }
+                      }
+                      return x;
                     });
                     if (rafId == null) rafId = requestAnimationFrame(flush);
                   };
@@ -3087,7 +3125,7 @@ export const TimelineEditor = memo(function TimelineEditor({
                                 onSectionBlocksChange?.(blocks.map(x => x.id === b.id ? { ...x, label: newName } : x));
                               }
                             }}
-                            title={isDerived ? "譜割タブから派生中。ドラッグで編集モードに切り替え。ダブルクリックで名前編集。Alt でフリー配置。" : "ダブルクリックで名前編集。Alt でフリー配置。"}
+                            title={isDerived ? "譜割タブから派生中。ドラッグで編集モードに切り替え。ダブルクリックで名前編集。Alt でフリー配置。Cmd で隣接ブロックとの隙間を開く。" : "ダブルクリックで名前編集。Alt でフリー配置。Cmd で隣接ブロックとの隙間を開く。"}
                           >
                             <div
                               className="absolute inset-0 rounded-sm overflow-hidden pointer-events-none"
