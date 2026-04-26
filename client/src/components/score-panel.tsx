@@ -101,8 +101,10 @@ function buildDisplayRows(
       const lyricKey = `${block.label}-${rowInSection}`;
       const lyricInitial = telopText || legacyLyricMap[lyricKey] || "";
 
-      // BAR 列の表示テキスト：4 小節は "4"、端数は数値そのまま
-      const barsText = thisBars === Math.floor(thisBars) ? `${thisBars}` : thisBars.toFixed(2);
+      // BAR 列の表示テキスト：浮動小数点の誤差を吸収して、整数なら "4"、端数のみ "2.5" 等で表示
+      const rounded = Math.round(thisBars * 100) / 100;
+      const isInt = Math.abs(rounded - Math.round(rounded)) < 0.01;
+      const barsText = isInt ? `${Math.round(rounded)}` : `${rounded}`;
 
       result.push({
         key: `${block.id}-${offset}`,

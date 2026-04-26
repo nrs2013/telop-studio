@@ -2982,11 +2982,15 @@ export const TimelineEditor = memo(function TimelineEditor({
                 const colorFor = (_label: string, idx: number) => blockColors[idx];
                 // TELOP と同じ snapToBeat を使う：BPM × quantizeDiv で見えてるグリッドにスナップ。
                 // Alt キーで一時的にスナップ無効（自由配置）にできる。
+                // 結果は 1/256 小節単位で丸めて、time→bar 変換時の浮動小数点誤差（2.00000001 等）を消す。
                 const snapBar = (bar: number, e: MouseEvent) => {
-                  if (e.altKey) return bar;
+                  if (e.altKey) {
+                    return Math.max(0, Math.round(bar * 256) / 256);
+                  }
                   const time = offset + bar * secPerBar;
                   const snappedTime = snapToBeat(time, true);
-                  return Math.max(0, (snappedTime - offset) / secPerBar);
+                  const result = Math.max(0, (snappedTime - offset) / secPerBar);
+                  return Math.round(result * 256) / 256;
                 };
                 const onBlockMouseDown = (ev: React.MouseEvent, b: any, mode: "move" | "left" | "right") => {
                   ev.preventDefault();
@@ -3106,11 +3110,14 @@ export const TimelineEditor = memo(function TimelineEditor({
                             />
                             <div className="relative z-5 pointer-events-none" style={{ display: "flex", alignItems: "baseline", gap: 6, whiteSpace: "nowrap", padding: "0 8px" }}>
                               <span style={{ fontSize: w < 50 ? 10 : 11, fontWeight: 700, letterSpacing: "0.04em" }}>{b.label}</span>
-                              {w >= 50 && (
-                                <span style={{ fontSize: 8, opacity: 0.7, fontWeight: 500 }}>
-                                  {Number.isInteger(len) ? len : len.toFixed(2)}
-                                </span>
-                              )}
+                              {w >= 50 && (() => {
+                                const lenRounded = Math.round(len * 100) / 100;
+                                const lenIsInt = Math.abs(lenRounded - Math.round(lenRounded)) < 0.01;
+                                const lenText = lenIsInt ? `${Math.round(lenRounded)}` : `${lenRounded}`;
+                                return (
+                                  <span style={{ fontSize: 8, opacity: 0.7, fontWeight: 500 }}>{lenText}</span>
+                                );
+                              })()}
                             </div>
                             <button
                               data-del="1"
