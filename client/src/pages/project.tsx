@@ -1201,7 +1201,10 @@ export default function ProjectPage() {
   timelineSelectedIdsRef.current = timelineSelectedIds;
 
   // タイムライン高さ（リサイズ可能）。localStorage に保存して次回起動時も復元。
-  const TIMELINE_H_DEFAULT = 320;
+  // タイムラインの中身（toolbar + TELOP + SECTION 帯 + 波形）にピッタリ収まる高さ。
+  // 計算根拠：toolbar ≈ 58 / blocksZoneH 106 / TRACK_GAP 2 / SECTION_BAND_H 44 / WAVE_H 56
+  // 合計 266 だが、内部の余白等を考慮し少し余裕をもたせる。
+  const TIMELINE_H_DEFAULT = 266;
   const TIMELINE_H_MIN = 200;
   const [timelineHeight, setTimelineHeight] = useState<number>(TIMELINE_H_DEFAULT);
   const timelineHeightRef = useRef<number>(TIMELINE_H_DEFAULT);

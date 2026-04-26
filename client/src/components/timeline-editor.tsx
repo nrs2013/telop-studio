@@ -2885,8 +2885,7 @@ export const TimelineEditor = memo(function TimelineEditor({
                     <div
                       className="flex items-center gap-1.5 relative"
                       style={{
-                        flex: "1 1 0%",
-                        minHeight: `${AUDIO_BLOCK_H}px`,
+                        height: `${AUDIO_BLOCK_H}px`,
                         backgroundColor: "hsl(0 0% 7%)",
                         borderRight: "1px solid hsl(0 0% 22%)",
                         paddingLeft: "4px",
@@ -3650,7 +3649,7 @@ export const TimelineEditor = memo(function TimelineEditor({
                         className="absolute left-0 right-0"
                         style={{
                           top: `${blocksZoneH + TRACK_GAP + SECTION_BAND_H}px`,
-                          bottom: 0,
+                          height: `${WAVE_H}px`,
                           backgroundColor: "hsl(0 0% 7%)",
                         }}
                       >
