@@ -2854,7 +2854,7 @@ export const TimelineEditor = memo(function TimelineEditor({
           const activeLanes = 2;
           const blocksZoneH = 18 + activeLanes * (LANE_HEIGHT + LANE_GAP) + 4;
           const TRACK_GAP = 2;
-          const WAVE_H = waveformPeaks ? 2 * (LANE_HEIGHT + LANE_GAP) : 0;
+          const WAVE_H = waveformPeaks ? 56 : 0;
           const AUDIO_BLOCK_H = waveformPeaks ? SECTION_BAND_H + WAVE_H : 0;
           const totalH = blocksZoneH + (waveformPeaks ? TRACK_GAP + AUDIO_BLOCK_H : 0);
           const HEADER_W = 56;
@@ -2966,7 +2966,7 @@ export const TimelineEditor = memo(function TimelineEditor({
                   window.addEventListener("mouseup", onUp);
                 };
                 return (
-                  <div className="absolute left-0 right-0 z-30 overflow-hidden" style={{ top: blocksZoneH + TRACK_GAP, height: SECTION_BAND_H, background: "hsla(0,0%,0%,0.3)", borderTop: "1px solid hsl(0 0% 14%)", borderBottom: "1px solid hsl(0 0% 14%)" }}>
+                  <div className="absolute left-0 right-0 z-30 overflow-hidden" style={{ top: blocksZoneH + TRACK_GAP, height: SECTION_BAND_H, borderTop: "1px solid hsl(0 0% 14%)", borderBottom: "1px solid hsl(0 0% 14%)" }}>
                     <div className="absolute inset-0 pointer-events-none" />
                     <div className="absolute top-0 bottom-0" style={{ left: -tlScrollLeft }}>
                       {blocks.map(b => {
@@ -3024,7 +3024,7 @@ export const TimelineEditor = memo(function TimelineEditor({
                 );
               })()}
               {waveformPeaks && !(bpm && bpm > 0) && (
-                <div className="absolute left-0 right-0 z-30 pointer-events-none" style={{ top: blocksZoneH + TRACK_GAP, height: SECTION_BAND_H, background: "hsla(0,0%,0%,0.3)", borderTop: "1px solid hsl(0 0% 14%)", borderBottom: "1px solid hsl(0 0% 14%)", display: "flex", alignItems: "center", justifyContent: "center", color: "hsl(0 0% 35%)", fontSize: 10, letterSpacing: "0.1em" }}>
+                <div className="absolute left-0 right-0 z-30 pointer-events-none" style={{ top: blocksZoneH + TRACK_GAP, height: SECTION_BAND_H, borderTop: "1px solid hsl(0 0% 14%)", borderBottom: "1px solid hsl(0 0% 14%)", display: "flex", alignItems: "center", justifyContent: "center", color: "hsl(0 0% 35%)", fontSize: 10, letterSpacing: "0.1em" }}>
                   BPM 検出後に SECTION ブロックを配置できます
                 </div>
               )}
