@@ -138,8 +138,7 @@ import { safeSetItem } from "@/lib/safeStorage";
 import { useScoreRows } from "@/hooks/useScoreRows";
 import { useSectionBlocks } from "@/hooks/useSectionBlocks";
 import { useLyricOverrides } from "@/hooks/useLyricOverrides";
-import { useScoreFullText } from "@/hooks/useScoreFullText";
-import { useScoreBarOverrides } from "@/hooks/useScoreBarOverrides";
+// useScoreFullText / useScoreBarOverrides は譜割タブが完全自動生成になり不要に（撤去済み）
 import { deriveBlocksFromScoreRows } from "@/lib/sectionBlockDerivation";
 import { addSectionBlockAt } from "@/lib/sectionBlockOps";
 import { SamplerPanel } from "@/components/sampler-panel";
@@ -557,12 +556,8 @@ export default function ProjectPage() {
   // SECTION ブロック選択中の id（譜割モード時に使う）。タブ切替時にクリア。
   const [selectedSectionId, setSelectedSectionId] = useState<string | null>(null);
   const { scoreRows, setScoreRows, updateScoreRow } = useScoreRows(id);
-  // 譜割タブ LYRIC 列のユーザー上書き
+  // 譜割タブ LYRIC 列のユーザー上書き（旧手入力モード時の残り。完全自動生成化に伴い実用は無いが、データは保持）
   const { overrides: lyricOverrides, setOverride: setLyricOverride } = useLyricOverrides(id);
-  // 譜割タブ全曲分の歌詞テキスト（1 つの大きい textarea 用）
-  const { fullText: scoreFullText, setFullText: setScoreFullText } = useScoreFullText(id);
-  // 譜割タブ BAR 列の手動編集（per-section）
-  const { barOverrides: scoreBarOverrides, setBar: setScoreBar } = useScoreBarOverrides(id);
   // 譜割タブで使う「実効 SECTION ブロック」：手動配置（sectionBlocks）が空なら scoreRows から派生
   const effectiveSectionBlocks = useMemo(
     () => (sectionBlocks.length > 0 ? sectionBlocks : deriveBlocksFromScoreRows(scoreRows)),
