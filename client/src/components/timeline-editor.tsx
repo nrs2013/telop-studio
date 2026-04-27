@@ -2908,10 +2908,27 @@ export const TimelineEditor = memo(function TimelineEditor({
                 {waveformPeaks && (
                   <>
                     <div style={{ height: `${TRACK_GAP}px`, backgroundColor: "hsl(0 0% 5%)" }} />
+                    {/* R 段（リハーサルマーク帯）：高さ SECTION_BAND_H */}
                     <div
                       className="flex items-center gap-1.5 relative"
                       style={{
-                        height: `${AUDIO_BLOCK_H}px`,
+                        height: `${SECTION_BAND_H}px`,
+                        backgroundColor: "hsl(0 0% 7%)",
+                        borderRight: "1px solid hsl(0 0% 22%)",
+                        paddingLeft: "4px",
+                      }}
+                    >
+                      <div style={{ width: "3px", height: "100%", backgroundColor: "hsl(48 100% 45%)", borderRadius: "1px", flexShrink: 0, alignSelf: "stretch" }} />
+                      <div className="flex flex-col items-start justify-center" style={{ minWidth: 0, overflow: "hidden" }}>
+                        <span className="text-[13px] font-mono font-black leading-none" style={{ color: "hsl(48 100% 50%)" }}>R</span>
+                        <span className="text-[7px] font-mono font-semibold leading-tight" style={{ color: "hsl(0 0% 85%)" }}>MARK</span>
+                      </div>
+                    </div>
+                    {/* A 段（波形）：高さ WAVE_H */}
+                    <div
+                      className="flex items-center gap-1.5 relative"
+                      style={{
+                        height: `${WAVE_H}px`,
                         backgroundColor: "hsl(0 0% 7%)",
                         borderRight: "1px solid hsl(0 0% 22%)",
                         paddingLeft: "4px",
@@ -2921,7 +2938,6 @@ export const TimelineEditor = memo(function TimelineEditor({
                       <div className="flex flex-col items-start justify-center" style={{ minWidth: 0, overflow: "hidden" }}>
                         <span className="text-[13px] font-mono font-black leading-none" style={{ color: "hsl(48 100% 50%)" }}>A</span>
                         <span className="text-[7px] font-mono font-semibold leading-tight" style={{ color: "hsl(0 0% 85%)" }}>AUDIO</span>
-                        <span className="text-[7px] font-mono font-semibold leading-tight" style={{ color: "hsl(0 0% 50%)", marginTop: 4 }}>+ SEC</span>
                       </div>
                     </div>
                   </>
