@@ -188,6 +188,8 @@ export function ExportDialog({
       const creditBaseX = outputWidth * presetConfig.creditBaseXRatio;
       const creditWeight = presetConfig.creditFontWeight;
 
+      // トレース風アニメ：stroke を「左→右へ」 走る範囲だけ描画、fill は時間差で全体に乗せる。
+      // strokeProgress=1, fillProgress=1 で呼ばれる場合は普通の全描画になる（クレジット類などの非タイトルで使う）。
       const drawStrokeTextInline = (
         text: string, x: number, y: number, font: string,
         align: CanvasTextAlign, baseline: CanvasTextBaseline,
@@ -203,37 +205,40 @@ export function ExportDialog({
         ctx.font = font;
         ctx.textAlign = align;
         ctx.textBaseline = baseline;
-        if (strokeProgress > 0 && strokeProgress <= 1) {
-          const dashLen = ctx.measureText(text).width * 6;
-          const drawn = dashLen * strokeProgress;
-          ctx.setLineDash([drawn, dashLen - drawn]);
-          ctx.lineDashOffset = 0;
-          ctx.strokeStyle = color;
-          ctx.lineWidth = sw;
-          ctx.lineJoin = "round";
+        ctx.setLineDash([]);
+
+        // stroke：左から strokeProgress 分だけ描画（範囲をクリップ）
+        if (strokeProgress > 0 && scaledStrokeW > 0) {
+          const measuredW = ctx.measureText(text).width;
+          const leftX = align === "center" ? x - measuredW / 2
+                      : align === "right" ? x - measuredW
+                      : x;
+          const padY = thisFontSize * 0.4;
+          const heightY = thisFontSize * 1.6;
+          const topY = baseline === "top" ? y - padY
+                     : baseline === "middle" ? y - thisFontSize * 0.7
+                     : y - thisFontSize - padY * 0.3;
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(leftX, topY, measuredW * strokeProgress, heightY);
+          ctx.clip();
           ctx.globalAlpha = alpha;
+          ctx.strokeStyle = strokeColor;
+          ctx.lineWidth = scaledStrokeW;
+          ctx.lineJoin = "round";
+          if (scaledBlur > 0) { ctx.shadowColor = strokeColor; ctx.shadowBlur = scaledBlur; }
           ctx.strokeText(text, x, y);
+          ctx.shadowColor = "transparent"; ctx.shadowBlur = 0;
+          ctx.restore();
         }
+
+        // fill：時間差で全体に乗る
         if (fillProgress > 0) {
-          ctx.setLineDash([]);
           ctx.globalAlpha = fillProgress * alpha;
-          if (scaledStrokeW > 0) {
-            ctx.strokeStyle = strokeColor;
-            ctx.lineWidth = scaledStrokeW;
-            ctx.lineJoin = "round";
-            if (scaledBlur > 0) {
-              ctx.shadowColor = strokeColor;
-              ctx.shadowBlur = scaledBlur;
-              ctx.shadowOffsetX = 0;
-              ctx.shadowOffsetY = 0;
-            }
-            ctx.strokeText(text, x, y);
-            ctx.shadowColor = "transparent";
-            ctx.shadowBlur = 0;
-          }
           ctx.fillStyle = color;
           ctx.fillText(text, x, y);
         }
+
         ctx.restore();
       };
 
@@ -294,8 +299,9 @@ export function ExportDialog({
             for (let ci = 0; ci < titleText.length; ci++) {
               const ch = titleText[ci];
               const chStart = titleStart + ci * charDelay;
-              const chStrokeP = easeInOut(clamp01((elapsedMs - chStart) / charAnimDur));
-              const chFillP = easeOut(clamp01((elapsedMs - chStart - charAnimDur * 0.7) / (charAnimDur * 0.5)));
+              // トレース：前半 60% で stroke が左→右へ走る、後半 40% で fill が乗る
+              const chStrokeP = easeInOut(clamp01((elapsedMs - chStart) / (charAnimDur * 0.6)));
+              const chFillP = easeOut(clamp01((elapsedMs - chStart - charAnimDur * 0.6) / (charAnimDur * 0.4)));
               if (chStrokeP > 0) {
                 drawStrokeTextInline(ch, charX, lineY - 12, titleFont, "left", "bottom", chStrokeP, chFillP);
               }
@@ -359,8 +365,9 @@ export function ExportDialog({
           for (let ci = 0; ci < titleText.length; ci++) {
             const ch = titleText[ci];
             const chStart = titleStart + ci * charDelay;
-            const chStrokeP = easeInOut(clamp01((elapsedMs - chStart) / charAnimDur));
-            const chFillP = easeOut(clamp01((elapsedMs - chStart - charAnimDur * 0.7) / (charAnimDur * 0.5)));
+            // トレース：前半 60% で stroke が左→右へ走る、後半 40% で fill が乗る
+            const chStrokeP = easeInOut(clamp01((elapsedMs - chStart) / (charAnimDur * 0.6)));
+            const chFillP = easeOut(clamp01((elapsedMs - chStart - charAnimDur * 0.6) / (charAnimDur * 0.4)));
             if (chStrokeP > 0) {
               drawStrokeTextInline(ch, charX, lineY - 12, bigFont, "left", "bottom", chStrokeP, chFillP);
             }

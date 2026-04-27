@@ -135,11 +135,9 @@ import { Slider } from "@/components/ui/slider";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { safeSetItem } from "@/lib/safeStorage";
-import { useScoreRows } from "@/hooks/useScoreRows";
+// 旧手入力譜割（useScoreRows / useLyricOverrides / useScoreFullText / useScoreBarOverrides /
+// sectionBlockDerivation）は譜割タブの完全自動化に伴いまるごと撤去
 import { useSectionBlocks } from "@/hooks/useSectionBlocks";
-import { useLyricOverrides } from "@/hooks/useLyricOverrides";
-// useScoreFullText / useScoreBarOverrides は譜割タブが完全自動生成になり不要に（撤去済み）
-import { deriveBlocksFromScoreRows } from "@/lib/sectionBlockDerivation";
 import { addSectionBlockAt } from "@/lib/sectionBlockOps";
 import { SamplerPanel } from "@/components/sampler-panel";
 import { ScorePanel } from "@/components/score-panel";
@@ -550,19 +548,13 @@ export default function ProjectPage() {
   const { sectionBlocks, setSectionBlocks } = useSectionBlocks(id);
 
   // ====== 譜割（SCORE）タブ ======
-  // データ管理は useScoreRows フックに集約（client/src/hooks/useScoreRows.ts）。
-  // 安全装置：データ加工なし／自動振り分けなし／マイグレーションなし。
+  // 譜割タブはタイムラインの SECTION ブロック + TELOP から完全自動生成。
+  // タブ自身に編集 UI はなく、ローカル状態は activeRightTab と selectedSectionId のみ。
   const [activeRightTab, setActiveRightTab] = useState<"lyrics" | "score">("lyrics");
   // SECTION ブロック選択中の id（譜割モード時に使う）。タブ切替時にクリア。
   const [selectedSectionId, setSelectedSectionId] = useState<string | null>(null);
-  const { scoreRows, setScoreRows, updateScoreRow } = useScoreRows(id);
-  // 譜割タブ LYRIC 列のユーザー上書き（旧手入力モード時の残り。完全自動生成化に伴い実用は無いが、データは保持）
-  const { overrides: lyricOverrides, setOverride: setLyricOverride } = useLyricOverrides(id);
-  // 譜割タブで使う「実効 SECTION ブロック」：手動配置（sectionBlocks）が空なら scoreRows から派生
-  const effectiveSectionBlocks = useMemo(
-    () => (sectionBlocks.length > 0 ? sectionBlocks : deriveBlocksFromScoreRows(scoreRows)),
-    [sectionBlocks, scoreRows],
-  );
+  // 譜割タブで使う SECTION ブロックは sectionBlocks そのもの（旧 scoreRows 派生は撤去済み）。
+  const effectiveSectionBlocks = sectionBlocks;
   // ハンドラ内（useEffect の空依存配列の中）から最新値を読むための ref
   const sectionBlocksRef = useRef(sectionBlocks);
   sectionBlocksRef.current = sectionBlocks;
@@ -3236,6 +3228,8 @@ export default function ProjectPage() {
           }
         }
       } else if (isAnimating) {
+        // トレース風アニメ：stroke は文字の「左から右へ」 走る範囲だけ描画、fill は時間差で全体に乗る。
+        // タイトル以外（クレジット類）は strokeProgress=1, fillProgress=1 で呼ばれるため、その場合は普通の全描画になる。
         const drawStrokeTextInline = (
           text: string, x: number, y: number, font: string,
           align: CanvasTextAlign, baseline: CanvasTextBaseline,
@@ -3251,21 +3245,43 @@ export default function ProjectPage() {
           ctx.font = font;
           ctx.textAlign = align;
           ctx.textBaseline = baseline;
+          ctx.setLineDash([]);
+
+          // stroke：左から strokeProgress 分だけ描画（範囲をクリップ）
+          if (strokeProgress > 0 && scaledStrokeW > 0) {
+            const measuredW = ctx.measureText(text).width;
+            // align に応じた文字の左端 x
+            const leftX = align === "center" ? x - measuredW / 2
+                        : align === "right" ? x - measuredW
+                        : x;
+            // baseline に応じた clip の上端 y（余裕を持たせて文字より少し外まで含める）
+            const padY = thisFontSize * 0.4;
+            const heightY = thisFontSize * 1.6;
+            const topY = baseline === "top" ? y - padY
+                       : baseline === "middle" ? y - thisFontSize * 0.7
+                       : y - thisFontSize - padY * 0.3; // bottom（既定）
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(leftX, topY, measuredW * strokeProgress, heightY);
+            ctx.clip();
+            ctx.globalAlpha = alpha;
+            ctx.strokeStyle = effectiveStrokeColor;
+            ctx.lineWidth = scaledStrokeW;
+            ctx.lineJoin = "round";
+            ctx.miterLimit = 2;
+            if (scaledBlur > 0) { ctx.shadowColor = effectiveStrokeColor; ctx.shadowBlur = scaledBlur; }
+            ctx.strokeText(text, x, y);
+            ctx.shadowColor = "transparent"; ctx.shadowBlur = 0;
+            ctx.restore();
+          }
+
+          // fill：時間差で全体に乗る
           if (fillProgress > 0) {
-            ctx.setLineDash([]);
             ctx.globalAlpha = fillProgress * alpha;
-            if (scaledStrokeW > 0) {
-              ctx.strokeStyle = effectiveStrokeColor;
-              ctx.lineWidth = scaledStrokeW;
-              ctx.lineJoin = "round";
-              ctx.miterLimit = 2;
-              if (scaledBlur > 0) { ctx.shadowColor = effectiveStrokeColor; ctx.shadowBlur = scaledBlur; }
-              ctx.strokeText(text, x, y);
-              ctx.shadowColor = "transparent"; ctx.shadowBlur = 0;
-            }
             ctx.fillStyle = color;
             ctx.fillText(text, x, y);
           }
+
           ctx.restore();
         };
 
@@ -3341,8 +3357,9 @@ export default function ProjectPage() {
             for (let ci = 0; ci < titleText.length; ci++) {
               const ch = titleText[ci];
               const chStart = titleStart + ci * charDelay;
-              const chStrokeP = easeInOut(clamp01((elapsedMs - chStart) / charAnimDur));
-              const chFillP = easeOut(clamp01((elapsedMs - chStart - charAnimDur * 0.7) / (charAnimDur * 0.5)));
+              // トレース：前半 60% で stroke が左→右へ走る、後半 40% で fill が乗る
+              const chStrokeP = easeInOut(clamp01((elapsedMs - chStart) / (charAnimDur * 0.6)));
+              const chFillP = easeOut(clamp01((elapsedMs - chStart - charAnimDur * 0.6) / (charAnimDur * 0.4)));
               if (chStrokeP > 0) {
                 drawStrokeTextInline(ch, charX, lineY - 12, titleFont, "left", "bottom", chStrokeP, chFillP);
               }
@@ -3408,8 +3425,9 @@ export default function ProjectPage() {
           for (let ci = 0; ci < titleText.length; ci++) {
             const ch = titleText[ci];
             const chStart = titleStart + ci * charDelay;
-            const chStrokeP = easeInOut(clamp01((elapsedMs - chStart) / charAnimDur));
-            const chFillP = easeOut(clamp01((elapsedMs - chStart - charAnimDur * 0.7) / (charAnimDur * 0.5)));
+            // トレース：前半 60% で stroke が左→右へ走る、後半 40% で fill が乗る
+            const chStrokeP = easeInOut(clamp01((elapsedMs - chStart) / (charAnimDur * 0.6)));
+            const chFillP = easeOut(clamp01((elapsedMs - chStart - charAnimDur * 0.6) / (charAnimDur * 0.4)));
             if (chStrokeP > 0) {
               drawStrokeTextInline(ch, charX, lineY - 12, bigFont, "left", "bottom", chStrokeP, chFillP);
             }
@@ -5414,7 +5432,6 @@ export default function ProjectPage() {
 
         {/* SAMPLER 欄（一番右）：実装は client/src/components/sampler-panel.tsx */}
         <SamplerPanel
-          scoreRows={scoreRows}
           sectionBlocks={effectiveSectionBlocks}
           bpm={project?.detectedBpm}
           bpmGridOffset={project?.bpmGridOffset ?? 0}
@@ -5495,7 +5512,6 @@ export default function ProjectPage() {
               savedBpm={project?.detectedBpm ?? null}
               onSelectionChange={setTimelineSelectedIds}
               bpmGridOffset={project?.bpmGridOffset ?? 0}
-              scoreRows={scoreRows}
               sectionBlocks={sectionBlocks}
               onSectionBlocksChange={setSectionBlocks}
               onSectionAddAt={(atBar) => {
