@@ -3619,6 +3619,15 @@ export const TimelineEditor = memo(function TimelineEditor({
                       </div>
                     </div>
 
+                    {/* TITLE バー群（TITLE A / HOLD / TITLE B / 各種ハンドル）。譜割モード時はロック */}
+                    <div
+                      style={{
+                        opacity: editMode === "score" ? 0.35 : 1,
+                        pointerEvents: editMode === "score" ? "none" : "auto",
+                        transition: "opacity 0.15s",
+                      }}
+                      data-credit-bar-group
+                    >
                     {(() => {
                       const inPx = effectiveCreditIn !== null ? timeToPixels(effectiveCreditIn) : null;
                       const outPx = effectiveCreditOut !== null ? timeToPixels(effectiveCreditOut) : null;
@@ -3891,6 +3900,7 @@ export const TimelineEditor = memo(function TimelineEditor({
                         </>
                       );
                     })()}
+                    </div>
                   </div>
 
                   {waveformPeaks && (

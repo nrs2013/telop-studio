@@ -212,7 +212,7 @@ export function ScorePanel({
 
   if (!bpm || bpm <= 0) {
     return (
-      <div className="flex-1 flex flex-col overflow-hidden" data-testid="score-table" style={{ background: TS_DESIGN.bg2 }}>
+      <div className="flex-1 flex flex-col overflow-hidden" data-testid="score-table" style={{ background: "transparent" }}>
         <Header />
         <div style={{ padding: "24px 16px", color: TS_DESIGN.text3, fontSize: 11, lineHeight: 1.7 }}>
           BPM を検出するとここに譜割が表示されます。
@@ -223,7 +223,7 @@ export function ScorePanel({
 
   if (sectionBlocks.length === 0) {
     return (
-      <div className="flex-1 flex flex-col overflow-hidden" data-testid="score-table" style={{ background: TS_DESIGN.bg2 }}>
+      <div className="flex-1 flex flex-col overflow-hidden" data-testid="score-table" style={{ background: "transparent" }}>
         <Header />
         <div style={{ padding: "24px 16px", color: TS_DESIGN.text3, fontSize: 11, lineHeight: 1.7 }}>
           タイムラインに SECTION ブロックを配置すると、ここに譜割が自動で並びます。
@@ -237,7 +237,7 @@ export function ScorePanel({
   const totalHeight = totalRows * LINE_H;
 
   return (
-    <div className="flex-1 flex flex-col overflow-hidden" data-testid="score-table" style={{ background: TS_DESIGN.bg2 }}>
+    <div className="flex-1 flex flex-col overflow-hidden" data-testid="score-table" style={{ background: "transparent" }}>
       <Header />
       <div className="flex-1 overflow-y-auto" data-testid="score-scroll">
         <div

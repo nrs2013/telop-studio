@@ -5053,11 +5053,12 @@ export default function ProjectPage() {
               <button
                 tabIndex={-1}
                 onClick={() => { setActiveRightTab("lyrics"); setSelectedSectionId(null); }}
-                className="transition-colors"
+                className="transition-colors focus:outline-none"
                 style={{
                   padding: "9px 28px",
                   background: "transparent",
                   border: "none",
+                  outline: "none",
                   color: activeRightTab === "lyrics" ? "#ffd34d" : "hsl(0 0% 42%)",
                   fontSize: 13,
                   fontWeight: 500,
@@ -5072,11 +5073,12 @@ export default function ProjectPage() {
               <button
                 tabIndex={-1}
                 onClick={() => { setActiveRightTab("score"); setSelectedSectionId(null); }}
-                className="transition-colors"
+                className="transition-colors focus:outline-none"
                 style={{
                   padding: "9px 28px",
                   background: "transparent",
                   border: "none",
+                  outline: "none",
                   color: activeRightTab === "score" ? "#ffd34d" : "hsl(0 0% 42%)",
                   fontSize: 13,
                   fontWeight: 500,
