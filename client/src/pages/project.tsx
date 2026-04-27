@@ -5045,22 +5045,19 @@ export default function ProjectPage() {
                 </div>
               </div>
             )}
-            {/* タブバー（D 案 + Chrome 風 / B サイズ）：選択中タブは下のコンテンツと黄色フレームで連続 */}
-            <div className="flex items-stretch shrink-0 select-none" style={{ height: 40, background: "hsl(0 0% 11%)" }}>
+            {/* タブ + コンテンツを 1 つの親枠で囲む（黄色フレームで連続表示） */}
+            <div className="flex-1 flex flex-col overflow-hidden" style={{ border: "1px solid #c08a1c", borderRadius: 8 }}>
+            {/* タブバー：上の段、コンテンツとの間に水平線 */}
+            <div className="flex items-stretch shrink-0 select-none" style={{ height: 40, background: TS_DESIGN.bg2, borderBottom: "1px solid #c08a1c" }}>
               {/* LYRIC タブ */}
               <button
                 tabIndex={-1}
                 onClick={() => { setActiveRightTab("lyrics"); setSelectedSectionId(null); }}
                 className="transition-colors"
                 style={{
-                  position: "relative",
                   padding: "9px 28px",
-                  background: activeRightTab === "lyrics" ? TS_DESIGN.bg2 : "transparent",
-                  border: activeRightTab === "lyrics" ? "1px solid #c08a1c" : "none",
-                  borderBottom: activeRightTab === "lyrics" ? "none" : "1px solid #c08a1c",
-                  borderRadius: activeRightTab === "lyrics" ? "8px 8px 0 0" : 0,
-                  marginBottom: activeRightTab === "lyrics" ? -1 : 0,
-                  zIndex: activeRightTab === "lyrics" ? 2 : 1,
+                  background: "transparent",
+                  border: "none",
                   color: activeRightTab === "lyrics" ? "#ffd34d" : "hsl(0 0% 42%)",
                   fontSize: 13,
                   fontWeight: 500,
@@ -5077,14 +5074,9 @@ export default function ProjectPage() {
                 onClick={() => { setActiveRightTab("score"); setSelectedSectionId(null); }}
                 className="transition-colors"
                 style={{
-                  position: "relative",
                   padding: "9px 28px",
-                  background: activeRightTab === "score" ? TS_DESIGN.bg2 : "transparent",
-                  border: activeRightTab === "score" ? "1px solid #c08a1c" : "none",
-                  borderBottom: activeRightTab === "score" ? "none" : "1px solid #c08a1c",
-                  borderRadius: activeRightTab === "score" ? "8px 8px 0 0" : 0,
-                  marginBottom: activeRightTab === "score" ? -1 : 0,
-                  zIndex: activeRightTab === "score" ? 2 : 1,
+                  background: "transparent",
+                  border: "none",
                   color: activeRightTab === "score" ? "#ffd34d" : "hsl(0 0% 42%)",
                   fontSize: 13,
                   fontWeight: 500,
@@ -5095,10 +5087,10 @@ export default function ProjectPage() {
               >
                 譜割
               </button>
-              {/* 残りスペース：黄色の下線でタブと連続 */}
-              <div style={{ flex: 1, borderBottom: "1px solid #c08a1c", marginBottom: -1 }} />
-              {/* 右端：LYRIC モード時の補助 + REC ボタン + 最小化トグル */}
-              <div className="flex items-center gap-2 pl-3 pr-3" style={{ borderBottom: "1px solid #c08a1c", marginBottom: -1 }}>
+              {/* 残りスペース */}
+              <div style={{ flex: 1 }} />
+              {/* 右端：LYRIC モード時の補助 + REC ボタン */}
+              <div className="flex items-center gap-2 pl-3 pr-3">
                 {activeRightTab === "lyrics" && (
                   <>
                     <span className="text-[9px]" style={{ color: "hsl(0 0% 42%)" }}>
@@ -5141,8 +5133,8 @@ export default function ProjectPage() {
                 )}
               </div>
             </div>
-            {/* コンテンツエリア全体を黄色フレームで囲む（タブと連続） */}
-            <div className="flex-1 flex flex-col overflow-hidden" style={{ border: "1px solid #c08a1c", borderTop: "none" }}>
+            {/* コンテンツエリア（親枠の中、タブの下） */}
+            <div className="flex-1 flex flex-col overflow-hidden">
             {activeRightTab === "lyrics" && (isRecording ? (
               <div
                 ref={recordingScrollRef}
@@ -5421,6 +5413,7 @@ export default function ProjectPage() {
                 onBarChange={setScoreBar}
               />
             )}
+            </div>
             </div>
           </div>
         </div>
