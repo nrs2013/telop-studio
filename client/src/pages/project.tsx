@@ -5404,6 +5404,7 @@ export default function ProjectPage() {
                 bpm={project?.detectedBpm}
                 bpmGridOffset={project?.bpmGridOffset ?? 0}
                 lyrics={lyrics || []}
+                currentTime={currentTime}
               />
             )}
             </div>

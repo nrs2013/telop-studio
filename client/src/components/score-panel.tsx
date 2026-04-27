@@ -26,6 +26,8 @@ type Props = {
   bpm: number | null | undefined;
   bpmGridOffset: number;
   lyrics: LyricLine[];
+  /** 現在再生位置（秒）。該当する BAR / LYRIC 行をハイライトするのに使う */
+  currentTime?: number;
 };
 
 const LINE_H = 24;
@@ -58,13 +60,19 @@ type SectionView = {
   label: string;
   /** 行 → BAR トークン文字列のマップ（歌詞タイミングに合わせて縦位置を配置） */
   barByRow: Map<number, string>;
+  /** 行 → BAR トークンの時間範囲（startTime, endTime）。ハイライト判定用 */
+  barTimeByRow: Map<number, { startTime: number; endTime: number }>;
   lyricLines: string[];
+  /** 各歌詞行の startTime（同行のインデックスで対応） */
+  lyricStartByRow: Map<number, number>;
   /** SECTION の開始 grid 行（1-based）*/
   rowStart: number;
   /** SECTION の中身の行数 = max(BAR トークン数, LYRIC 行数, 1) */
   contentLines: number;
   /** SECTION 開始時刻（秒） */
   startTimeSec: number;
+  /** SECTION 終了時刻（秒）。最後の歌詞行の終了判定に使う */
+  endTimeSec: number;
 };
 
 /** "4" → 4 小節、"2" → 2 小節、"1" → 1 小節、"3/4" → 0.75 小節 などに変換 */
@@ -79,7 +87,7 @@ function tokenBarLength(tok: string): number {
   return 0;
 }
 
-export function ScorePanel({ sectionBlocks, bpm, bpmGridOffset, lyrics }: Props) {
+export function ScorePanel({ sectionBlocks, bpm, bpmGridOffset, lyrics, currentTime = 0 }: Props) {
   // タイムライン位置順（startBar 昇順）に必ず並べる。
   const sortedSectionBlocks = useMemo(
     () => [...sectionBlocks].sort((a, b) => a.startBar - b.startBar),
@@ -113,13 +121,23 @@ export function ScorePanel({ sectionBlocks, bpm, bpmGridOffset, lyrics }: Props)
       // BAR トークンを「歌詞タイミングに最も近い行」 の縦位置に配置する。
       // 歌詞が無いセクションは上から順番に並べる（従来通り）。
       const barByRow = new Map<number, string>();
+      const barTimeByRow = new Map<number, { startTime: number; endTime: number }>();
       if (lyricLines.length === 0 || secPerBar <= 0) {
-        barTokens.forEach((tok, i) => barByRow.set(i, tok));
+        let cumBars = 0;
+        barTokens.forEach((tok, i) => {
+          barByRow.set(i, tok);
+          const tStart = startTime + cumBars * secPerBar;
+          const tLen = tokenBarLength(tok);
+          cumBars += tLen;
+          barTimeByRow.set(i, { startTime: tStart, endTime: startTime + cumBars * secPerBar });
+        });
       } else {
         let cumBars = 0;
         for (const tok of barTokens) {
           const tokenStartBar = cumBars; // SECTION 内の相対小節
           const tokenStartTime = startTime + tokenStartBar * secPerBar;
+          const tLen = tokenBarLength(tok);
+          const tokenEndTime = startTime + (cumBars + tLen) * secPerBar;
           // この BAR の開始時刻に最も近い歌詞行を探す
           let bestRow = 0;
           let minDist = Infinity;
@@ -131,9 +149,14 @@ export function ScorePanel({ sectionBlocks, bpm, bpmGridOffset, lyrics }: Props)
           let row = bestRow;
           while (barByRow.has(row)) row++;
           barByRow.set(row, tok);
-          cumBars += tokenBarLength(tok);
+          barTimeByRow.set(row, { startTime: tokenStartTime, endTime: tokenEndTime });
+          cumBars += tLen;
         }
       }
+
+      // 歌詞行ごとの startTime をマップに（行番号 → 開始秒）。
+      const lyricStartByRow = new Map<number, number>();
+      lyricStarts.forEach((t, i) => lyricStartByRow.set(i, t));
 
       const maxBarRow = barByRow.size > 0 ? Math.max(...Array.from(barByRow.keys())) + 1 : 0;
       const contentLines = Math.max(1, maxBarRow, lyricLines.length);
@@ -141,10 +164,13 @@ export function ScorePanel({ sectionBlocks, bpm, bpmGridOffset, lyrics }: Props)
         id: block.id,
         label: block.label,
         barByRow,
+        barTimeByRow,
         lyricLines,
+        lyricStartByRow,
         rowStart: cursor,
         contentLines,
         startTimeSec: startTime,
+        endTimeSec: endTime,
       });
       cursor += contentLines + 1; // +1 = SECTION 間の区切り行
     }
@@ -238,6 +264,8 @@ export function ScorePanel({ sectionBlocks, bpm, bpmGridOffset, lyrics }: Props)
             // BAR 列：歌詞タイミングに合わせて縦位置に配置（barByRow に格納済み）
             for (let i = 0; i < s.contentLines; i++) {
               const tok = s.barByRow.get(i) ?? "";
+              const range = s.barTimeByRow.get(i);
+              const isActive = !!range && currentTime >= range.startTime && currentTime < range.endTime;
               cells.push(
                 <div
                   key={`${s.id}-bar-${i}`}
@@ -248,9 +276,11 @@ export function ScorePanel({ sectionBlocks, bpm, bpmGridOffset, lyrics }: Props)
                     alignItems: "center",
                     justifyContent: "center",
                     borderRight: `1px solid ${TS_DESIGN.border}`,
-                    color: TS_DESIGN.text3,
+                    color: isActive ? "#ffd34d" : TS_DESIGN.text3,
+                    background: isActive ? "rgba(192, 138, 28, 0.18)" : "transparent",
                     fontVariantNumeric: "tabular-nums",
                     letterSpacing: "0.04em",
+                    fontWeight: isActive ? 600 : 400,
                   }}
                 >
                   {tok}
@@ -261,6 +291,15 @@ export function ScorePanel({ sectionBlocks, bpm, bpmGridOffset, lyrics }: Props)
             // LYRIC 列：時間範囲内の歌詞を 1 行ずつ表示（編集不可）
             for (let i = 0; i < s.contentLines; i++) {
               const text = s.lyricLines[i] ?? "";
+              // この歌詞行のアクティブ判定：startTime ≤ currentTime < 次の行の startTime（または SECTION 終了）
+              const lyricStart = s.lyricStartByRow.get(i);
+              let lyricEnd: number | undefined;
+              for (let j = i + 1; j < s.contentLines; j++) {
+                const next = s.lyricStartByRow.get(j);
+                if (next != null) { lyricEnd = next; break; }
+              }
+              if (lyricEnd == null) lyricEnd = s.endTimeSec;
+              const isActive = lyricStart != null && currentTime >= lyricStart && currentTime < lyricEnd;
               cells.push(
                 <div
                   key={`${s.id}-lyric-${i}`}
@@ -268,10 +307,12 @@ export function ScorePanel({ sectionBlocks, bpm, bpmGridOffset, lyrics }: Props)
                     gridColumn: 4,
                     gridRow: s.rowStart + i,
                     padding: "0 10px",
-                    color: TS_DESIGN.text,
+                    color: isActive ? "#ffd34d" : TS_DESIGN.text,
+                    background: isActive ? "rgba(192, 138, 28, 0.18)" : "transparent",
                     overflow: "hidden",
                     whiteSpace: "nowrap",
                     textOverflow: "ellipsis",
+                    fontWeight: isActive ? 600 : 400,
                   }}
                 >
                   {text}
