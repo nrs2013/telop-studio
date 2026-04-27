@@ -56,7 +56,8 @@ function formatTimeMSS(sec: number): string {
 type SectionView = {
   id: string;
   label: string;
-  barTokens: string[];
+  /** 行 → BAR トークン文字列のマップ（歌詞タイミングに合わせて縦位置を配置） */
+  barByRow: Map<number, string>;
   lyricLines: string[];
   /** SECTION の開始 grid 行（1-based）*/
   rowStart: number;
@@ -65,6 +66,18 @@ type SectionView = {
   /** SECTION 開始時刻（秒） */
   startTimeSec: number;
 };
+
+/** "4" → 4 小節、"2" → 2 小節、"1" → 1 小節、"3/4" → 0.75 小節 などに変換 */
+function tokenBarLength(tok: string): number {
+  if (tok === "4") return 4;
+  if (tok === "2") return 2;
+  if (tok === "1") return 1;
+  if (tok.includes("/")) {
+    const [num] = tok.split("/").map(Number);
+    return Number.isFinite(num) ? num / 4 : 0;
+  }
+  return 0;
+}
 
 export function ScorePanel({ sectionBlocks, bpm, bpmGridOffset, lyrics }: Props) {
   // タイムライン位置順（startBar 昇順）に必ず並べる。
@@ -82,15 +95,52 @@ export function ScorePanel({ sectionBlocks, bpm, bpmGridOffset, lyrics }: Props)
       const barTokens = tokenizeBars(totalBars);
       const startTime = secPerBar > 0 ? bpmGridOffset + block.startBar * secPerBar : 0;
       const endTime = secPerBar > 0 ? bpmGridOffset + block.endBar * secPerBar : 0;
-      const lyricLines = lyrics
-        .filter((l) => l.startTime != null && l.startTime >= startTime && l.startTime < endTime)
-        .sort((a, b) => (a.startTime ?? 0) - (b.startTime ?? 0))
-        .map((l) => l.text);
-      const contentLines = Math.max(1, barTokens.length, lyricLines.length);
+
+      // 歌詞の「中央時刻」が SECTION 範囲に入るか で判定。
+      // 食って歌い出しても歌詞は SECTION 内で歌い切るので、中央なら確実に正しい SECTION に入る。
+      const matchedLyrics = lyrics
+        .filter((l) => {
+          if (l.startTime == null) return false;
+          const s = l.startTime;
+          const e = l.endTime ?? s;
+          const mid = (s + e) / 2;
+          return mid >= startTime && mid < endTime;
+        })
+        .sort((a, b) => (a.startTime ?? 0) - (b.startTime ?? 0));
+      const lyricLines = matchedLyrics.map((l) => l.text);
+      const lyricStarts = matchedLyrics.map((l) => l.startTime as number);
+
+      // BAR トークンを「歌詞タイミングに最も近い行」 の縦位置に配置する。
+      // 歌詞が無いセクションは上から順番に並べる（従来通り）。
+      const barByRow = new Map<number, string>();
+      if (lyricLines.length === 0 || secPerBar <= 0) {
+        barTokens.forEach((tok, i) => barByRow.set(i, tok));
+      } else {
+        let cumBars = 0;
+        for (const tok of barTokens) {
+          const tokenStartBar = cumBars; // SECTION 内の相対小節
+          const tokenStartTime = startTime + tokenStartBar * secPerBar;
+          // この BAR の開始時刻に最も近い歌詞行を探す
+          let bestRow = 0;
+          let minDist = Infinity;
+          for (let i = 0; i < lyricStarts.length; i++) {
+            const d = Math.abs(lyricStarts[i] - tokenStartTime);
+            if (d < minDist) { minDist = d; bestRow = i; }
+          }
+          // 既に同じ行に置かれている場合は次の空き行に逃がす（重なり防止）
+          let row = bestRow;
+          while (barByRow.has(row)) row++;
+          barByRow.set(row, tok);
+          cumBars += tokenBarLength(tok);
+        }
+      }
+
+      const maxBarRow = barByRow.size > 0 ? Math.max(...Array.from(barByRow.keys())) + 1 : 0;
+      const contentLines = Math.max(1, maxBarRow, lyricLines.length);
       sec.push({
         id: block.id,
         label: block.label,
-        barTokens,
+        barByRow,
         lyricLines,
         rowStart: cursor,
         contentLines,
@@ -185,9 +235,9 @@ export function ScorePanel({ sectionBlocks, bpm, bpmGridOffset, lyrics }: Props)
               </div>,
             );
 
-            // BAR 列：トークンを 1 行ずつ縦に並べる（自動計算のみ、編集不可）
+            // BAR 列：歌詞タイミングに合わせて縦位置に配置（barByRow に格納済み）
             for (let i = 0; i < s.contentLines; i++) {
-              const tok = s.barTokens[i] ?? "";
+              const tok = s.barByRow.get(i) ?? "";
               cells.push(
                 <div
                   key={`${s.id}-bar-${i}`}
