@@ -77,6 +77,12 @@ interface TimelineEditorProps {
   onSectionBlocksChange?: (blocks: { id: string; label: string; startBar: number; endBar: number }[]) => void;
   /** リハーサルマーク帯の空白部分をダブルクリックした時に呼ばれる。bar = タイムライン小節位置 */
   onSectionAddAt?: (atBar: number) => void;
+  /** 編集モード："lyrics" = 歌詞編集（SECTION 帯はロック） / "score" = 譜割編集（歌詞ブロック帯はロック） */
+  editMode?: "lyrics" | "score";
+  /** 選択中の SECTION ブロック id（譜割モード時のハイライト用） */
+  selectedSectionId?: string | null;
+  /** SECTION ブロックのクリック / 空白クリック時に呼ばれる */
+  onSelectedSectionIdChange?: (id: string | null) => void;
 }
 
 let decodedCache: { projectId: string; bufferByteLength: number; channelData: Float32Array; sampleRate: number } | null = null;
@@ -177,6 +183,9 @@ export const TimelineEditor = memo(function TimelineEditor({
   sectionBlocks,
   onSectionBlocksChange,
   onSectionAddAt,
+  editMode = "lyrics",
+  selectedSectionId,
+  onSelectedSectionIdChange,
 }: TimelineEditorProps) {
   const aHue = propAccentHue ?? 270;
   const [zoom, setZoom] = useState(50);
@@ -2872,7 +2881,11 @@ export const TimelineEditor = memo(function TimelineEditor({
           const totalH = blocksZoneH + (waveformPeaks ? TRACK_GAP + AUDIO_BLOCK_H : 0);
           const HEADER_W = 56;
           return (
-            <div className="flex-1 flex overflow-hidden relative">
+            <div className="flex-1 flex overflow-hidden relative ts-timeline-root" data-edit-mode={editMode}>
+              {/* 編集モード時に歌詞ブロックをロック（譜割モード時に有効） */}
+              {editMode === "score" && (
+                <style>{`.ts-timeline-root[data-edit-mode="score"] [data-block]{opacity:0.35;pointer-events:none;transition:opacity 0.15s;}`}</style>
+              )}
               <div
                 className="shrink-0 flex flex-col z-10"
                 style={{ width: `${HEADER_W}px` }}
@@ -2958,16 +2971,10 @@ export const TimelineEditor = memo(function TimelineEditor({
                 const isDerived = manualBlocks.length === 0;
                 const blocks = isDerived ? deriveBlocksFromScore() : manualBlocks;
                 // SECTION 名から基本色を返す（カテゴリ別）
-                const baseColorFor = (label: string) => {
-                  const l = (label || "").trim().toUpperCase();
-                  if (l === "INTRO") return { bg: "#1d4d63", border: "#2a6b87", text: "#b6e2f5" };
-                  if (l === "INTER" || l === "インター") return { bg: "#5f3a1f", border: "#8b5b2c", text: "#f0c490" };
-                  if (l === "BRIDGE" || l === "ブリッジ") return { bg: "#5c3a1f", border: "#7e4d24", text: "#f0c490" };
-                  if (l === "OUTRO" || l === "アウトロ") return { bg: "#5c1f1f", border: "#8e2f2f", text: "#ecb3b3" };
-                  if (/^[1１]/.test(l)) return { bg: "#1f3d5c", border: "#305887", text: "#b3cdec" };
-                  if (/^[2２]/.test(l)) return { bg: "#1f5c3a", border: "#2f8757", text: "#b3ecc8" };
-                  if (/^[3３]/.test(l)) return { bg: "#5c1f3d", border: "#8e2f5c", text: "#ecb3cd" };
-                  return { bg: "#2c2c2a", border: "#46463f", text: "#ece6d8" };
+                // SECTION ブロックは黄色で統一（TITLE 帯の系統と揃える）。
+                // 隣接の境目が分からなくならないよう、後段の liftColor で明・暗の 2 階調を交互配置。
+                const baseColorFor = (_label: string) => {
+                  return { bg: "#8a6614", border: "#c08a1c", text: "#1a1a1a" };
                 };
                 // 16 進色を少し明るく（隣接同色を見分けるための差分）
                 const liftColor = (hex: string, amount = 24) => {
@@ -3164,7 +3171,15 @@ export const TimelineEditor = memo(function TimelineEditor({
                 return (
                   <div
                     className="absolute left-0 right-0 z-30 overflow-hidden"
-                    style={{ top: blocksZoneH + TRACK_GAP, height: SECTION_BAND_H, borderTop: "1px solid hsl(0 0% 14%)", borderBottom: "1px solid hsl(0 0% 14%)" }}
+                    style={{
+                      top: blocksZoneH + TRACK_GAP,
+                      height: SECTION_BAND_H,
+                      borderTop: "1px solid hsl(0 0% 14%)",
+                      borderBottom: "1px solid hsl(0 0% 14%)",
+                      opacity: editMode === "lyrics" ? 0.35 : 1,
+                      pointerEvents: editMode === "lyrics" ? "none" : "auto",
+                      transition: "opacity 0.15s",
+                    }}
                     onDoubleClick={(e) => {
                       // 既存ブロックの上のダブルクリックはラベル編集に任せる
                       const t = e.target as HTMLElement;
@@ -3190,6 +3205,8 @@ export const TimelineEditor = memo(function TimelineEditor({
                       const t = e.target as HTMLElement;
                       if (t.closest("[data-section-block]")) return;
                       e.stopPropagation();
+                      // 空白クリックで選択解除
+                      onSelectedSectionIdChange?.(null);
                     }}
                   >
                     <div className="absolute top-0 bottom-0 pointer-events-none" style={{ left: -tlScrollLeft, zIndex: 0 }}>
@@ -3216,7 +3233,11 @@ export const TimelineEditor = memo(function TimelineEditor({
                                 e.preventDefault();
                                 e.stopPropagation();
                                 sectionBlockDidMove.current = false;
+                                return;
                               }
+                              // クリックで選択切替：選択中のブロックを再度クリックで解除、それ以外は選択
+                              e.stopPropagation();
+                              onSelectedSectionIdChange?.(selectedSectionId === b.id ? null : b.id);
                             }}
                             onDoubleClick={(e) => {
                               const t = e.target as HTMLElement;
@@ -3233,7 +3254,12 @@ export const TimelineEditor = memo(function TimelineEditor({
                               className="absolute inset-0 rounded-sm overflow-hidden pointer-events-none"
                               style={{
                                 backgroundColor: c.bg,
-                                border: `1px ${isDerived ? "dashed" : "solid"} ${c.border}`,
+                                border: selectedSectionId === b.id
+                                  ? "1.5px solid #ffe066"
+                                  : `1px ${isDerived ? "dashed" : "solid"} ${c.border}`,
+                                boxShadow: selectedSectionId === b.id
+                                  ? "0 0 0 1px rgba(255, 224, 102, 0.25)"
+                                  : "none",
                               }}
                             />
                             <div
@@ -3271,15 +3297,6 @@ export const TimelineEditor = memo(function TimelineEditor({
                         );
                       })}
                     </div>
-                    <button
-                      onClick={() => {
-                        const last = blocks.reduce((m, b) => Math.max(m, b.endBar), 0);
-                        const id = `b-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,5)}`;
-                        onSectionBlocksChange?.([...blocks, { id, label: "NEW", startBar: last, endBar: last + 4 }]);
-                      }}
-                      style={{ position: "absolute", top: 4, right: 6, background: "rgba(229,191,61,0.15)", color: "hsl(48 100% 60%)", border: "1px solid hsl(48 70% 35%)", borderRadius: 3, padding: "2px 8px", fontSize: 10, cursor: "pointer", zIndex: 5 }}
-                      title="末尾に SECTION を追加（4 小節）"
-                    >+ 追加</button>
                   </div>
                 );
               })()}

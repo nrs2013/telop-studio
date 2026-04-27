@@ -554,6 +554,8 @@ export default function ProjectPage() {
   // データ管理は useScoreRows フックに集約（client/src/hooks/useScoreRows.ts）。
   // 安全装置：データ加工なし／自動振り分けなし／マイグレーションなし。
   const [activeRightTab, setActiveRightTab] = useState<"lyrics" | "score">("lyrics");
+  // SECTION ブロック選択中の id（譜割モード時に使う）。タブ切替時にクリア。
+  const [selectedSectionId, setSelectedSectionId] = useState<string | null>(null);
   const { scoreRows, setScoreRows, updateScoreRow } = useScoreRows(id);
   // 譜割タブ LYRIC 列のユーザー上書き
   const { overrides: lyricOverrides, setOverride: setLyricOverride } = useLyricOverrides(id);
@@ -571,6 +573,10 @@ export default function ProjectPage() {
   sectionBlocksRef.current = sectionBlocks;
   const effectiveSectionBlocksRef = useRef(effectiveSectionBlocks);
   effectiveSectionBlocksRef.current = effectiveSectionBlocks;
+  const activeRightTabRef = useRef(activeRightTab);
+  activeRightTabRef.current = activeRightTab;
+  const selectedSectionIdRef = useRef(selectedSectionId);
+  selectedSectionIdRef.current = selectedSectionId;
 
 
 
@@ -2666,6 +2672,15 @@ export default function ProjectPage() {
     }
 
       if ((e.code === "Delete" || e.code === "Backspace") && !isTextInput) {
+        // 譜割モードかつ SECTION ブロック選択中なら、その SECTION を削除
+        const currentTab = activeRightTabRef.current;
+        const currentSelected = selectedSectionIdRef.current;
+        if (currentTab === "score" && currentSelected) {
+          e.preventDefault();
+          setSectionBlocks(prev => prev.filter(b => b.id !== currentSelected));
+          setSelectedSectionId(null);
+          return;
+        }
         window.dispatchEvent(new CustomEvent("delete-selected-markers"));
         return;
       }
@@ -4327,6 +4342,19 @@ export default function ProjectPage() {
               </div>
             );
           })()}
+          {/* SHORT CUT：曲ファイル名の右側、ヘッダーバーに常駐 */}
+          <Button
+            tabIndex={-1}
+            size="sm"
+            variant="ghost"
+            className="text-[11px] px-2 py-1 opacity-60 hover:opacity-100 tracking-wider font-semibold"
+            onClick={() => setShortcutsOpen(true)}
+            data-testid="button-shortcuts-header"
+            title="ショートカット一覧"
+          >
+            <Keyboard className="w-3.5 h-3.5 mr-1" />
+            SHORT CUT
+          </Button>
           <div className="flex items-center gap-1 rounded-md px-1 py-0.5" style={{ backgroundColor: "hsl(0 0% 12%)", border: "1px solid hsl(0 0% 22%)" }}>
             <span className="text-[9px] font-bold tracking-wider uppercase px-1" style={{ color: "hsl(0 0% 40%)" }}>IN</span>
             <Button
@@ -4959,18 +4987,7 @@ export default function ProjectPage() {
                   REC
                 </Button>
               )}
-              <Button
-                tabIndex={-1}
-                size="sm"
-                variant="ghost"
-                className="text-[11px] px-2 py-1 opacity-60 hover:opacity-100 tracking-wider font-semibold"
-                onClick={() => setShortcutsOpen(true)}
-                data-testid="button-shortcuts"
-                title="ショートカット一覧"
-              >
-                <Keyboard className="w-3.5 h-3.5 mr-1" />
-                SHORT CUT
-              </Button>
+              {/* SHORT CUT はヘッダーバー（曲ファイル名の右）に移動済み */}
               <Button
                 tabIndex={-1}
                 size="icon"
@@ -5083,34 +5100,60 @@ export default function ProjectPage() {
                 </div>
               </div>
             )}
-            <div className="flex items-center gap-1 px-1 py-0.5 shrink-0 select-none" style={{ borderBottom: "1px solid hsl(0 0% 20%)", background: "hsl(0 0% 11%)", minHeight: 28 }}>
+            {/* タブバー（D 案 + Chrome 風）：選択中タブは下のコンテンツと黄色フレームで連続 */}
+            <div className="flex items-stretch shrink-0 select-none" style={{ height: 52, background: "hsl(0 0% 11%)" }}>
+              {/* LYRIC タブ */}
               <button
                 tabIndex={-1}
-                onClick={() => setActiveRightTab("lyrics")}
-                className="text-[11px] font-bold tracking-widest uppercase px-2 py-1 rounded transition-colors"
+                onClick={() => { setActiveRightTab("lyrics"); setSelectedSectionId(null); }}
+                className="px-9 transition-colors"
                 style={{
-                  color: activeRightTab === "lyrics" ? "hsl(48 100% 50%)" : TS_DESIGN.text3,
-                  background: activeRightTab === "lyrics" ? "rgba(229,191,61,0.08)" : "transparent",
+                  position: "relative",
+                  background: activeRightTab === "lyrics" ? TS_DESIGN.bg2 : "transparent",
+                  border: activeRightTab === "lyrics" ? "1px solid #c08a1c" : "none",
+                  borderBottom: activeRightTab === "lyrics" ? "none" : "1px solid #c08a1c",
+                  borderRadius: activeRightTab === "lyrics" ? "10px 10px 0 0" : 0,
+                  marginBottom: activeRightTab === "lyrics" ? -1 : 0,
+                  zIndex: activeRightTab === "lyrics" ? 2 : 1,
+                  color: activeRightTab === "lyrics" ? "#ffd34d" : "hsl(0 0% 42%)",
+                  fontSize: 15,
+                  fontWeight: 500,
+                  letterSpacing: "0.08em",
+                  cursor: "pointer",
                 }}
                 data-testid="tab-right-lyrics"
               >
-                Lyrics{lyrics ? ` (${lyrics.length})` : ""}
+                LYRIC{lyrics ? ` (${lyrics.length})` : ""}
               </button>
+              {/* 譜割タブ */}
               <button
                 tabIndex={-1}
-                onClick={() => setActiveRightTab("score")}
-                className="text-[11px] font-bold tracking-widest uppercase px-2 py-1 rounded transition-colors"
+                onClick={() => { setActiveRightTab("score"); setSelectedSectionId(null); }}
+                className="px-9 transition-colors"
                 style={{
-                  color: activeRightTab === "score" ? "hsl(48 100% 50%)" : TS_DESIGN.text3,
-                  background: activeRightTab === "score" ? "rgba(229,191,61,0.08)" : "transparent",
+                  position: "relative",
+                  background: activeRightTab === "score" ? TS_DESIGN.bg2 : "transparent",
+                  border: activeRightTab === "score" ? "1px solid #c08a1c" : "none",
+                  borderBottom: activeRightTab === "score" ? "none" : "1px solid #c08a1c",
+                  borderRadius: activeRightTab === "score" ? "10px 10px 0 0" : 0,
+                  marginBottom: activeRightTab === "score" ? -1 : 0,
+                  zIndex: activeRightTab === "score" ? 2 : 1,
+                  color: activeRightTab === "score" ? "#ffd34d" : "hsl(0 0% 42%)",
+                  fontSize: 15,
+                  fontWeight: 500,
+                  letterSpacing: "0.08em",
+                  cursor: "pointer",
                 }}
                 data-testid="tab-right-score"
               >
                 譜割
               </button>
+              {/* 残りスペース：黄色の下線でタブと連続 */}
+              <div style={{ flex: 1, borderBottom: "1px solid #c08a1c", marginBottom: -1 }} />
+              {/* 右端の補助：LYRIC モード時のみフルスクリーン展開ボタンと保存ステータス */}
               {activeRightTab === "lyrics" && (
-                <>
-                  <span className="text-[9px] ml-auto" style={{ color: "hsl(0 0% 42%)" }}>
+                <div className="flex items-center gap-2 px-3" style={{ borderBottom: "1px solid #c08a1c", marginBottom: -1 }}>
+                  <span className="text-[9px]" style={{ color: "hsl(0 0% 42%)" }}>
                     行番号をドラッグ→TL
                   </span>
                   <button
@@ -5128,7 +5171,10 @@ export default function ProjectPage() {
                       保存待ち...
                     </span>
                   )}
-                </>
+                </div>
+              )}
+              {activeRightTab === "score" && (
+                <div className="flex items-center px-3" style={{ borderBottom: "1px solid #c08a1c", marginBottom: -1 }} />
               )}
             </div>
             {activeRightTab === "lyrics" && (isRecording ? (
@@ -5503,6 +5549,9 @@ export default function ProjectPage() {
                 const next = addSectionBlockAt(baseBlocks, atBar);
                 if (next) setSectionBlocks(next);
               }}
+              editMode={activeRightTab}
+              selectedSectionId={selectedSectionId}
+              onSelectedSectionIdChange={setSelectedSectionId}
               onBpmGridOffsetChange={(offset) => {
                 updateProjectData({ bpmGridOffset: offset } as any);
               }}
