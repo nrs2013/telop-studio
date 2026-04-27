@@ -2956,7 +2956,7 @@ export default function ProjectPage() {
   const [showCreditMode, setShowCreditMode] = useState(true);
   const [previewFullscreen, setPreviewFullscreen] = useState(false);
   const [lyricsFullscreen, setLyricsFullscreen] = useState(false);
-  const [minimalMode, setMinimalMode] = useState(false);
+  // minimalMode は撤去済み（タブと REC の同段統合に伴い不要に）
   const [rightPanelWidth, setRightPanelWidth] = useState(520);
   const isDraggingDividerRef = useRef(false);
   const dividerStartXRef = useRef(0);
@@ -4813,7 +4813,7 @@ export default function ProjectPage() {
           </div>
           </div>
           </div>
-          {!isRecording && !minimalMode && (() => {
+          {!isRecording && (() => {
             const titleSize = project?.creditTitleFontSize ?? activePreset.creditTitleFontSize;
             const creditInfoSize = project?.creditLyricsFontSize ?? activePreset.creditInfoFontSize;
             const rightTitleSize = project?.creditRightTitleFontSize ?? activePreset.creditRightTitleFontSize;
@@ -4977,29 +4977,7 @@ export default function ProjectPage() {
             </div>
           )}
 
-          {!isRecording && minimalMode && (
-            <div className="shrink-0 px-3 py-2 flex items-center gap-2" style={{ borderBottom: "1px solid hsl(0 0% 22%)" }}>
-              <Button tabIndex={-1} size="sm" variant="outline" className="h-7 text-xs" onClick={() => { if (audioRef.current) { if (isPlaying) audioRef.current.pause(); else safePlay().catch(() => {}); } }} disabled={!audioUrl} data-testid="button-minimal-play">
-                {isPlaying ? <Pause className="w-3 h-3 mr-1" /> : <Music className="w-3 h-3 mr-1" />}
-                {isPlaying ? "PAUSE" : "PLAY"}
-              </Button>
-              <span className="text-[10px] font-mono" style={{ color: "hsl(0 0% 50%)" }}>
-                {formatTime(currentTime)} / {formatTime(duration)}
-              </span>
-              <button
-                className="ml-auto text-[8px] px-1.5 py-0.5 rounded font-bold"
-                style={{
-                  backgroundColor: showCreditMode ? "hsl(0 0% 22%)" : "hsl(0 0% 15%)",
-                  color: showCreditMode ? "hsl(0 0% 85%)" : "hsl(0 0% 45%)",
-                  border: `1px solid ${showCreditMode ? "hsl(0 0% 32%)" : "hsl(0 0% 20%)"}`,
-                }}
-                onClick={() => setShowCreditMode(!showCreditMode)}
-                data-testid="button-minimal-credit-toggle"
-              >
-                CREDIT {showCreditMode ? "ON" : "OFF"}
-              </button>
-            </div>
-          )}
+          {/* minimalMode の PLAY/CREDIT バーは撤去済み */}
 
 
           <div
@@ -5068,7 +5046,7 @@ export default function ProjectPage() {
               </div>
             )}
             {/* タブバー（D 案 + Chrome 風 / B サイズ）：選択中タブは下のコンテンツと黄色フレームで連続 */}
-            <div className="flex items-stretch shrink-0 select-none" style={{ height: 40, background: "hsl(0 0% 11%)", paddingLeft: 14 }}>
+            <div className="flex items-stretch shrink-0 select-none" style={{ height: 40, background: "hsl(0 0% 11%)" }}>
               {/* LYRIC タブ */}
               <button
                 tabIndex={-1}
@@ -5161,21 +5139,10 @@ export default function ProjectPage() {
                     REC
                   </Button>
                 )}
-                <Button
-                  tabIndex={-1}
-                  size="icon"
-                  variant="ghost"
-                  className="h-6 w-6 opacity-50 hover:opacity-100"
-                  onClick={() => setMinimalMode(!minimalMode)}
-                  data-testid="button-minimal-mode"
-                  title={minimalMode ? "通常表示に戻す" : "最小限表示"}
-                >
-                  {minimalMode ? <Maximize className="w-3.5 h-3.5" /> : <Minimize className="w-3.5 h-3.5" />}
-                </Button>
               </div>
             </div>
             {/* コンテンツエリア全体を黄色フレームで囲む（タブと連続） */}
-            <div className="flex-1 flex flex-col overflow-hidden" style={{ border: "1px solid #c08a1c", borderTop: "none", borderRadius: "0 0 8px 8px", marginLeft: 14, marginRight: 14, marginBottom: 14 }}>
+            <div className="flex-1 flex flex-col overflow-hidden" style={{ border: "1px solid #c08a1c", borderTop: "none" }}>
             {activeRightTab === "lyrics" && (isRecording ? (
               <div
                 ref={recordingScrollRef}
