@@ -3169,12 +3169,27 @@ export const TimelineEditor = memo(function TimelineEditor({
                       // 既存ブロックの上のダブルクリックはラベル編集に任せる
                       const t = e.target as HTMLElement;
                       if (t.closest("[data-section-block]")) return;
+                      // 親要素にイベントが伝播しないようにする（誤発火防止）
+                      e.stopPropagation();
+                      e.preventDefault();
                       // クリック位置 → bar 計算 → 親に通知
                       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
                       const xInBand = e.clientX - rect.left + tlScrollLeft;
                       const time = xInBand / pixelsPerSecond;
                       const bar = (time - offset) / secPerBar;
                       onSectionAddAtRef.current?.(bar);
+                    }}
+                    // ダブルクリック以外の click / mousedown も親に伝播させない
+                    // （「クリックで消えた」現象の防止：他のリスナーに届かないようにする）
+                    onMouseDown={(e) => {
+                      const t = e.target as HTMLElement;
+                      if (t.closest("[data-section-block]")) return;
+                      e.stopPropagation();
+                    }}
+                    onClick={(e) => {
+                      const t = e.target as HTMLElement;
+                      if (t.closest("[data-section-block]")) return;
+                      e.stopPropagation();
                     }}
                   >
                     <div className="absolute top-0 bottom-0 pointer-events-none" style={{ left: -tlScrollLeft, zIndex: 0 }}>

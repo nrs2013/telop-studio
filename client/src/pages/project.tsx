@@ -566,6 +566,11 @@ export default function ProjectPage() {
     () => (sectionBlocks.length > 0 ? sectionBlocks : deriveBlocksFromScoreRows(scoreRows)),
     [sectionBlocks, scoreRows],
   );
+  // ハンドラ内（useEffect の空依存配列の中）から最新値を読むための ref
+  const sectionBlocksRef = useRef(sectionBlocks);
+  sectionBlocksRef.current = sectionBlocks;
+  const effectiveSectionBlocksRef = useRef(effectiveSectionBlocks);
+  effectiveSectionBlocksRef.current = effectiveSectionBlocks;
 
 
 
@@ -2628,8 +2633,10 @@ export default function ProjectPage() {
       if (!bpm || bpm <= 0) return;
       const secPerBar = (60 / bpm) * 4;
       const playheadBar = Math.max(0, (currentTimeRef.current - offset) / secPerBar);
+      // ref 経由で最新値を見る（useEffect の依存配列が空のため、クロージャの値は古い）
       // 派生中のブロックも含めて土台にすることで、追加と同時に手動配置に昇格させる
-      const baseBlocks = sectionBlocks.length > 0 ? sectionBlocks : effectiveSectionBlocks;
+      const currentBlocks = sectionBlocksRef.current;
+      const baseBlocks = currentBlocks.length > 0 ? currentBlocks : effectiveSectionBlocksRef.current;
       const next = addSectionBlockAt(baseBlocks, playheadBar);
       if (next) setSectionBlocks(next);
       return;
