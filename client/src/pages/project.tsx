@@ -5094,9 +5094,6 @@ export default function ProjectPage() {
               <div className="flex items-center gap-2 pl-3 pr-3">
                 {activeRightTab === "lyrics" && (
                   <>
-                    <span className="text-[9px]" style={{ color: "hsl(0 0% 42%)" }}>
-                      行番号をドラッグ→TL
-                    </span>
                     <button
                       tabIndex={-1}
                       className="w-5 h-5 flex items-center justify-center rounded hover:bg-white/10"
