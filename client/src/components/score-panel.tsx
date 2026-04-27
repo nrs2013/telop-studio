@@ -129,10 +129,18 @@ export function ScorePanel({
   barOverrides,
   onBarChange,
 }: Props) {
+  // タイムラインの位置順（startBar 昇順）に必ず並べる。
+  // sectionBlocks は配列順がタイムラインの追加順なので、ユーザーがブロックを動かしても
+  // ここでは明示的にソートして、譜割タブが常に「左→右」の順に並ぶようにする。
+  const sortedSectionBlocks = useMemo(
+    () => [...sectionBlocks].sort((a, b) => a.startBar - b.startBar),
+    [sectionBlocks],
+  );
+
   const { sections, totalRows } = useMemo(() => {
     const sec: SectionView[] = [];
     let cursor = 1;
-    for (const block of sectionBlocks) {
+    for (const block of sortedSectionBlocks) {
       const totalBars = block.endBar - block.startBar;
       const autoBarText = tokenizeBars(totalBars).join("\n");
       const barText = barOverrides[block.id] ?? autoBarText;
@@ -149,7 +157,7 @@ export function ScorePanel({
       cursor += contentLines + 1;
     }
     return { sections: sec, totalRows: cursor - 1 };
-  }, [sectionBlocks, barOverrides]);
+  }, [sortedSectionBlocks, barOverrides]);
 
   // 初期値（fullText === null のときに使う）
   const initialFullText = useMemo(() => {

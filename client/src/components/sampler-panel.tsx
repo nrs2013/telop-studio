@@ -55,7 +55,9 @@ export function SamplerPanel({
           const sectionItems: { id: string; label: string; sectionTime: number; cueTime: number }[] = [];
           if (sectionBlocks.length > 0) {
             // 優先：タイムラインのリハーサルマークから時間を計算
-            for (const block of sectionBlocks) {
+            // 必ず startBar 昇順に並べてから処理（タイムライン位置順 = 演奏順）
+            const sortedBlocks = [...sectionBlocks].sort((a, b) => a.startBar - b.startBar);
+            for (const block of sortedBlocks) {
               const sectionTime = offset + block.startBar * secPerBar;
               sectionItems.push({
                 id: block.id,
