@@ -75,6 +75,8 @@ interface TimelineEditorProps {
   scoreRows?: { id: string; section: string; bars: string; lyric: string }[];
   sectionBlocks?: { id: string; label: string; startBar: number; endBar: number }[];
   onSectionBlocksChange?: (blocks: { id: string; label: string; startBar: number; endBar: number }[]) => void;
+  /** リハーサルマーク帯の空白部分をダブルクリックした時に呼ばれる。bar = タイムライン小節位置 */
+  onSectionAddAt?: (atBar: number) => void;
 }
 
 let decodedCache: { projectId: string; bufferByteLength: number; channelData: Float32Array; sampleRate: number } | null = null;
@@ -174,6 +176,7 @@ export const TimelineEditor = memo(function TimelineEditor({
   scoreRows,
   sectionBlocks,
   onSectionBlocksChange,
+  onSectionAddAt,
 }: TimelineEditorProps) {
   const aHue = propAccentHue ?? 270;
   const [zoom, setZoom] = useState(50);
@@ -869,6 +872,9 @@ export const TimelineEditor = memo(function TimelineEditor({
   const dragDidMove = useRef(false);
   const dragCleanupRef = useRef<(() => void) | null>(null);
   const sectionBlockDidMove = useRef(false);
+  // ダブルクリック追加コールバックの最新版を保持（onDoubleClick 内から参照しやすくするため）
+  const onSectionAddAtRef = useRef(onSectionAddAt);
+  onSectionAddAtRef.current = onSectionAddAt;
 
   const snapEnabledRef = useRef(snapEnabled);
   snapEnabledRef.current = snapEnabled;
@@ -3156,7 +3162,21 @@ export const TimelineEditor = memo(function TimelineEditor({
                   window.addEventListener("mouseup", onUp);
                 };
                 return (
-                  <div className="absolute left-0 right-0 z-30 overflow-hidden" style={{ top: blocksZoneH + TRACK_GAP, height: SECTION_BAND_H, borderTop: "1px solid hsl(0 0% 14%)", borderBottom: "1px solid hsl(0 0% 14%)" }}>
+                  <div
+                    className="absolute left-0 right-0 z-30 overflow-hidden"
+                    style={{ top: blocksZoneH + TRACK_GAP, height: SECTION_BAND_H, borderTop: "1px solid hsl(0 0% 14%)", borderBottom: "1px solid hsl(0 0% 14%)" }}
+                    onDoubleClick={(e) => {
+                      // 既存ブロックの上のダブルクリックはラベル編集に任せる
+                      const t = e.target as HTMLElement;
+                      if (t.closest("[data-section-block]")) return;
+                      // クリック位置 → bar 計算 → 親に通知
+                      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                      const xInBand = e.clientX - rect.left + tlScrollLeft;
+                      const time = xInBand / pixelsPerSecond;
+                      const bar = (time - offset) / secPerBar;
+                      onSectionAddAtRef.current?.(bar);
+                    }}
+                  >
                     <div className="absolute top-0 bottom-0 pointer-events-none" style={{ left: -tlScrollLeft, zIndex: 0 }}>
                       {bpmGridLines}
                     </div>
@@ -3173,6 +3193,7 @@ export const TimelineEditor = memo(function TimelineEditor({
                             className="absolute flex items-center justify-center group"
                             style={{ left: x, top: 4, width: w, height: SECTION_BAND_H - 8, color: c.text, userSelect: "none", cursor: "move", opacity: isDerived ? 0.9 : 1 }}
                             data-testid={`tl-section-${b.id}`}
+                            data-section-block
                             onMouseDown={(e) => onBlockMouseDown(e, b, "move")}
                             onClick={(e) => {
                               // ドラッグ後の click は無視（誤発火防止）

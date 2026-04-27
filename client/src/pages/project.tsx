@@ -141,6 +141,7 @@ import { useLyricOverrides } from "@/hooks/useLyricOverrides";
 import { useScoreFullText } from "@/hooks/useScoreFullText";
 import { useScoreBarOverrides } from "@/hooks/useScoreBarOverrides";
 import { deriveBlocksFromScoreRows } from "@/lib/sectionBlockDerivation";
+import { addSectionBlockAt } from "@/lib/sectionBlockOps";
 import { SamplerPanel } from "@/components/sampler-panel";
 import { ScorePanel } from "@/components/score-panel";
 import { FullscreenPreview } from "@/components/fullscreen-preview";
@@ -423,6 +424,7 @@ export default function ProjectPage() {
     fullscreen: "Digit1",
     titleIn: "KeyT",
     title2In: "KeyY",
+    addRehearsalMark: "KeyR",
   }), []);
 
   const [customKeyMap, setCustomKeyMap] = useState<Record<string, string>>(() => {
@@ -2617,6 +2619,21 @@ export default function ProjectPage() {
         }
         return;
       }
+
+    if (e.code === km.addRehearsalMark && !e.metaKey && !e.ctrlKey && !e.altKey && !isTextInput) {
+      e.preventDefault();
+      const proj = projectRef.current;
+      const bpm = proj?.detectedBpm;
+      const offset = proj?.bpmGridOffset ?? 0;
+      if (!bpm || bpm <= 0) return;
+      const secPerBar = (60 / bpm) * 4;
+      const playheadBar = Math.max(0, (currentTimeRef.current - offset) / secPerBar);
+      // 派生中のブロックも含めて土台にすることで、追加と同時に手動配置に昇格させる
+      const baseBlocks = sectionBlocks.length > 0 ? sectionBlocks : effectiveSectionBlocks;
+      const next = addSectionBlockAt(baseBlocks, playheadBar);
+      if (next) setSectionBlocks(next);
+      return;
+    }
 
     if ((e.code === km.titleIn || e.code === km.title2In) && !e.metaKey && !e.ctrlKey && !e.altKey && !isTextInput) {
       e.preventDefault();
@@ -5474,6 +5491,11 @@ export default function ProjectPage() {
               scoreRows={scoreRows}
               sectionBlocks={sectionBlocks}
               onSectionBlocksChange={setSectionBlocks}
+              onSectionAddAt={(atBar) => {
+                const baseBlocks = sectionBlocks.length > 0 ? sectionBlocks : effectiveSectionBlocks;
+                const next = addSectionBlockAt(baseBlocks, atBar);
+                if (next) setSectionBlocks(next);
+              }}
               onBpmGridOffsetChange={(offset) => {
                 updateProjectData({ bpmGridOffset: offset } as any);
               }}
@@ -5681,6 +5703,7 @@ export default function ProjectPage() {
               ["fadeMode", "フェードモード切替"],
               ["titleIn", "TITLE A IN 配置/削除"],
               ["title2In", "TITLE B IN 配置/削除"],
+              ["addRehearsalMark", "リハーサルマーク追加（再生位置に1小節）"],
               ["fullscreen", "フルスクリーンプレビュー"],
             ] as [string, string][]).map(([action, desc]) => (
               <Fragment key={action}>
