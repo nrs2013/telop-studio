@@ -3171,7 +3171,7 @@ export const TimelineEditor = memo(function TimelineEditor({
                           <div
                             key={b.id}
                             className="absolute flex items-center justify-center group"
-                            style={{ left: Math.max(0, x), top: 4, width: w, height: SECTION_BAND_H - 8, color: c.text, userSelect: "none", cursor: "move", opacity: isDerived ? 0.9 : 1 }}
+                            style={{ left: x, top: 4, width: w, height: SECTION_BAND_H - 8, color: c.text, userSelect: "none", cursor: "move", opacity: isDerived ? 0.9 : 1 }}
                             data-testid={`tl-section-${b.id}`}
                             onMouseDown={(e) => onBlockMouseDown(e, b, "move")}
                             onClick={(e) => {
