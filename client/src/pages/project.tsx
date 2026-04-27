@@ -5045,23 +5045,24 @@ export default function ProjectPage() {
                 </div>
               </div>
             )}
-            {/* タブ + コンテンツを 1 つの親枠で囲む（黄色フレームで連続表示） */}
+            {/* タブ + コンテンツを 1 つの親枠で囲む */}
             <div className="flex-1 flex flex-col overflow-hidden" style={{ border: "1px solid #c08a1c", borderRadius: 8 }}>
-            {/* タブバー：上の段、コンテンツとの間に水平線 */}
-            <div className="flex items-stretch shrink-0 select-none" style={{ height: 40, background: TS_DESIGN.bg2, borderBottom: "1px solid #c08a1c" }}>
+            {/* タブバー：セグメンテッドコントロールスタイル */}
+            <div className="flex items-center shrink-0 select-none gap-2 px-3" style={{ height: 48, background: TS_DESIGN.bg2, borderBottom: "1px solid #c08a1c" }}>
               {/* LYRIC タブ */}
               <button
                 tabIndex={-1}
                 onClick={() => { setActiveRightTab("lyrics"); setSelectedSectionId(null); }}
-                className="transition-colors focus:outline-none"
+                className="transition-all focus:outline-none"
                 style={{
-                  padding: "9px 28px",
-                  background: "transparent",
+                  padding: "8px 36px",
+                  background: activeRightTab === "lyrics" ? "#c08a1c" : "transparent",
                   border: "none",
                   outline: "none",
-                  color: activeRightTab === "lyrics" ? "#ffd34d" : "hsl(0 0% 42%)",
-                  fontSize: 13,
-                  fontWeight: 500,
+                  borderRadius: 6,
+                  color: activeRightTab === "lyrics" ? "#1a1a1a" : "hsl(0 0% 50%)",
+                  fontSize: 14,
+                  fontWeight: activeRightTab === "lyrics" ? 700 : 500,
                   letterSpacing: "0.08em",
                   cursor: "pointer",
                 }}
@@ -5073,15 +5074,16 @@ export default function ProjectPage() {
               <button
                 tabIndex={-1}
                 onClick={() => { setActiveRightTab("score"); setSelectedSectionId(null); }}
-                className="transition-colors focus:outline-none"
+                className="transition-all focus:outline-none"
                 style={{
-                  padding: "9px 28px",
-                  background: "transparent",
+                  padding: "8px 36px",
+                  background: activeRightTab === "score" ? "#c08a1c" : "transparent",
                   border: "none",
                   outline: "none",
-                  color: activeRightTab === "score" ? "#ffd34d" : "hsl(0 0% 42%)",
-                  fontSize: 13,
-                  fontWeight: 500,
+                  borderRadius: 6,
+                  color: activeRightTab === "score" ? "#1a1a1a" : "hsl(0 0% 50%)",
+                  fontSize: 14,
+                  fontWeight: activeRightTab === "score" ? 700 : 500,
                   letterSpacing: "0.08em",
                   cursor: "pointer",
                 }}
