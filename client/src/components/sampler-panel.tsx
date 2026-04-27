@@ -1,19 +1,13 @@
 // SAMPLER パネル：タイムラインの SECTION ブロック（リハーサルマーク）から自動生成されるボタン群。
 // クリックすると該当 SECTION の 2 小節前から再生。
 // 再生位置に応じて該当ボタンが黄色く光る（追従ハイライト）。
-//
-// データソース：
-//   - sectionBlocks（タイムライン側のリハーサルマーク）が優先
-//   - sectionBlocks が空のときは scoreRows（旧手入力データ）から派生して表示
 
 import type { MutableRefObject } from "react";
-import type { ScoreRow } from "@/hooks/useScoreRows";
 import { TS_DESIGN } from "@/lib/designTokens";
 
 export type SamplerSectionBlock = { id: string; label: string; startBar: number; endBar: number };
 
 type Props = {
-  scoreRows: ScoreRow[];
   sectionBlocks: SamplerSectionBlock[];
   bpm: number | null | undefined;
   bpmGridOffset: number;
@@ -24,7 +18,6 @@ type Props = {
 };
 
 export function SamplerPanel({
-  scoreRows,
   sectionBlocks,
   bpm,
   bpmGridOffset,
@@ -51,42 +44,19 @@ export function SamplerPanel({
           }
           const beatsPerBar = 4;
           const secPerBar = (60 / bpm) * beatsPerBar;
-          // 1 パス目：全 SECTION の時間を集める
-          const sectionItems: { id: string; label: string; sectionTime: number; cueTime: number }[] = [];
-          if (sectionBlocks.length > 0) {
-            // 優先：タイムラインのリハーサルマークから時間を計算
-            // 必ず startBar 昇順に並べてから処理（タイムライン位置順 = 演奏順）
-            const sortedBlocks = [...sectionBlocks].sort((a, b) => a.startBar - b.startBar);
-            for (const block of sortedBlocks) {
-              const sectionTime = offset + block.startBar * secPerBar;
-              sectionItems.push({
-                id: block.id,
-                label: block.label,
-                sectionTime,
-                cueTime: Math.max(0, sectionTime - 2 * secPerBar),
-              });
-            }
-          } else {
-            // フォールバック：旧手入力 scoreRows から派生
-            let cumBars = 0;
-            for (const row of scoreRows) {
-              const secLines = row.section.split("\n");
-              const barLines = row.bars.split("\n");
-              const maxLines = Math.max(secLines.length, barLines.length);
-              for (let i = 0; i < maxLines; i++) {
-                const label = (secLines[i] || "").trim();
-                if (label) {
-                  const sectionTime = offset + cumBars * secPerBar;
-                  sectionItems.push({ id: `${row.id}-${i}`, label, sectionTime, cueTime: Math.max(0, sectionTime - 2 * secPerBar) });
-                }
-                const barText = barLines[i] || "";
-                const nums = barText.match(/\d+/g) || [];
-                cumBars += nums.reduce((s, n) => s + parseInt(n, 10), 0);
-              }
-            }
-          }
+          // タイムラインのリハーサルマークから時間を計算（startBar 昇順 = 演奏順）
+          const sortedBlocks = [...sectionBlocks].sort((a, b) => a.startBar - b.startBar);
+          const sectionItems: { id: string; label: string; sectionTime: number; cueTime: number }[] = sortedBlocks.map((block) => {
+            const sectionTime = offset + block.startBar * secPerBar;
+            return {
+              id: block.id,
+              label: block.label,
+              sectionTime,
+              cueTime: Math.max(0, sectionTime - 2 * secPerBar),
+            };
+          });
           if (sectionItems.length === 0) {
-            return <div style={{ color: TS_DESIGN.text3, fontSize: 10, padding: "8px 4px" }}>譜割タブの SECTION 欄に書き込むと、ここにボタンが並びます。</div>;
+            return <div style={{ color: TS_DESIGN.text3, fontSize: 10, padding: "8px 4px" }}>タイムラインにリハーサルマークを置くと、ここにボタンが並びます。</div>;
           }
           // 2 パス目：currentTime がどの SECTION に属するか判定 → ハイライト
           return sectionItems.map((s, idx) => {

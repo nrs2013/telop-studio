@@ -72,7 +72,7 @@ interface TimelineEditorProps {
   zoomInLabel?: string;
   rightTitleAnimDurMs?: number;
   rightTitleText?: string;
-  scoreRows?: { id: string; section: string; bars: string; lyric: string }[];
+  // scoreRows props は撤去（旧手入力譜割の後方互換用だったが、 譜割タブ自動化で不要に）
   sectionBlocks?: { id: string; label: string; startBar: number; endBar: number }[];
   onSectionBlocksChange?: (blocks: { id: string; label: string; startBar: number; endBar: number }[]) => void;
   /** リハーサルマーク帯の空白部分をダブルクリックした時に呼ばれる。bar = タイムライン小節位置 */
@@ -179,7 +179,6 @@ export const TimelineEditor = memo(function TimelineEditor({
   zoomInLabel,
   rightTitleAnimDurMs,
   rightTitleText,
-  scoreRows,
   sectionBlocks,
   onSectionBlocksChange,
   onSectionAddAt,
@@ -2914,47 +2913,13 @@ export const TimelineEditor = memo(function TimelineEditor({
               </div>
 
               <div className="flex-1 relative">
-              {/* SECTION ブロック帯：sectionBlocks がマスター。空の時は譜割タブから派生表示（読み取り専用、破線） */}
+              {/* SECTION ブロック帯：sectionBlocks（タイムライン手動配置）が source of truth */}
               {bpm && bpm > 0 && (() => {
                 const beatsPerBar = 4;
                 const secPerBar = (60 / bpm) * beatsPerBar;
                 const offset = gridOffsetRef.current || 0;
-                // 譜割タブからの派生：scoreRows の各行を順に走査し、SECTION 名が現れた位置から
-                // 次の SECTION 名（または曲末尾）までを 1 ブロックとして扱う。bars 列の数字を
-                // 累積して開始小節 / 終了小節を計算する。データ加工なし、読み取り専用。
-                const deriveBlocksFromScore = (): { id: string; label: string; startBar: number; endBar: number }[] => {
-                  if (!scoreRows || scoreRows.length === 0) return [];
-                  const result: { id: string; label: string; startBar: number; endBar: number }[] = [];
-                  let cumBars = 0;
-                  let current: { id: string; label: string; startBar: number; endBar: number } | null = null;
-                  for (const row of scoreRows) {
-                    const secLines = row.section.split("\n");
-                    const barLines = row.bars.split("\n");
-                    const maxLines = Math.max(secLines.length, barLines.length);
-                    for (let i = 0; i < maxLines; i++) {
-                      const label = (secLines[i] || "").trim();
-                      if (label) {
-                        if (current) {
-                          current.endBar = cumBars;
-                          if (current.endBar > current.startBar) result.push(current);
-                        }
-                        current = { id: `derived-${row.id}-${i}`, label, startBar: cumBars, endBar: cumBars };
-                      }
-                      const barText = barLines[i] || "";
-                      const nums = barText.match(/\d+/g) || [];
-                      const barSum = nums.reduce((s, n) => s + parseInt(n, 10), 0);
-                      cumBars += barSum;
-                    }
-                  }
-                  if (current) {
-                    current.endBar = cumBars;
-                    if (current.endBar > current.startBar) result.push(current);
-                  }
-                  return result;
-                };
-                const manualBlocks = sectionBlocks || [];
-                const isDerived = manualBlocks.length === 0;
-                const blocks = isDerived ? deriveBlocksFromScore() : manualBlocks;
+                const blocks = sectionBlocks || [];
+                const isDerived = false;
                 // タイムライン位置順（startBar 昇順）でインデックスを取り、偶奇で「黄色 / グレー」を交互に
                 const sortedByStart = [...blocks].sort((a, b) => a.startBar - b.startBar);
                 const positionIndex = new Map<string, number>();
