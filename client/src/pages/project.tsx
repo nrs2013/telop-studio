@@ -3247,19 +3247,19 @@ export default function ProjectPage() {
           ctx.textBaseline = baseline;
           ctx.setLineDash([]);
 
-          // stroke：左から strokeProgress 分だけ描画（範囲をクリップ）
+          // 共通の clip 領域計算（align/baseline に応じた文字の囲み箱）
+          const measuredW = ctx.measureText(text).width;
+          const leftX = align === "center" ? x - measuredW / 2
+                      : align === "right" ? x - measuredW
+                      : x;
+          const padY = thisFontSize * 0.4;
+          const heightY = thisFontSize * 1.6;
+          const topY = baseline === "top" ? y - padY
+                     : baseline === "middle" ? y - thisFontSize * 0.7
+                     : y - thisFontSize - padY * 0.3; // bottom（既定）
+
+          // stroke：左から strokeProgress 分だけ走らせる
           if (strokeProgress > 0 && scaledStrokeW > 0) {
-            const measuredW = ctx.measureText(text).width;
-            // align に応じた文字の左端 x
-            const leftX = align === "center" ? x - measuredW / 2
-                        : align === "right" ? x - measuredW
-                        : x;
-            // baseline に応じた clip の上端 y（余裕を持たせて文字より少し外まで含める）
-            const padY = thisFontSize * 0.4;
-            const heightY = thisFontSize * 1.6;
-            const topY = baseline === "top" ? y - padY
-                       : baseline === "middle" ? y - thisFontSize * 0.7
-                       : y - thisFontSize - padY * 0.3; // bottom（既定）
             ctx.save();
             ctx.beginPath();
             ctx.rect(leftX, topY, measuredW * strokeProgress, heightY);
@@ -3275,11 +3275,16 @@ export default function ProjectPage() {
             ctx.restore();
           }
 
-          // fill：時間差で全体に乗る
+          // fill：左から fillProgress 分だけ「塗りが走る」（stroke を追いかける）
           if (fillProgress > 0) {
-            ctx.globalAlpha = fillProgress * alpha;
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(leftX, topY, measuredW * fillProgress, heightY);
+            ctx.clip();
+            ctx.globalAlpha = alpha;
             ctx.fillStyle = color;
             ctx.fillText(text, x, y);
+            ctx.restore();
           }
 
           ctx.restore();

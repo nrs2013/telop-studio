@@ -207,17 +207,19 @@ export function ExportDialog({
         ctx.textBaseline = baseline;
         ctx.setLineDash([]);
 
-        // stroke：左から strokeProgress 分だけ描画（範囲をクリップ）
+        // 共通の clip 領域計算
+        const measuredW = ctx.measureText(text).width;
+        const leftX = align === "center" ? x - measuredW / 2
+                    : align === "right" ? x - measuredW
+                    : x;
+        const padY = thisFontSize * 0.4;
+        const heightY = thisFontSize * 1.6;
+        const topY = baseline === "top" ? y - padY
+                   : baseline === "middle" ? y - thisFontSize * 0.7
+                   : y - thisFontSize - padY * 0.3;
+
+        // stroke：左から strokeProgress 分だけ走らせる
         if (strokeProgress > 0 && scaledStrokeW > 0) {
-          const measuredW = ctx.measureText(text).width;
-          const leftX = align === "center" ? x - measuredW / 2
-                      : align === "right" ? x - measuredW
-                      : x;
-          const padY = thisFontSize * 0.4;
-          const heightY = thisFontSize * 1.6;
-          const topY = baseline === "top" ? y - padY
-                     : baseline === "middle" ? y - thisFontSize * 0.7
-                     : y - thisFontSize - padY * 0.3;
           ctx.save();
           ctx.beginPath();
           ctx.rect(leftX, topY, measuredW * strokeProgress, heightY);
@@ -232,11 +234,16 @@ export function ExportDialog({
           ctx.restore();
         }
 
-        // fill：時間差で全体に乗る
+        // fill：左から fillProgress 分だけ「塗りが走る」（stroke を追いかける）
         if (fillProgress > 0) {
-          ctx.globalAlpha = fillProgress * alpha;
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(leftX, topY, measuredW * fillProgress, heightY);
+          ctx.clip();
+          ctx.globalAlpha = alpha;
           ctx.fillStyle = color;
           ctx.fillText(text, x, y);
+          ctx.restore();
         }
 
         ctx.restore();
