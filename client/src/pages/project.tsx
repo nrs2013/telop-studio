@@ -5100,23 +5100,24 @@ export default function ProjectPage() {
                 </div>
               </div>
             )}
-            {/* タブバー（D 案 + Chrome 風）：選択中タブは下のコンテンツと黄色フレームで連続 */}
-            <div className="flex items-stretch shrink-0 select-none" style={{ height: 52, background: "hsl(0 0% 11%)" }}>
+            {/* タブバー（D 案 + Chrome 風 / B サイズ）：選択中タブは下のコンテンツと黄色フレームで連続 */}
+            <div className="flex items-stretch shrink-0 select-none" style={{ height: 40, background: "hsl(0 0% 11%)", paddingLeft: 14 }}>
               {/* LYRIC タブ */}
               <button
                 tabIndex={-1}
                 onClick={() => { setActiveRightTab("lyrics"); setSelectedSectionId(null); }}
-                className="px-9 transition-colors"
+                className="transition-colors"
                 style={{
                   position: "relative",
+                  padding: "9px 28px",
                   background: activeRightTab === "lyrics" ? TS_DESIGN.bg2 : "transparent",
                   border: activeRightTab === "lyrics" ? "1px solid #c08a1c" : "none",
                   borderBottom: activeRightTab === "lyrics" ? "none" : "1px solid #c08a1c",
-                  borderRadius: activeRightTab === "lyrics" ? "10px 10px 0 0" : 0,
+                  borderRadius: activeRightTab === "lyrics" ? "8px 8px 0 0" : 0,
                   marginBottom: activeRightTab === "lyrics" ? -1 : 0,
                   zIndex: activeRightTab === "lyrics" ? 2 : 1,
                   color: activeRightTab === "lyrics" ? "#ffd34d" : "hsl(0 0% 42%)",
-                  fontSize: 15,
+                  fontSize: 13,
                   fontWeight: 500,
                   letterSpacing: "0.08em",
                   cursor: "pointer",
@@ -5129,17 +5130,18 @@ export default function ProjectPage() {
               <button
                 tabIndex={-1}
                 onClick={() => { setActiveRightTab("score"); setSelectedSectionId(null); }}
-                className="px-9 transition-colors"
+                className="transition-colors"
                 style={{
                   position: "relative",
+                  padding: "9px 28px",
                   background: activeRightTab === "score" ? TS_DESIGN.bg2 : "transparent",
                   border: activeRightTab === "score" ? "1px solid #c08a1c" : "none",
                   borderBottom: activeRightTab === "score" ? "none" : "1px solid #c08a1c",
-                  borderRadius: activeRightTab === "score" ? "10px 10px 0 0" : 0,
+                  borderRadius: activeRightTab === "score" ? "8px 8px 0 0" : 0,
                   marginBottom: activeRightTab === "score" ? -1 : 0,
                   zIndex: activeRightTab === "score" ? 2 : 1,
                   color: activeRightTab === "score" ? "#ffd34d" : "hsl(0 0% 42%)",
-                  fontSize: 15,
+                  fontSize: 13,
                   fontWeight: 500,
                   letterSpacing: "0.08em",
                   cursor: "pointer",
@@ -5177,6 +5179,8 @@ export default function ProjectPage() {
                 <div className="flex items-center px-3" style={{ borderBottom: "1px solid #c08a1c", marginBottom: -1 }} />
               )}
             </div>
+            {/* コンテンツエリア全体を黄色フレームで囲む（タブと連続） */}
+            <div className="flex-1 flex flex-col overflow-hidden" style={{ border: "1px solid #c08a1c", borderTop: "none", borderRadius: "0 0 8px 8px", marginLeft: 14, marginRight: 14, marginBottom: 14 }}>
             {activeRightTab === "lyrics" && (isRecording ? (
               <div
                 ref={recordingScrollRef}
@@ -5455,6 +5459,7 @@ export default function ProjectPage() {
                 onBarChange={setScoreBar}
               />
             )}
+            </div>
           </div>
         </div>
 
