@@ -2970,33 +2970,16 @@ export const TimelineEditor = memo(function TimelineEditor({
                 const manualBlocks = sectionBlocks || [];
                 const isDerived = manualBlocks.length === 0;
                 const blocks = isDerived ? deriveBlocksFromScore() : manualBlocks;
-                // SECTION 名から基本色を返す（カテゴリ別）
-                // SECTION ブロックは黄色で統一（TITLE 帯の系統と揃える）。
-                // 隣接の境目が分からなくならないよう、後段の liftColor で明・暗の 2 階調を交互配置。
-                const baseColorFor = (_label: string) => {
-                  return { bg: "#8a6614", border: "#c08a1c", text: "#1a1a1a" };
-                };
-                // 16 進色を少し明るく（隣接同色を見分けるための差分）
-                const liftColor = (hex: string, amount = 24) => {
-                  const m = hex.match(/^#([0-9a-f]{6})$/i);
-                  if (!m) return hex;
-                  const n = parseInt(m[1], 16);
-                  const r = Math.min(255, ((n >> 16) & 0xff) + amount);
-                  const g = Math.min(255, ((n >> 8) & 0xff) + amount);
-                  const bch = Math.min(255, (n & 0xff) + amount);
-                  return "#" + [r, g, bch].map(v => v.toString(16).padStart(2, "0")).join("");
-                };
-                // 隣接ブロックの色が一致したら「明るい変種」に切り替えて境目を視認できるようにする
-                const blockColors = blocks.map((bb, i) => {
-                  let c = baseColorFor(bb.label);
-                  if (i > 0) {
-                    const prev = baseColorFor(blocks[i - 1].label);
-                    // 直前と同カテゴリ → 1 段階ずらす（直前が「素」なら今度は「明」、逆も同じ）
-                    if (prev.bg === c.bg) {
-                      c = { bg: liftColor(c.bg), border: liftColor(c.border), text: c.text };
-                    }
-                  }
-                  return c;
+                // タイムライン位置順（startBar 昇順）でインデックスを取り、偶奇で「黄色 / グレー」を交互に
+                const sortedByStart = [...blocks].sort((a, b) => a.startBar - b.startBar);
+                const positionIndex = new Map<string, number>();
+                sortedByStart.forEach((b, i) => positionIndex.set(b.id, i));
+                const COLOR_YELLOW = { bg: "#8a6614", border: "#c08a1c", text: "#1a1a1a" };
+                const COLOR_GRAY = { bg: "#3a3a3a", border: "#5a5a5a", text: "#e8e8e8" };
+                // 旧 baseColorFor / liftColor は撤去（隣接が必ずガラッと別色になる方式に変更）
+                const blockColors = blocks.map((bb) => {
+                  const i = positionIndex.get(bb.id) ?? 0;
+                  return i % 2 === 0 ? COLOR_YELLOW : COLOR_GRAY;
                 });
                 const colorFor = (_label: string, idx: number) => blockColors[idx];
                 // TELOP と同じ snapToBeat を使う：BPM × quantizeDiv で見えてるグリッドにスナップ。
