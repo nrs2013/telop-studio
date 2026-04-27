@@ -277,10 +277,8 @@ export function ScorePanel({ sectionBlocks, bpm, bpmGridOffset, lyrics, currentT
                     justifyContent: "center",
                     borderRight: `1px solid ${TS_DESIGN.border}`,
                     color: isActive ? "#ffd34d" : TS_DESIGN.text3,
-                    background: isActive ? "rgba(192, 138, 28, 0.18)" : "transparent",
                     fontVariantNumeric: "tabular-nums",
                     letterSpacing: "0.04em",
-                    fontWeight: isActive ? 600 : 400,
                   }}
                 >
                   {tok}
@@ -308,11 +306,9 @@ export function ScorePanel({ sectionBlocks, bpm, bpmGridOffset, lyrics, currentT
                     gridRow: s.rowStart + i,
                     padding: "0 10px",
                     color: isActive ? "#ffd34d" : TS_DESIGN.text,
-                    background: isActive ? "rgba(192, 138, 28, 0.18)" : "transparent",
                     overflow: "hidden",
                     whiteSpace: "nowrap",
                     textOverflow: "ellipsis",
-                    fontWeight: isActive ? 600 : 400,
                   }}
                 >
                   {text}
