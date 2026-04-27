@@ -2583,38 +2583,7 @@ export const TimelineEditor = memo(function TimelineEditor({
               >
                 {gridOffset >= 0 ? "+" : ""}{gridOffset.toFixed(3)}s
               </span>
-              <button
-                tabIndex={-1}
-                className="text-[10px] font-bold font-mono tracking-wider px-2 py-1 rounded transition-colors"
-                style={{
-                  color: "hsl(0 0% 70%)",
-                  border: "1px solid hsl(0 0% 30%)",
-                  backgroundColor: "transparent",
-                  cursor: "pointer",
-                }}
-                onMouseEnter={(e) => {
-                  (e.currentTarget as HTMLButtonElement).style.color = "hsl(30 90% 60%)";
-                  (e.currentTarget as HTMLButtonElement).style.borderColor = "hsl(30 80% 45%)";
-                }}
-                onMouseLeave={(e) => {
-                  (e.currentTarget as HTMLButtonElement).style.color = "hsl(0 0% 70%)";
-                  (e.currentTarget as HTMLButtonElement).style.borderColor = "hsl(0 0% 30%)";
-                }}
-                onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  // 再生ヘッドがある場所を 1小節目（BAR 1）に設定
-                  const nowT = audioRef.current ? audioRef.current.currentTime : currentTimeRef.current;
-                  if (typeof nowT === "number" && Number.isFinite(nowT) && nowT >= 0) {
-                    setGridOffset(nowT);
-                    onBpmGridOffsetChange?.(nowT);
-                  }
-                }}
-                title="再生ヘッドの現在位置を 1小節目 に設定"
-                data-testid="button-set-bar-1"
-              >
-                SET BAR 1
-              </button>
+              {/* SET BAR 1 ボタンは撤去（リハーサルマーク機能が代替） */}
             </div>
           </>
         )}
