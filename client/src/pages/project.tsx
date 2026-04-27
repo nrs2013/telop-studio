@@ -5407,14 +5407,9 @@ export default function ProjectPage() {
             {activeRightTab === "score" && (
               <ScorePanel
                 sectionBlocks={effectiveSectionBlocks}
-                scoreRows={scoreRows}
                 bpm={project?.detectedBpm}
                 bpmGridOffset={project?.bpmGridOffset ?? 0}
                 lyrics={lyrics || []}
-                fullText={scoreFullText}
-                onFullTextChange={setScoreFullText}
-                barOverrides={scoreBarOverrides}
-                onBarChange={setScoreBar}
               />
             )}
             </div>
