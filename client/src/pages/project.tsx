@@ -4967,40 +4967,7 @@ export default function ProjectPage() {
                 </Button>
               </div>
             </div>
-          ) : (
-            <div className="px-3 py-2 shrink-0 flex items-center gap-2" style={{ borderBottom: "1px solid hsl(0 0% 22%)" }}>
-              {!isRecording && countdown === null && (
-                <Button
-                  tabIndex={-1}
-                  size="sm"
-                  className="text-xs font-bold"
-                  style={{
-                    backgroundColor: "hsl(0 70% 40%)",
-                    border: "1px solid hsl(0 70% 50%)",
-                    color: "#fff",
-                  }}
-                  onClick={startRecording}
-                  disabled={!audioUrl || !lyrics || lyrics.length === 0}
-                  data-testid="button-start-recording-panel"
-                >
-                  <Circle className="w-3 h-3 mr-1 fill-current" />
-                  REC
-                </Button>
-              )}
-              {/* SHORT CUT はヘッダーバー（曲ファイル名の右）に移動済み */}
-              <Button
-                tabIndex={-1}
-                size="icon"
-                variant="ghost"
-                className="h-6 w-6 ml-auto opacity-50 hover:opacity-100"
-                onClick={() => setMinimalMode(!minimalMode)}
-                data-testid="button-minimal-mode"
-                title={minimalMode ? "通常表示に戻す" : "最小限表示"}
-              >
-                {minimalMode ? <Maximize className="w-3.5 h-3.5" /> : <Minimize className="w-3.5 h-3.5" />}
-              </Button>
-            </div>
-          )}
+          ) : null /* 録音停止時の REC は新タブバー右端に統合済み */}
 
           {isRecording && (
             <div className="px-3 py-1 border-b border-border/30 shrink-0 bg-red-950/10">
@@ -5152,32 +5119,60 @@ export default function ProjectPage() {
               </button>
               {/* 残りスペース：黄色の下線でタブと連続 */}
               <div style={{ flex: 1, borderBottom: "1px solid #c08a1c", marginBottom: -1 }} />
-              {/* 右端の補助：LYRIC モード時のみフルスクリーン展開ボタンと保存ステータス */}
-              {activeRightTab === "lyrics" && (
-                <div className="flex items-center gap-2 px-3" style={{ borderBottom: "1px solid #c08a1c", marginBottom: -1 }}>
-                  <span className="text-[9px]" style={{ color: "hsl(0 0% 42%)" }}>
-                    行番号をドラッグ→TL
-                  </span>
-                  <button
-                    tabIndex={-1}
-                    className="w-5 h-5 flex items-center justify-center rounded hover:bg-white/10"
-                    style={{ color: "hsl(0 0% 50%)" }}
-                    onClick={() => setLyricsFullscreen(true)}
-                    title="歌詞フルスクリーン"
-                    data-testid="button-lyrics-fullscreen-open"
-                  >
-                    <Maximize className="w-3 h-3" />
-                  </button>
-                  {lyricsTextDirty && (
-                    <span className="text-[9px]" style={{ color: "hsl(0 0% 45%)" }}>
-                      保存待ち...
+              {/* 右端：LYRIC モード時の補助 + REC ボタン + 最小化トグル */}
+              <div className="flex items-center gap-2 pl-3 pr-3" style={{ borderBottom: "1px solid #c08a1c", marginBottom: -1 }}>
+                {activeRightTab === "lyrics" && (
+                  <>
+                    <span className="text-[9px]" style={{ color: "hsl(0 0% 42%)" }}>
+                      行番号をドラッグ→TL
                     </span>
-                  )}
-                </div>
-              )}
-              {activeRightTab === "score" && (
-                <div className="flex items-center px-3" style={{ borderBottom: "1px solid #c08a1c", marginBottom: -1 }} />
-              )}
+                    <button
+                      tabIndex={-1}
+                      className="w-5 h-5 flex items-center justify-center rounded hover:bg-white/10"
+                      style={{ color: "hsl(0 0% 50%)" }}
+                      onClick={() => setLyricsFullscreen(true)}
+                      title="歌詞フルスクリーン"
+                      data-testid="button-lyrics-fullscreen-open"
+                    >
+                      <Maximize className="w-3 h-3" />
+                    </button>
+                    {lyricsTextDirty && (
+                      <span className="text-[9px]" style={{ color: "hsl(0 0% 45%)" }}>
+                        保存待ち...
+                      </span>
+                    )}
+                  </>
+                )}
+                {!isRecording && countdown === null && (
+                  <Button
+                    tabIndex={-1}
+                    size="sm"
+                    className="text-xs font-bold h-7 px-3"
+                    style={{
+                      backgroundColor: "hsl(0 70% 40%)",
+                      border: "1px solid hsl(0 70% 50%)",
+                      color: "#fff",
+                    }}
+                    onClick={startRecording}
+                    disabled={!audioUrl || !lyrics || lyrics.length === 0}
+                    data-testid="button-start-recording-panel"
+                  >
+                    <Circle className="w-3 h-3 mr-1 fill-current" />
+                    REC
+                  </Button>
+                )}
+                <Button
+                  tabIndex={-1}
+                  size="icon"
+                  variant="ghost"
+                  className="h-6 w-6 opacity-50 hover:opacity-100"
+                  onClick={() => setMinimalMode(!minimalMode)}
+                  data-testid="button-minimal-mode"
+                  title={minimalMode ? "通常表示に戻す" : "最小限表示"}
+                >
+                  {minimalMode ? <Maximize className="w-3.5 h-3.5" /> : <Minimize className="w-3.5 h-3.5" />}
+                </Button>
+              </div>
             </div>
             {/* コンテンツエリア全体を黄色フレームで囲む（タブと連続） */}
             <div className="flex-1 flex flex-col overflow-hidden" style={{ border: "1px solid #c08a1c", borderTop: "none", borderRadius: "0 0 8px 8px", marginLeft: 14, marginRight: 14, marginBottom: 14 }}>
