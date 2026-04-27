@@ -5065,6 +5065,7 @@ export default function ProjectPage() {
                   fontWeight: activeRightTab === "lyrics" ? 700 : 500,
                   letterSpacing: "0.08em",
                   cursor: "pointer",
+                  whiteSpace: "nowrap",
                 }}
                 data-testid="tab-right-lyrics"
               >
@@ -5086,6 +5087,7 @@ export default function ProjectPage() {
                   fontWeight: activeRightTab === "score" ? 700 : 500,
                   letterSpacing: "0.08em",
                   cursor: "pointer",
+                  whiteSpace: "nowrap",
                 }}
                 data-testid="tab-right-score"
               >
