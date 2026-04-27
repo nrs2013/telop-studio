@@ -2982,17 +2982,15 @@ export const TimelineEditor = memo(function TimelineEditor({
                   return i % 2 === 0 ? COLOR_YELLOW : COLOR_GRAY;
                 });
                 const colorFor = (_label: string, idx: number) => blockColors[idx];
-                // TELOP と同じ snapToBeat を使う：BPM × quantizeDiv で見えてるグリッドにスナップ。
-                // Alt キーで一時的にスナップ無効（自由配置）にできる。
-                // 結果は 1/256 小節単位で丸めて、time→bar 変換時の浮動小数点誤差（2.00000001 等）を消す。
+                // SECTION ブロック専用の snap：1 拍（1/4 小節 = 4 分音符）単位。
+                // これで譜割タブの BAR は「整数小節 + 1/4・2/4・3/4」のみになり、
+                // 1/16 のような細かい半端や合計のズレが起こらない。
+                // Alt キーで完全フリー配置（特殊な microtiming 用）。
                 const snapBar = (bar: number, e: MouseEvent) => {
                   if (e.altKey) {
                     return Math.max(0, Math.round(bar * 256) / 256);
                   }
-                  const time = offset + bar * secPerBar;
-                  const snappedTime = snapToBeat(time, true);
-                  const result = Math.max(0, (snappedTime - offset) / secPerBar);
-                  return Math.round(result * 256) / 256;
+                  return Math.max(0, Math.round(bar * 4) / 4);
                 };
                 const onBlockMouseDown = (ev: React.MouseEvent, b: any, mode: "move" | "left" | "right") => {
                   ev.preventDefault();
