@@ -2763,6 +2763,11 @@ export default function ProjectPage() {
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const previewContainerRef = useRef<HTMLDivElement>(null);
+  // TITLE A のトレースアニメ用 SVG オーバーレイ ref（Phase A：タイトル全体を 1 要素で描画）
+  const titleSvgGroupRef = useRef<SVGGElement>(null);
+  const titleSvgTextRef = useRef<SVGTextElement>(null);
+  // SVG トレースモードを使うかのフラグ。true で SVG 経由、false で従来 Canvas トレース
+  const USE_SVG_TITLE_ANIM = true;
   const previewWrapperRef = useRef<HTMLDivElement>(null);
   const [previewSize, setPreviewSize] = useState<{ width: number; height: number } | null>(null);
   const outputW = project?.outputWidth || 1920;
@@ -3026,6 +3031,10 @@ export default function ProjectPage() {
       ctx.putImageData(checkerPatternRef.current, 0, 0);
     } else {
       ctx.clearRect(0, 0, outputW, outputH);
+    }
+    // SVG タイトルオーバーレイは毎フレームデフォルト hide。後段の isAnimating で必要なら表示する。
+    if (USE_SVG_TITLE_ANIM && titleSvgGroupRef.current) {
+      titleSvgGroupRef.current.style.display = "none";
     }
 
     const now = currentTimeRef.current;
@@ -4781,6 +4790,30 @@ export default function ProjectPage() {
               }}
               data-testid="canvas-preview"
             />
+            {/* TITLE A のトレースアニメ用 SVG オーバーレイ。
+                canvas と同じ viewBox で重ね、stroke-dasharray + dashoffset で「ペン先で書く」動きを実現。
+                通常は display:none、TITLE A 表示中だけ描画ループから直接属性を更新して見せる。 */}
+            <svg
+              style={{
+                position: "absolute",
+                inset: 0,
+                width: "100%",
+                height: "100%",
+                pointerEvents: "none",
+              }}
+              viewBox={`0 0 ${outputW} ${outputH}`}
+              preserveAspectRatio="none"
+              data-testid="title-svg-overlay"
+            >
+              <g ref={titleSvgGroupRef} style={{ display: "none" }} data-testid="title-svg-group">
+                <text
+                  ref={titleSvgTextRef}
+                  data-testid="title-svg-text"
+                  textAnchor="start"
+                  dominantBaseline="alphabetic"
+                />
+              </g>
+            </svg>
             {countdown !== null && (
               <div className="absolute inset-0 flex items-center justify-center bg-black/70 z-30 pointer-events-none" data-testid="countdown-overlay">
                 <div className="flex flex-col items-center gap-2">
