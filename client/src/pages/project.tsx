@@ -2763,11 +2763,6 @@ export default function ProjectPage() {
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const previewContainerRef = useRef<HTMLDivElement>(null);
-  // TITLE A のトレースアニメ用 SVG オーバーレイ ref（Phase A：タイトル全体を 1 要素で描画）
-  const titleSvgGroupRef = useRef<SVGGElement>(null);
-  const titleSvgTextRef = useRef<SVGTextElement>(null);
-  // SVG トレースモードを使うかのフラグ。true で SVG 経由、false で従来 Canvas トレース
-  const USE_SVG_TITLE_ANIM = true;
   const previewWrapperRef = useRef<HTMLDivElement>(null);
   const [previewSize, setPreviewSize] = useState<{ width: number; height: number } | null>(null);
   const outputW = project?.outputWidth || 1920;
@@ -3032,10 +3027,6 @@ export default function ProjectPage() {
     } else {
       ctx.clearRect(0, 0, outputW, outputH);
     }
-    // SVG タイトルオーバーレイは毎フレームデフォルト hide。後段の isAnimating で必要なら表示する。
-    if (USE_SVG_TITLE_ANIM && titleSvgGroupRef.current) {
-      titleSvgGroupRef.current.style.display = "none";
-    }
 
     const now = currentTimeRef.current;
     const fadeOpacity = calcFadeOpacity(now);
@@ -3237,8 +3228,6 @@ export default function ProjectPage() {
           }
         }
       } else if (isAnimating) {
-        // トレース風アニメ：stroke は文字の「左から右へ」 走る範囲だけ描画、fill は時間差で全体に乗る。
-        // タイトル以外（クレジット類）は strokeProgress=1, fillProgress=1 で呼ばれるため、その場合は普通の全描画になる。
         const drawStrokeTextInline = (
           text: string, x: number, y: number, font: string,
           align: CanvasTextAlign, baseline: CanvasTextBaseline,
@@ -3254,48 +3243,21 @@ export default function ProjectPage() {
           ctx.font = font;
           ctx.textAlign = align;
           ctx.textBaseline = baseline;
-          ctx.setLineDash([]);
-
-          // 共通の clip 領域計算（align/baseline に応じた文字の囲み箱）
-          const measuredW = ctx.measureText(text).width;
-          const leftX = align === "center" ? x - measuredW / 2
-                      : align === "right" ? x - measuredW
-                      : x;
-          const padY = thisFontSize * 0.4;
-          const heightY = thisFontSize * 1.6;
-          const topY = baseline === "top" ? y - padY
-                     : baseline === "middle" ? y - thisFontSize * 0.7
-                     : y - thisFontSize - padY * 0.3; // bottom（既定）
-
-          // stroke：左から strokeProgress 分だけ走らせる
-          if (strokeProgress > 0 && scaledStrokeW > 0) {
-            ctx.save();
-            ctx.beginPath();
-            ctx.rect(leftX, topY, measuredW * strokeProgress, heightY);
-            ctx.clip();
-            ctx.globalAlpha = alpha;
-            ctx.strokeStyle = effectiveStrokeColor;
-            ctx.lineWidth = scaledStrokeW;
-            ctx.lineJoin = "round";
-            ctx.miterLimit = 2;
-            if (scaledBlur > 0) { ctx.shadowColor = effectiveStrokeColor; ctx.shadowBlur = scaledBlur; }
-            ctx.strokeText(text, x, y);
-            ctx.shadowColor = "transparent"; ctx.shadowBlur = 0;
-            ctx.restore();
-          }
-
-          // fill：左から fillProgress 分だけ「塗りが走る」（stroke を追いかける）
           if (fillProgress > 0) {
-            ctx.save();
-            ctx.beginPath();
-            ctx.rect(leftX, topY, measuredW * fillProgress, heightY);
-            ctx.clip();
-            ctx.globalAlpha = alpha;
+            ctx.setLineDash([]);
+            ctx.globalAlpha = fillProgress * alpha;
+            if (scaledStrokeW > 0) {
+              ctx.strokeStyle = effectiveStrokeColor;
+              ctx.lineWidth = scaledStrokeW;
+              ctx.lineJoin = "round";
+              ctx.miterLimit = 2;
+              if (scaledBlur > 0) { ctx.shadowColor = effectiveStrokeColor; ctx.shadowBlur = scaledBlur; }
+              ctx.strokeText(text, x, y);
+              ctx.shadowColor = "transparent"; ctx.shadowBlur = 0;
+            }
             ctx.fillStyle = color;
             ctx.fillText(text, x, y);
-            ctx.restore();
           }
-
           ctx.restore();
         };
 
@@ -3371,9 +3333,8 @@ export default function ProjectPage() {
             for (let ci = 0; ci < titleText.length; ci++) {
               const ch = titleText[ci];
               const chStart = titleStart + ci * charDelay;
-              // トレース：前半 60% で stroke が左→右へ走る、後半 40% で fill が乗る
-              const chStrokeP = easeInOut(clamp01((elapsedMs - chStart) / (charAnimDur * 0.6)));
-              const chFillP = easeOut(clamp01((elapsedMs - chStart - charAnimDur * 0.6) / (charAnimDur * 0.4)));
+              const chStrokeP = easeInOut(clamp01((elapsedMs - chStart) / charAnimDur));
+              const chFillP = easeOut(clamp01((elapsedMs - chStart - charAnimDur * 0.7) / (charAnimDur * 0.5)));
               if (chStrokeP > 0) {
                 drawStrokeTextInline(ch, charX, lineY - 12, titleFont, "left", "bottom", chStrokeP, chFillP);
               }
@@ -3439,9 +3400,8 @@ export default function ProjectPage() {
           for (let ci = 0; ci < titleText.length; ci++) {
             const ch = titleText[ci];
             const chStart = titleStart + ci * charDelay;
-            // トレース：前半 60% で stroke が左→右へ走る、後半 40% で fill が乗る
-            const chStrokeP = easeInOut(clamp01((elapsedMs - chStart) / (charAnimDur * 0.6)));
-            const chFillP = easeOut(clamp01((elapsedMs - chStart - charAnimDur * 0.6) / (charAnimDur * 0.4)));
+            const chStrokeP = easeInOut(clamp01((elapsedMs - chStart) / charAnimDur));
+            const chFillP = easeOut(clamp01((elapsedMs - chStart - charAnimDur * 0.7) / (charAnimDur * 0.5)));
             if (chStrokeP > 0) {
               drawStrokeTextInline(ch, charX, lineY - 12, bigFont, "left", "bottom", chStrokeP, chFillP);
             }
@@ -4790,30 +4750,6 @@ export default function ProjectPage() {
               }}
               data-testid="canvas-preview"
             />
-            {/* TITLE A のトレースアニメ用 SVG オーバーレイ。
-                canvas と同じ viewBox で重ね、stroke-dasharray + dashoffset で「ペン先で書く」動きを実現。
-                通常は display:none、TITLE A 表示中だけ描画ループから直接属性を更新して見せる。 */}
-            <svg
-              style={{
-                position: "absolute",
-                inset: 0,
-                width: "100%",
-                height: "100%",
-                pointerEvents: "none",
-              }}
-              viewBox={`0 0 ${outputW} ${outputH}`}
-              preserveAspectRatio="none"
-              data-testid="title-svg-overlay"
-            >
-              <g ref={titleSvgGroupRef} style={{ display: "none" }} data-testid="title-svg-group">
-                <text
-                  ref={titleSvgTextRef}
-                  data-testid="title-svg-text"
-                  textAnchor="start"
-                  dominantBaseline="alphabetic"
-                />
-              </g>
-            </svg>
             {countdown !== null && (
               <div className="absolute inset-0 flex items-center justify-center bg-black/70 z-30 pointer-events-none" data-testid="countdown-overlay">
                 <div className="flex flex-col items-center gap-2">
