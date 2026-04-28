@@ -5099,14 +5099,14 @@ export default function ProjectPage() {
             {/* タブ + コンテンツを 1 つの親枠で囲む */}
             <div className="flex-1 flex flex-col overflow-hidden" style={{ border: "1px solid #c08a1c", borderRadius: 8 }}>
             {/* タブバー：セグメンテッドコントロールスタイル */}
-            <div className="flex items-center shrink-0 select-none gap-2 px-3" style={{ height: 48, background: TS_DESIGN.bg2, borderBottom: "1px solid #c08a1c" }}>
+            <div className="flex items-center shrink-0 select-none gap-2 px-3" style={{ height: 40, background: TS_DESIGN.bg2, borderBottom: "1px solid #c08a1c" }}>
               {/* LYRIC タブ */}
               <button
                 tabIndex={-1}
                 onClick={() => { setActiveRightTab("lyrics"); setSelectedSectionId(null); }}
                 className="transition-all focus:outline-none"
                 style={{
-                  padding: "8px 36px",
+                  padding: "5px 36px",
                   background: activeRightTab === "lyrics" ? "#c08a1c" : "transparent",
                   border: "none",
                   outline: "none",
@@ -5128,7 +5128,7 @@ export default function ProjectPage() {
                 onClick={() => { setActiveRightTab("score"); setSelectedSectionId(null); }}
                 className="transition-all focus:outline-none"
                 style={{
-                  padding: "8px 36px",
+                  padding: "5px 36px",
                   background: activeRightTab === "score" ? "#c08a1c" : "transparent",
                   border: "none",
                   outline: "none",
