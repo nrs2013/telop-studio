@@ -199,6 +199,7 @@ export const TimelineEditor = memo(function TimelineEditor({
   const [fadeMode, setFadeMode] = useState(false);
   const [selectedMarkerIds, setSelectedMarkerIds] = useState<Set<string>>(new Set());
   const [markerSelectRect, setMarkerSelectRect] = useState<{ startX: number; endX: number } | null>(null);
+  const [editingSectionId, setEditingSectionId] = useState<string | null>(null);
   const markerDragRef = useRef<{ id: string; origTime: number; startX: number } | null>(null);
   const markerSelectStartRef = useRef<{ x: number; scrollLeft: number } | null>(null);
   const onMarkersChangeRef = useRef(onMarkersChange);
@@ -3174,10 +3175,7 @@ export const TimelineEditor = memo(function TimelineEditor({
                               const t = e.target as HTMLElement;
                               if (t.dataset.handle || t.dataset.del) return;
                               e.stopPropagation();
-                              const newName = window.prompt("SECTION 名を編集", b.label);
-                              if (newName !== null) {
-                                onSectionBlocksChange?.(blocks.map(x => x.id === b.id ? { ...x, label: newName } : x));
-                              }
+                              setEditingSectionId(b.id);
                             }}
                             title={isDerived ? "譜割タブから派生中。ドラッグで編集モードに切り替え。ダブルクリックで名前編集。Alt でフリー配置。Cmd で隣接ブロックとの隙間を開く。" : "ダブルクリックで名前編集。Alt でフリー配置。Cmd で隣接ブロックとの隙間を開く。"}
                           >
@@ -3205,17 +3203,64 @@ export const TimelineEditor = memo(function TimelineEditor({
                               style={{ right: "-4px", width: "8px" }}
                               onMouseDown={(e) => { e.stopPropagation(); onBlockMouseDown(e, b, "right"); }}
                             />
-                            <div className="relative z-5 pointer-events-none" style={{ display: "flex", alignItems: "baseline", gap: 6, whiteSpace: "nowrap", padding: "0 8px" }}>
-                              <span style={{ fontSize: w < 50 ? 10 : 11, fontWeight: 700, letterSpacing: "0.04em" }}>{b.label}</span>
-                              {w >= 50 && (() => {
-                                const lenRounded = Math.round(len * 100) / 100;
-                                const lenIsInt = Math.abs(lenRounded - Math.round(lenRounded)) < 0.01;
-                                const lenText = lenIsInt ? `${Math.round(lenRounded)}` : `${lenRounded}`;
-                                return (
-                                  <span style={{ fontSize: 8, opacity: 0.7, fontWeight: 500 }}>{lenText}</span>
-                                );
-                              })()}
-                            </div>
+                            {editingSectionId === b.id ? (
+                              <div className="relative z-5" style={{ display: "flex", alignItems: "baseline", gap: 6, whiteSpace: "nowrap", padding: "0 8px", width: "100%" }}>
+                                <input
+                                  autoFocus
+                                  defaultValue={b.label}
+                                  onMouseDown={(e) => e.stopPropagation()}
+                                  onClick={(e) => e.stopPropagation()}
+                                  onDoubleClick={(e) => e.stopPropagation()}
+                                  onFocus={(e) => e.currentTarget.select()}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter") {
+                                      e.preventDefault();
+                                      const v = e.currentTarget.value.trim();
+                                      if (v) {
+                                        onSectionBlocksChange?.(blocks.map(x => x.id === b.id ? { ...x, label: v } : x));
+                                      }
+                                      setEditingSectionId(null);
+                                    } else if (e.key === "Escape") {
+                                      e.preventDefault();
+                                      setEditingSectionId(null);
+                                    }
+                                    e.stopPropagation();
+                                  }}
+                                  onBlur={(e) => {
+                                    const v = e.currentTarget.value.trim();
+                                    if (v) {
+                                      onSectionBlocksChange?.(blocks.map(x => x.id === b.id ? { ...x, label: v } : x));
+                                    }
+                                    setEditingSectionId(null);
+                                  }}
+                                  style={{
+                                    fontSize: w < 50 ? 10 : 11,
+                                    fontWeight: 700,
+                                    letterSpacing: "0.04em",
+                                    color: c.text,
+                                    background: "transparent",
+                                    border: "none",
+                                    outline: "none",
+                                    padding: 0,
+                                    margin: 0,
+                                    width: "100%",
+                                    fontFamily: "inherit",
+                                  }}
+                                />
+                              </div>
+                            ) : (
+                              <div className="relative z-5 pointer-events-none" style={{ display: "flex", alignItems: "baseline", gap: 6, whiteSpace: "nowrap", padding: "0 8px" }}>
+                                <span style={{ fontSize: w < 50 ? 10 : 11, fontWeight: 700, letterSpacing: "0.04em" }}>{b.label}</span>
+                                {w >= 50 && (() => {
+                                  const lenRounded = Math.round(len * 100) / 100;
+                                  const lenIsInt = Math.abs(lenRounded - Math.round(lenRounded)) < 0.01;
+                                  const lenText = lenIsInt ? `${Math.round(lenRounded)}` : `${lenRounded}`;
+                                  return (
+                                    <span style={{ fontSize: 8, opacity: 0.7, fontWeight: 500 }}>{lenText}</span>
+                                  );
+                                })()}
+                              </div>
+                            )}
                             <button
                               data-del="1"
                               onMouseDown={(e) => e.stopPropagation()}
