@@ -231,7 +231,7 @@ export function ScorePanel({ sectionBlocks, bpm, bpmGridOffset, lyrics, currentT
                   alignItems: "flex-start",
                   justifyContent: "center",
                   borderRight: `1px solid ${TS_DESIGN.border}`,
-                  color: TS_DESIGN.text3,
+                  color: TS_DESIGN.text,
                   fontVariantNumeric: "tabular-nums",
                   letterSpacing: "0.04em",
                 }}
@@ -252,8 +252,7 @@ export function ScorePanel({ sectionBlocks, bpm, bpmGridOffset, lyrics, currentT
                   alignItems: "flex-start",
                   justifyContent: "center",
                   borderRight: `1px solid ${TS_DESIGN.border}`,
-                  color: "hsl(0 0% 75%)",
-                  fontWeight: 500,
+                  color: TS_DESIGN.text,
                 }}
                 data-testid={`score-section-${s.id}`}
               >
@@ -276,7 +275,7 @@ export function ScorePanel({ sectionBlocks, bpm, bpmGridOffset, lyrics, currentT
                     alignItems: "center",
                     justifyContent: "center",
                     borderRight: `1px solid ${TS_DESIGN.border}`,
-                    color: isActive ? "#ffd34d" : TS_DESIGN.text3,
+                    color: isActive ? "#ffd34d" : TS_DESIGN.text,
                     fontVariantNumeric: "tabular-nums",
                     letterSpacing: "0.04em",
                   }}
