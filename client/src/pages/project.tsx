@@ -176,6 +176,7 @@ import {
   HardDrive,
   Link2,
   Unlink2,
+  Cast,
 } from "lucide-react";
 import { formatTime } from "@/lib/formatTime";
 import { drawTextWithRuby } from "@/lib/rubyParser";
@@ -401,6 +402,13 @@ export default function ProjectPage() {
   const { id } = useParams<{ id: string }>();
   const [, navigate] = useLocation();
   const { toast } = useToast();
+  // キャストモード（投影専用画面）：URL に ?mode=cast が付いていたら、UI を全部隠して
+  // Canvas だけを背景透明・全画面で表示する。OBS の Browser Source で取り込んで
+  // Syphon → Resolume Arena などへ送る用途。読み取り専用、データには絶対に触らない。
+  const isCastMode = useMemo(() => {
+    if (typeof window === "undefined") return false;
+    return new URLSearchParams(window.location.search).get("mode") === "cast";
+  }, []);
   const { undo, redo, canUndo, canRedo, push: pushUndo, clear: clearUndo, undoDescription, redoDescription } = useUndo(projectUndoManager);
   const [exportOpen, setExportOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -619,6 +627,12 @@ export default function ProjectPage() {
       setProject(p);
       setProjectLoading(false);
     });
+    // キャストモードではサーバー同期を完全に止める。
+    // 理由：別タブ（メインタブ）と二重にサーバーと同期するとデータ競合の原因になる。
+    // キャストタブはあくまで「描画専用」「読み取り専用」の存在。
+    if (isCastMode) {
+      return;
+    }
     syncService.autoLogin().then(() => {
       const reloadAfterSync = async () => {
         if (isRecordingRef.current) {
@@ -645,7 +659,7 @@ export default function ProjectPage() {
       syncService.flushScheduledPush();
       syncService.stopAutoSync();
     };
-  }, [id]);
+  }, [id, isCastMode]);
 
   const [lyrics, setLyrics] = useState<LyricLine[] | undefined>();
 
@@ -2978,11 +2992,20 @@ export default function ProjectPage() {
   };
   const getDefaultTextY = () => outputH * 0.8;
 
-  const [previewBgMode, setPreviewBgMode] = useState<"checker" | "color">("checker");
+  const [previewBgMode, setPreviewBgMode] = useState<"checker" | "color" | "transparent">(
+    isCastMode ? "transparent" : "checker"
+  );
   const checkerPatternRef = useRef<ImageData | null>(null);
   const checkerSizeRef = useRef({ w: 0, h: 0, mode: "" as string });
 
   useEffect(() => {
+    // キャストモード（背景透明）では checker パターンを生成しない。
+    // drawCanvas は previewBgMode === "transparent" のとき、ただ clearRect する。
+    if (previewBgMode === "transparent") {
+      checkerPatternRef.current = null;
+      checkerSizeRef.current = { w: 0, h: 0, mode: "transparent" };
+      return;
+    }
     const key = `${outputW}_${outputH}_${previewBgMode}_${accentHue}`;
     if (checkerPatternRef.current && checkerSizeRef.current.mode === key) return;
     const offscreen = document.createElement("canvas");
@@ -3022,7 +3045,11 @@ export default function ProjectPage() {
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = "source-over";
     ctx.setLineDash([]);
-    if (checkerPatternRef.current) {
+    // キャストモード（投影用）では背景を一切塗らずに透明のままにする。
+    // Canvas 全体が透明 → body 透明 → OBS の Browser Source 透過 → Arena でアルファ合成
+    if (previewBgMode === "transparent") {
+      ctx.clearRect(0, 0, outputW, outputH);
+    } else if (checkerPatternRef.current) {
       ctx.putImageData(checkerPatternRef.current, 0, 0);
     } else {
       ctx.clearRect(0, 0, outputW, outputH);
@@ -3525,6 +3552,68 @@ export default function ProjectPage() {
     canvasRafRef.current = requestAnimationFrame(checkLoop);
     return () => cancelAnimationFrame(canvasRafRef.current);
   }, []);
+
+  // ─── キャストモード（投影専用画面）─────────────────────────────────────────
+  // ?mode=cast でアクセスされたタブ向けの 2 つの effect。
+  //   1) body/html/#root を透明にする（OBS Browser Source 透過 → Arena アルファ合成のため）
+  //   2) BroadcastChannel でメインタブと再生位置を同期
+  // これらは isCastMode === false のときは何もしない（既存挙動 100% 維持）。
+
+  useEffect(() => {
+    if (!isCastMode) return;
+    const root = document.getElementById("root");
+    const origs = {
+      htmlBg: document.documentElement.style.background,
+      bodyBg: document.body.style.background,
+      rootBg: root?.style.background ?? "",
+    };
+    document.documentElement.style.background = "transparent";
+    document.body.style.background = "transparent";
+    if (root) root.style.background = "transparent";
+    return () => {
+      document.documentElement.style.background = origs.htmlBg;
+      document.body.style.background = origs.bodyBg;
+      if (root) root.style.background = origs.rootBg;
+    };
+  }, [isCastMode]);
+
+  // BroadcastChannel：メインタブ ↔ キャストタブ同期（同一オリジン・標準ブラウザ機能）
+  //   メイン側：rAF サイクルで currentTime/isPlaying を発信（変化があった時だけ）
+  //   キャスト側：受信して ref を更新。停止中でも最新フレームを 1 枚描画。
+  useEffect(() => {
+    if (!id) return;
+    const channelName = `telop-cast-sync-${id}`;
+    const ch = new BroadcastChannel(channelName);
+    if (isCastMode) {
+      ch.onmessage = (e) => {
+        const data = e.data as { currentTime?: number; isPlaying?: boolean };
+        if (typeof data.currentTime === "number") currentTimeRef.current = data.currentTime;
+        if (typeof data.isPlaying === "boolean") isPlayingRef.current = data.isPlaying;
+        // 停止中はメインの描画ループが走らないので、ここで 1 枚だけ描く
+        if (!isPlayingRef.current) drawCanvasRef.current();
+      };
+      return () => ch.close();
+    } else {
+      let rafId = 0;
+      let lastCt = NaN;
+      let lastIp = false;
+      const tick = () => {
+        const ct = currentTimeRef.current;
+        const ip = isPlayingRef.current;
+        if (ct !== lastCt || ip !== lastIp) {
+          ch.postMessage({ currentTime: ct, isPlaying: ip });
+          lastCt = ct;
+          lastIp = ip;
+        }
+        rafId = requestAnimationFrame(tick);
+      };
+      rafId = requestAnimationFrame(tick);
+      return () => {
+        cancelAnimationFrame(rafId);
+        ch.close();
+      };
+    }
+  }, [id, isCastMode]);
 
   const handlePreviewMouseDown = useCallback((e: React.MouseEvent) => {
     const container = previewContainerRef.current;
@@ -4056,6 +4145,42 @@ export default function ProjectPage() {
     );
   }
 
+  // ─── キャストモード（投影専用 / OBS Browser Source 用）の最小 JSX ──────────
+  // メイン UI は一切表示せず、Canvas 1 個だけを画面いっぱいに置く。
+  // 背景は body/html/#root 含めてすべて透明（別 useEffect で設定済み）。
+  // 描画ロジックは ProjectPage 本体の drawCanvas を再利用。再生位置は BroadcastChannel
+  // 経由でメインタブから受信する（別の useEffect で組み済み）。
+  if (isCastMode) {
+    return (
+      <div
+        style={{
+          position: "fixed",
+          inset: 0,
+          width: "100vw",
+          height: "100vh",
+          background: "transparent",
+          overflow: "hidden",
+          margin: 0,
+          padding: 0,
+        }}
+        data-testid="cast-mode-root"
+      >
+        <canvas
+          ref={canvasRef}
+          style={{
+            position: "absolute",
+            inset: 0,
+            width: "100vw",
+            height: "100vh",
+            objectFit: "contain",
+            background: "transparent",
+            display: "block",
+          }}
+        />
+      </div>
+    );
+  }
+
   return (
     <div
       className="h-screen w-screen max-w-full flex flex-col overflow-hidden gap-[3px] relative"
@@ -4427,6 +4552,23 @@ export default function ProjectPage() {
             >
               <Download className="w-3.5 h-3.5 mr-1.5" />
               EXPORT
+            </Button>
+            <div className="w-px h-3.5" style={{ backgroundColor: "hsl(0 0% 22%)" }} />
+            <Button
+              tabIndex={-1}
+              variant="ghost"
+              size="sm"
+              className="text-xs h-7 px-2"
+              style={{ color: "#ffd34d" }}
+              onClick={() => {
+                if (!id) return;
+                window.open(`/project/${id}?mode=cast`, "_blank", "noopener,noreferrer");
+              }}
+              title="キャストモードで別タブを開く（OBS Browser Source 用：背景透明・UIなし・Canvas のみ）"
+              data-testid="button-cast"
+            >
+              <Cast className="w-3.5 h-3.5 mr-1.5" />
+              CAST
             </Button>
           </div>
 
@@ -5537,7 +5679,7 @@ export default function ProjectPage() {
           duration={duration}
           seekTo={seekTo}
           safePlay={safePlay}
-          previewBgMode={previewBgMode}
+          previewBgMode={previewBgMode === "transparent" ? "checker" : previewBgMode}
           onToggleBgMode={() => setPreviewBgMode(prev => prev === "checker" ? "color" : "checker")}
           styleProps={{
             fontFamily,
