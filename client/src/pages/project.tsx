@@ -1853,6 +1853,48 @@ export default function ProjectPage() {
     };
   }, []);
 
+  // 「imported_audio」プレースホルダ自動リネーム
+  // 古い .telop ファイル経由でプロジェクトの audioFileName が "imported_audio" になっている場合、
+  // 曲タイトル（または無ければプロジェクト名）でサイレントにリネームする。
+  // のむさんから明示的にこの自動化の指示あり（2026-04-28）。
+  // DATA_SAFETY_RULES に従い、リネーム前に元値を localStorage の別キーに必ずバックアップ。
+  // キャストモード時は触らない（読み取り専用タブ）。
+  const autoRenameAttemptedRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!project || !id) return;
+    if (isCastMode) return;
+    if (!project.activeAudioTrackId) return;
+    const currentName = project.audioFileName ?? "";
+    const PLACEHOLDER_RE = /^imported_audio(\.\w+)?$/i;
+    if (!PLACEHOLDER_RE.test(currentName)) return;
+    const candidate = (project.songTitle?.trim() || project.name?.trim() || "");
+    if (!candidate) return;
+    // 同じプロジェクトに対して 1 セッション内で複数回試行しない（無限ループ・トースト連打防止）
+    const attemptKey = `${project.id}:${currentName}:${candidate}`;
+    if (autoRenameAttemptedRef.current.has(attemptKey)) return;
+    autoRenameAttemptedRef.current.add(attemptKey);
+    (async () => {
+      try {
+        // バックアップ：元の audioFileName を別キーに保存（DATA_SAFETY_RULES ルール 2）
+        const backupKey = `telop-audio-original-${project.id}-${new Date().toISOString()}`;
+        try {
+          localStorage.setItem(backupKey, JSON.stringify({
+            projectId: project.id,
+            originalAudioFileName: currentName,
+            replacedWith: candidate,
+            timestamp: new Date().toISOString(),
+          }));
+        } catch {
+          // localStorage がフルでも音源リネームは妨げない
+        }
+        await handleRenameAudioFile(candidate);
+        toast({ title: `音源名を「${candidate}」に直しました`, description: `元: ${currentName}` });
+      } catch (e) {
+        console.error("[auto-rename] failed", e);
+      }
+    })();
+  }, [project?.id, project?.audioFileName, project?.songTitle, project?.name, project?.activeAudioTrackId, id, isCastMode, handleRenameAudioFile, toast]);
+
   const audioLoadEpoch = useRef(0);
 
   useEffect(() => {
