@@ -1871,13 +1871,34 @@ export default function ProjectPage() {
         } catch {
           // localStorage がフルでも音源リネームは妨げない
         }
-        await handleRenameAudioFile(candidate);
+        // Dropbox には触らずローカルとサーバー sync だけ更新する。
+        // 理由：handleRenameAudioFile は Dropbox API リネームを伴い、Dropbox 失敗時に
+        // 早期 return するため、ローカル state が更新されないままトーストだけ出る不整合が
+        // 起きていた（2026-04-29 観測）。Dropbox 上のファイル名はそのまま残るが、後で鉛筆
+        // ボタンから手動同期可能。
+        const trackId = project.activeAudioTrackId;
+        if (!trackId) return;
+        const track = audioTracks.find(t => t.id === trackId);
+        if (!track) return;
+        const newFileName = candidate.replace(/\.mp3$/i, "") + ".mp3";
+        if (newFileName === track.fileName && newFileName === currentName) return;
+        if (track.dropboxPath) {
+          await storage.renameAudioTrackFile(trackId, newFileName, track.dropboxPath);
+        } else {
+          await storage.renameAudioTrackFile(trackId, newFileName);
+        }
+        await storage.updateProject(id, { audioFileName: newFileName });
+        setProject(prev => prev ? { ...prev, audioFileName: newFileName } : prev);
+        const tracks = await storage.getAudioTracks(id);
+        setAudioTracks(tracks);
+        if (project?.id) syncService.schedulePush(project.id);
         toast({ title: `音源名を「${candidate}」に直しました`, description: `元: ${currentName}` });
       } catch (e) {
         console.error("[auto-rename] failed", e);
+        toast({ title: "音源名の自動リネームに失敗", description: String(e), variant: "destructive" });
       }
     })();
-  }, [project?.id, project?.audioFileName, project?.songTitle, project?.name, project?.activeAudioTrackId, id, handleRenameAudioFile, toast]);
+  }, [project?.id, project?.audioFileName, project?.songTitle, project?.name, project?.activeAudioTrackId, id, audioTracks, toast]);
 
   const audioLoadEpoch = useRef(0);
 
