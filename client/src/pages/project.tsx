@@ -2044,7 +2044,19 @@ export default function ProjectPage() {
               if (!ab && isPathNotFound) {
                 if (audioLoadEpoch.current !== epoch) return;
                 setAudioProcessPhase("Dropbox全体を検索中...");
+                // 自動リネーム機能（imported_audio → 曲タイトル）の副作用対策：
+                // ローカル/サーバー側の audioFileName は新しい名前に書き換わるが、
+                // Dropbox 同期はスキップ仕様のため Dropbox 上のファイル名は古い名前のまま。
+                // track.dropboxPath には古い名前が残っているので、そこから basename を取り
+                // 出して検索候補の最優先に置く。これで「ローカル名と Dropbox 名のズレ」で
+                // リンク復元に失敗するケースを救済できる（2026-05-04 アンセムタイム事象）。
+                const dropboxBasename = track.dropboxPath
+                  ? track.dropboxPath
+                      .replace(/^.*\//, "")
+                      .replace(/\.(mp3|wav|m4a|aac|ogg|flac|wma|aiff|aif|opus)$/i, "")
+                  : null;
                 const rawNames = [
+                  dropboxBasename,                             // Dropbox 上の元ファイル名（最優先）
                   track.fileName,                              // most authoritative (if real)
                   projectRef.current?.songTitle || null,
                   projectRef.current?.name || null,
