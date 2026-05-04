@@ -1853,6 +1853,17 @@ export default function ProjectPage() {
     if (!PLACEHOLDER_RE.test(currentName)) return;
     const candidate = (project.songTitle?.trim() || project.name?.trim() || "");
     if (!candidate) return;
+    // track 取得を先にやる。
+    // audioTracks がまだロード前の状態で useEffect が走ることがあり、その時点で
+    // attemptKey を登録してしまうと、audioTracks がロードされた後の再走で
+    // 「すでに試行済み」と判定されて自動リネームが永遠に動かなくなるバグが
+    // 起きる（2026-05-04 Anthem time 事象）。track が確定するまで attemptKey は登録しない。
+    const trackId = project.activeAudioTrackId;
+    if (!trackId) return;
+    const track = audioTracks.find(t => t.id === trackId);
+    if (!track) return;
+    const newFileName = candidate.replace(/\.mp3$/i, "") + ".mp3";
+    if (newFileName === track.fileName && newFileName === currentName) return;
     // 同じプロジェクトに対して 1 セッション内で複数回試行しない（無限ループ・トースト連打防止）
     const attemptKey = `${project.id}:${currentName}:${candidate}`;
     if (autoRenameAttemptedRef.current.has(attemptKey)) return;
@@ -1876,12 +1887,6 @@ export default function ProjectPage() {
         // 早期 return するため、ローカル state が更新されないままトーストだけ出る不整合が
         // 起きていた（2026-04-29 観測）。Dropbox 上のファイル名はそのまま残るが、後で鉛筆
         // ボタンから手動同期可能。
-        const trackId = project.activeAudioTrackId;
-        if (!trackId) return;
-        const track = audioTracks.find(t => t.id === trackId);
-        if (!track) return;
-        const newFileName = candidate.replace(/\.mp3$/i, "") + ".mp3";
-        if (newFileName === track.fileName && newFileName === currentName) return;
         if (track.dropboxPath) {
           await storage.renameAudioTrackFile(trackId, newFileName, track.dropboxPath);
         } else {
