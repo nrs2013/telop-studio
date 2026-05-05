@@ -2046,6 +2046,10 @@ export default function ProjectPage() {
               const isPlaceholderName = (n: string | null | undefined) =>
                 !n || PLACEHOLDER_NAME_RE.test(n.trim());
               let ambiguousHit: { candidates: any[]; attemptedName: string } | null = null;
+              // fuzzy 候補：厳密一致が見つからなかったが、似たファイルが Dropbox にある場合。
+              // 自動リンクはせず、後でユーザーに「この候補から選んでください」とトーストで誘導。
+              // （誤マッチ事故を防ぐため、自動リンクは厳密一致のみを継続。2026-05-04 アンセムタイム事象を経て追加。）
+              let fuzzyHit: { suggestions: any[]; attemptedName: string } | null = null;
               if (!ab && isPathNotFound) {
                 if (audioLoadEpoch.current !== epoch) return;
                 setAudioProcessPhase("Dropbox全体を検索中...");
@@ -2095,6 +2099,13 @@ export default function ProjectPage() {
                       // Ambiguous result. Record for later so we can show a
                       // proper message; do NOT auto-link.
                       ambiguousHit = { candidates: findData.candidates, attemptedName: searchName };
+                    } else if (Array.isArray(findData.suggestions) && findData.suggestions.length > 0) {
+                      // Fuzzy 候補あり：完全一致じゃないが似たファイルが Dropbox にある。
+                      // ambiguous より弱い情報なので、ambiguousHit を上書きはしない。
+                      // 既に fuzzy 候補を別の searchName で受け取っていれば、より長い候補一覧を優先。
+                      if (!fuzzyHit || findData.suggestions.length > fuzzyHit.suggestions.length) {
+                        fuzzyHit = { suggestions: findData.suggestions, attemptedName: searchName };
+                      }
                     }
                   } catch (findErr) {
                     console.warn("Dropbox find fallback failed:", findErr);
@@ -2132,6 +2143,18 @@ export default function ProjectPage() {
                 toast({
                   title: "同名の音源が複数あります",
                   description: `「${ambiguousHit.attemptedName}」に一致するファイルが Dropbox に ${ambiguousHit.candidates.length} 件あります。自動でリンクはしません。ヘッダーの「Dropboxから選ぶ」から正しい曲を手動で選んでください。\n\n候補:\n${preview}${ambiguousHit.candidates.length > 3 ? "\n..." : ""}`,
+                  variant: "destructive",
+                });
+              } else if (fuzzyHit) {
+                // 完全一致は無いが、似たファイルが見つかった。
+                // 自動リンクはしない（誤マッチ防止）。ユーザーに候補を見せて
+                // 「Dropboxから選ぶ」で手動再リンクしてもらう。
+                // よくあるパターン：Dropbox 上で「リネーム＋移動」されたとき
+                //   例: ANTHEM TIME-ドローン旋回中v.3.mp3 → 過去/ANTHEM_ドローンv.3_240216.mp3
+                const preview = fuzzyHit.suggestions.slice(0, 5).map((c: any) => c.path).join("\n");
+                toast({
+                  title: "似ているファイルが Dropbox にあります",
+                  description: `「${fuzzyHit.attemptedName}」と完全一致は見つかりませんでした。Dropbox 側で名前変更や移動があった可能性があります。\n\n候補（${fuzzyHit.suggestions.length} 件）:\n${preview}${fuzzyHit.suggestions.length > 5 ? "\n..." : ""}\n\nヘッダーの「TEAM」または「MDB」ボタンから正しいファイルを選び直してください。`,
                   variant: "destructive",
                 });
               } else {

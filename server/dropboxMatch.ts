@@ -80,3 +80,85 @@ export function findExactMatches(query: string, entries: DropboxEntry[]): MatchO
   if (matches.length === 1) return { kind: "unique", query, normalizedQuery, match: matches[0] };
   return { kind: "ambiguous", query, normalizedQuery, candidates: matches };
 }
+
+/**
+ * Tokenize a filename for fuzzy comparison: split by punctuation/whitespace,
+ * normalize, drop empty tokens. Used by findFuzzyMatches below.
+ *
+ * Example: "ANTHEM TIME-ドローン旋回中v.3.mp3"
+ *   → ["anthem", "time", "ドローン旋回中v", "3"]
+ */
+export function tokenizeForFuzzy(name: string): string[] {
+  if (!name) return [];
+  const normalized = name
+    .normalize("NFC")
+    .trim()
+    .replace(AUDIO_EXTENSION_RE, "")
+    .toLocaleLowerCase("ja-JP");
+  // Split by typical separators that show up in filenames.
+  // Includes ASCII punctuation/whitespace AND Japanese brackets/punctuation.
+  return normalized
+    .split(/[\s\-_.()[\]{}【】〜~,、。!?！？/\\:;＆&'"`]+/)
+    .filter(t => t.length > 0);
+}
+
+/**
+ * Find fuzzy candidates for `query` among `entries` when the strict
+ * matcher returns nothing. Returns up to `maxResults` entries scored
+ * by token overlap.
+ *
+ * Important: this is intended for SUGGESTING candidates to the user,
+ * not for auto-linking. The caller MUST present these as choices and
+ * never silently link to one. (See the historical OPENING/DXTEEN_OPENING
+ * substring incident — that's why exact match owns the auto-link path.)
+ *
+ * Scoring rule: token-level overlap with a small bonus for shared
+ * 3+ char substrings. Stable tie-break by entry.name length so shorter
+ * (less noisy) names sort first when scores tie.
+ */
+export function findFuzzyMatches(
+  query: string,
+  entries: DropboxEntry[],
+  maxResults: number = 8
+): DropboxEntry[] {
+  const queryTokens = tokenizeForFuzzy(query);
+  if (queryTokens.length === 0) return [];
+
+  type Scored = { entry: DropboxEntry; score: number; matched: number };
+  const scored: Scored[] = [];
+  const seenPath = new Set<string>();
+
+  for (const e of entries) {
+    if (!e || !e.name || !e.path) continue;
+    if (seenPath.has(e.path)) continue;
+    const entryTokens = tokenizeForFuzzy(e.name);
+    if (entryTokens.length === 0) continue;
+    let matched = 0;
+    for (const qt of queryTokens) {
+      for (const et of entryTokens) {
+        if (
+          qt === et ||
+          (qt.length >= 3 && et.includes(qt)) ||
+          (et.length >= 3 && qt.includes(et))
+        ) {
+          matched++;
+          break; // count each query token at most once
+        }
+      }
+    }
+    if (matched === 0) continue;
+    // Score = ratio of query tokens hit. Caps at 1.0.
+    const score = matched / queryTokens.length;
+    scored.push({ entry: e, score, matched });
+    seenPath.add(e.path);
+  }
+
+  scored.sort(
+    (a, b) =>
+      b.score - a.score ||
+      b.matched - a.matched ||
+      a.entry.name.length - b.entry.name.length
+  );
+
+  return scored.slice(0, maxResults).map(s => s.entry);
+}

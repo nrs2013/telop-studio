@@ -40,7 +40,7 @@ import connectPgSimple from "connect-pg-simple";
 import pg from "pg";
 import { uploadToDropbox, downloadFromDropbox, downloadFromDropboxStream, listDropboxFiles, searchDropboxFiles, checkDropboxConnection, checkDropboxFileExists, deleteFromDropbox, renameInDropbox, getUncachableDropboxClient, getTeamDropboxClient, getDropboxAuthUrl, exchangeDropboxCode, disconnectDropboxCustom, getDropboxOAuthStatus, browseDropboxFolder, diagnoseDrpboxStructure } from "./dropbox";
 import { Readable } from "stream";
-import { findExactMatches, type DropboxEntry } from "./dropboxMatch";
+import { findExactMatches, findFuzzyMatches, type DropboxEntry } from "./dropboxMatch";
 import kuromoji from "kuromoji";
 
 let kuromojiTokenizer: kuromoji.Tokenizer<kuromoji.IpadicFeatures> | null = null;
@@ -1294,17 +1294,33 @@ export async function registerRoutes(
         });
       }
 
-      // No exact match anywhere. Do NOT fall back to substring matching —
-      // that was the original bug. Log diagnostic info so operators can see
-      // what was searched and what was available.
-      console.log(`[Dropbox] find "${fileName}" → NO MATCH (searched ${entries.length} entries total)`);
-      try {
-        const diag = await diagnoseDrpboxStructure();
-        console.log("[Dropbox] Auto-diagnostic (file not found):", JSON.stringify(diag, null, 2));
-      } catch (de: any) {
-        console.error("[Dropbox] Auto-diagnostic failed:", de.message);
+      // No exact match anywhere. Do NOT fall back to substring matching for
+      // auto-link — that was the original bug. But DO compute fuzzy
+      // candidates and return them as `suggestions` so the client can
+      // surface "did you mean…?" choices to the user, who can pick the
+      // correct file in the Dropbox picker without rebuilding the project.
+      // Auto-link still requires `found: true` (unique exact match).
+      console.log(`[Dropbox] find "${fileName}" → NO exact match (searched ${entries.length} entries total)`);
+      const suggestions = findFuzzyMatches(fileName, entries, 8);
+      if (suggestions.length > 0) {
+        console.log(`[Dropbox] find "${fileName}" → ${suggestions.length} fuzzy suggestion(s):`, suggestions.map(s => s.path));
+      } else {
+        // Only run the auto-diagnostic when even fuzzy turns up nothing —
+        // that's the genuinely surprising case worth logging in detail.
+        try {
+          const diag = await diagnoseDrpboxStructure();
+          console.log("[Dropbox] Auto-diagnostic (no exact, no fuzzy):", JSON.stringify(diag, null, 2));
+        } catch (de: any) {
+          console.error("[Dropbox] Auto-diagnostic failed:", de.message);
+        }
       }
-      res.json({ found: false, ambiguous: false, candidates: [], normalizedQuery: outcome.normalizedQuery });
+      res.json({
+        found: false,
+        ambiguous: false,
+        candidates: [],
+        suggestions,
+        normalizedQuery: outcome.normalizedQuery,
+      });
     } catch (err: any) {
       console.error("[Dropbox] Find error:", err.message);
       res.status(500).json({ message: err.message });
