@@ -1132,6 +1132,12 @@ export default function ProjectPage() {
 
     const result = await storage.setLyricLines(id, parsedLines);
 
+    // 編集をサーバーに反映する。これがないと autoSync の pull が走ったとき、
+    // dirtyProjects にこの id が入ってないので、サーバー側の古い歌詞で
+    // 上書きされて編集が巻き戻る（Dropbox取込→一文削除が消えて戻る事象）。
+    syncService.markDirty(id);
+    syncService.schedulePush(id);
+
     setLyrics(result);
     const normalizedText = lyricsToText(result);
     const userStillEditing = lyricsTextRef.current !== text;
@@ -1154,6 +1160,10 @@ export default function ProjectPage() {
           lyricsTextRef.current = restoredText;
           lastSyncedTextRef.current = restoredText;
           setLyricsTextDirty(false);
+          // Undo もサーバーに反映しないと、autoSync の pull で「Undo前の状態」が
+          // ローカルに戻ってきて Undo がなかったことにされる。
+          syncService.markDirty(id);
+          syncService.schedulePush(id);
         },
         redo: async () => {
           if (snapshotAfter) await storage.restoreFullProjectSnapshot(snapshotAfter);
@@ -1164,6 +1174,8 @@ export default function ProjectPage() {
           lyricsTextRef.current = restoredText;
           lastSyncedTextRef.current = restoredText;
           setLyricsTextDirty(false);
+          syncService.markDirty(id);
+          syncService.schedulePush(id);
         },
       });
     }
@@ -1195,6 +1207,10 @@ export default function ProjectPage() {
     try {
       const lines = await extractTextFromFile(file);
       const result = await storage.setLyricLines(id, lines.map((text, i) => ({ text, lineIndex: i })));
+      // 取り込んだ歌詞を即サーバーへ。これがないと、サーバー側に残っている古い歌詞で
+      // 次回 autoSync 時にローカルが上書きされ、取り込み直後の歌詞が消える。
+      syncService.markDirty(id);
+      syncService.schedulePush(id);
       setLyrics(result);
       setLyricsInitialized(false);
       setLyricsTextDirty(false);
@@ -1471,6 +1487,11 @@ export default function ProjectPage() {
         const file = new File([blob], dropboxFile.name);
         const lines = await extractTextFromFile(file);
         const result = await storage.setLyricLines(id, lines.map((text, i) => ({ text, lineIndex: i })));
+        // Dropbox から取り込んだ歌詞をサーバーにも反映する。これがないと、
+        // サーバー側に残っている古い歌詞で autoSync が走ったときにローカルが上書きされ、
+        // 取り込み直後の歌詞や直後の編集（「一文削除」など）が巻き戻ってしまう。
+        syncService.markDirty(id);
+        syncService.schedulePush(id);
         setLyrics(result);
         setLyricsInitialized(false);
         setLyricsTextDirty(false);
