@@ -647,14 +647,64 @@ export default function Home() {
     }
   }, [navigate, toast, pushUndo]);
 
+  // サーバー削除をリトライ付きで実行する小さなヘルパ。
+  // 過去：try/catch で握りつぶしてた → サーバー側で削除失敗していても
+  // ローカルだけ消えて、翌日の autoSync で server から復活する事故が起きていた
+  // （2026-05-X 報告）。リトライ 3 回 + 確実な成否判定で修正。
+  const deleteProjectFromServer = async (id: string): Promise<boolean> => {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const res = await fetch(`/api/sync/projects/${id}`, {
+          method: "DELETE",
+          credentials: "include",
+        });
+        if (res.ok) return true;
+        // 404 = 既にサーバー側で消えている。OK 扱い。
+        if (res.status === 404) return true;
+      } catch {
+        // ネットワーク瞬断 → リトライ対象
+      }
+      if (attempt < 2) {
+        await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+      }
+    }
+    return false;
+  };
+
   const deleteProject = useCallback(async (id: string) => {
+    const target = projects.find(p => p.id === id);
+    if (!target) return;
+
+    // ① ユーザー確認（DATA_SAFETY 観点）
+    // 削除はサーバーまで波及して取り消し効きづらい操作なので、必ず明示確認を取る。
+    const projectName = target.name || "（無名）";
+    const confirmMsg = `「${projectName}」を本当に消しますか？\n\n音源ファイル・歌詞・タイミングデータが全部削除されます。\n（元に戻すには直後に Undo してください）`;
+    if (!window.confirm(confirmMsg)) {
+      return;
+    }
+
+    // ② サーバー削除を先に・必須・リトライ付き
+    // 失敗したらローカルにも触らない（不整合防止）。
+    // これでサーバー側で消えてないのにローカルだけ消えて、翌日 autoSync で
+    // 復活する従来の事故を根絶する。
+    const serverOk = await deleteProjectFromServer(id);
+    if (!serverOk) {
+      toast({
+        title: "削除できませんでした",
+        description: "サーバーとの通信に失敗しました。ネットワーク接続を確認して、もう一度お試しください。",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // ③ ここから先はローカル側の削除。サーバーは既に削除済みなので
+    // 失敗してもデータ不整合は起きない（次回起動時に自動的に整合する）。
     try {
       const snapshot = await storage.getFullProjectSnapshot(id);
-      const deletedProject = projects.find(p => p.id === id);
       const folderRefs = folders.filter(f => f.projectIds.includes(id)).map(f => f.id);
 
       const tracks = await storage.getAudioTracks(id);
-      const preset = deletedProject?.preset || "other";
+      const preset = target?.preset || "other";
       for (const track of tracks) {
         const resolvedPath = track.dropboxPath ||
           `/Telop音源/${preset === "sakurazaka" ? "SAKURAZAKA" : preset === "hinatazaka" ? "HINATAZAKA" : "OTHER"}/${track.fileName}`;
@@ -671,34 +721,41 @@ export default function Home() {
       }
 
       await storage.deleteProject(id);
-      try {
-        await fetch(`/api/sync/projects/${id}`, { method: "DELETE" });
-      } catch {}
       setProjects((prev) => prev.filter((p) => p.id !== id));
       setFolders((prev) => prev.map(f => ({
         ...f,
         projectIds: f.projectIds.filter(pid => pid !== id),
       })));
-      if (snapshot && deletedProject) {
+      if (snapshot) {
         pushUndo({
-          description: `削除: ${deletedProject.name}`,
+          description: `削除: ${target.name}`,
           undo: async () => {
+            // 復元：ローカルに書き戻し、サーバーへ push して復活させる。
             await storage.restoreFullProjectSnapshot(snapshot);
-            setProjects(prev => [...prev, deletedProject]);
+            setProjects(prev => [...prev, target]);
             if (folderRefs.length > 0) {
               setFolders(prev => prev.map(f => folderRefs.includes(f.id) ? { ...f, projectIds: [...f.projectIds, id] } : f));
             }
+            try {
+              syncService.markDirty(id);
+              syncService.schedulePush(id);
+            } catch {}
           },
           redo: async () => {
+            // 再削除も同様にサーバーを先に・確実に。
+            const ok = await deleteProjectFromServer(id);
+            if (!ok) {
+              toast({ title: "削除できませんでした", variant: "destructive" });
+              return;
+            }
             await storage.deleteProject(id);
-            try { await fetch(`/api/sync/projects/${id}`, { method: "DELETE" }); } catch {}
             setProjects(prev => prev.filter(p => p.id !== id));
             setFolders(prev => prev.map(f => ({ ...f, projectIds: f.projectIds.filter(pid => pid !== id) })));
           },
         });
       }
     } catch {
-      toast({ title: "削除に失敗しました", variant: "destructive" });
+      toast({ title: "ローカル削除に失敗しました", description: "サーバー側は削除済みです。次回起動で自動的に整合します。", variant: "destructive" });
     }
   }, [toast, projects, folders, pushUndo]);
 
