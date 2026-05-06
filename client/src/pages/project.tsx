@@ -125,6 +125,7 @@ function getPresets(): Record<string, PresetConfig> {
 import { storage } from "@/lib/storage";
 import { projectUndoManager, useUndo } from "@/lib/undoManager";
 import { fetchDropbox } from "@/lib/dropbox-auto-reconnect";
+import { ToastAction } from "@/components/ui/toast";
 import { useParams, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -2168,15 +2169,73 @@ export default function ProjectPage() {
                 });
               } else if (fuzzyHit) {
                 // 完全一致は無いが、似たファイルが見つかった。
-                // 自動リンクはしない（誤マッチ防止）。ユーザーに候補を見せて
-                // 「Dropboxから選ぶ」で手動再リンクしてもらう。
-                // よくあるパターン：Dropbox 上で「リネーム＋移動」されたとき
-                //   例: ANTHEM TIME-ドローン旋回中v.3.mp3 → 過去/ANTHEM_ドローンv.3_240216.mp3
+                // 自動リンクはしない（誤マッチ防止：2026-04 アンセムタイム事象）。
+                // ただし候補が「ちょうど 1 件」の場合は、ワンクリックでリンクし直せる
+                // ボタンをトーストに足して、操作の手間を最小化する。
+                // クリックで保存された結果（dropboxPath）はサーバーへも push されるので、
+                // 一度誰かが直せば他のユーザーは何もしなくても次回から開ける。
                 const preview = fuzzyHit.suggestions.slice(0, 5).map((c: any) => c.path).join("\n");
+                const onlyOne = fuzzyHit.suggestions.length === 1;
+                const candidatePath: string | null = onlyOne ? (fuzzyHit.suggestions[0].path || null) : null;
+
+                const description = onlyOne
+                  ? `「${fuzzyHit.attemptedName}」と完全一致は見つかりませんでした。Dropbox 側で名前変更や移動があった可能性があります。\n\n候補（1 件）:\n${preview}\n\n下の「これでリンクし直す」を押すと、この候補で自動リンクします。違う場合は、ヘッダーの「TEAM」または「MDB」から手動で選んでください。`
+                  : `「${fuzzyHit.attemptedName}」と完全一致は見つかりませんでした。Dropbox 側で名前変更や移動があった可能性があります。\n\n候補（${fuzzyHit.suggestions.length} 件）:\n${preview}${fuzzyHit.suggestions.length > 5 ? "\n..." : ""}\n\nヘッダーの「TEAM」または「MDB」ボタンから正しいファイルを選び直してください。`;
+
+                let actionElement: React.ReactElement | undefined;
+                if (onlyOne && candidatePath) {
+                  actionElement = (
+                    <ToastAction
+                      altText="これでリンクし直す"
+                      onClick={async () => {
+                        try {
+                          // 候補パスを実際にダウンロード。tryDownload は成功時に
+                          // ArrayBuffer を、失敗時に status を返すヘルパ。
+                          const dl = await tryDownload(candidatePath);
+                          if (!dl.data || dl.data.byteLength === 0) {
+                            toast({
+                              title: "リンクし直しに失敗しました",
+                              description: `候補ファイルのダウンロードに失敗しました（status=${dl.status}）。ヘッダーの「TEAM」または「MDB」から手動で選び直してください。`,
+                              variant: "destructive",
+                            });
+                            return;
+                          }
+                          // ローカル保存 + dropboxPath 更新 + サーバー push。
+                          // この push が走ることで、次回他のユーザーが開いたときも
+                          // 同じ候補を辿る必要なく一発で開ける。
+                          await storage.updateAudioTrackBlob(trackId, dl.data);
+                          await storage.updateAudioTrackDropboxPath(trackId, candidatePath);
+                          if (id) {
+                            syncService.markDirty(id);
+                            syncService.schedulePush(id);
+                          }
+                          // 即座に再生できるよう URL も差し替える。
+                          if (objectUrl) URL.revokeObjectURL(objectUrl);
+                          const blob = new Blob([dl.data], { type: "audio/mpeg" });
+                          const newUrl = URL.createObjectURL(blob);
+                          objectUrl = newUrl;
+                          setAudioUrl(newUrl);
+                          setAudioArrayBuffer(dl.data);
+                          toast({ title: "リンクし直しました", description: candidatePath });
+                        } catch (e: any) {
+                          toast({
+                            title: "リンクし直しに失敗しました",
+                            description: e?.message || "想定外のエラーです。",
+                            variant: "destructive",
+                          });
+                        }
+                      }}
+                    >
+                      これでリンクし直す
+                    </ToastAction>
+                  );
+                }
+
                 toast({
                   title: "似ているファイルが Dropbox にあります",
-                  description: `「${fuzzyHit.attemptedName}」と完全一致は見つかりませんでした。Dropbox 側で名前変更や移動があった可能性があります。\n\n候補（${fuzzyHit.suggestions.length} 件）:\n${preview}${fuzzyHit.suggestions.length > 5 ? "\n..." : ""}\n\nヘッダーの「TEAM」または「MDB」ボタンから正しいファイルを選び直してください。`,
+                  description,
                   variant: "destructive",
+                  ...(actionElement ? { action: actionElement } : {}),
                 });
               } else {
                 // Decide which message to show. If the track still carries
