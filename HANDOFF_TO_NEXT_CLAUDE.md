@@ -405,3 +405,11 @@ GitHub LFS 越しに取ろうとして HTML（305KB）が降ってきた状態�
 - のむさんの Mac から OBS / DistroAV プラグイン / 関連 pkg は撤去済み
 
 **事故の教訓を風化させないこと。**
+
+---
+
+## 2026-05-06 共同開発者の参加開始
+- 共同開発者：稲田さん（GitHub: nrsassistant）が参加開始
+- 引き継ぎ Markdown（COLLABORATOR_ONBOARDING.md）を読了
+- TELOP / SCHEDULE 両方の構造を要約済み
+- 試運転として本エントリを追記して push の動作確認を実施
