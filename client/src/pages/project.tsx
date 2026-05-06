@@ -3071,6 +3071,10 @@ export default function ProjectPage() {
   const creditPendingRef = useRef<Record<string, { field: string; value: string }>>({});
   const debouncedCreditSave = useCallback((field: string, value: string) => {
     creditPendingRef.current[field] = { field, value };
+    // 800ms のデバウンスが発火するまでの間、autoSync の pull が走るとローカルが
+    // サーバーの古い値で上書きされる。markDirty を即時で立てておけば pull 側で
+    // skip されるので、編集途中にタブ移動・別曲を開いた瞬間に巻き戻る事故を防げる。
+    if (id) syncService.markDirty(id);
     if (creditDebounceRef.current[field]) clearTimeout(creditDebounceRef.current[field]);
     creditDebounceRef.current[field] = setTimeout(async () => {
       delete creditPendingRef.current[field];
@@ -3088,6 +3092,29 @@ export default function ProjectPage() {
       await storage.updateProject(id!, payload);
       syncService.schedulePush(id!);
     }
+  }, [id]);
+
+  // プロジェクトを離れる瞬間、未だ debounce 発火前の編集が残っていたら
+  // IndexedDB に書き込んでから unmount する。これがないと、ユーザーが
+  // 入力 → すぐ戻るボタン（800ms以内）の場合、home の loadProjects() が
+  // 古い値の IndexedDB を読んでしまい、一覧で「変更したはずのタイトルが
+  // 元に戻っている」ように見える。
+  // 注意: cleanup 関数は async にできないため updateProject は fire-and-forget。
+  // ただし IndexedDB は同一 store のトランザクションを直列化してくれるので、
+  // 直後に home が走らせる読み取りはこの書き込みの後に流れる。
+  useEffect(() => {
+    return () => {
+      const fields = Object.keys(creditPendingRef.current);
+      for (const field of fields) {
+        const pending = creditPendingRef.current[field];
+        if (!pending || !id) continue;
+        if (creditDebounceRef.current[field]) clearTimeout(creditDebounceRef.current[field]);
+        delete creditPendingRef.current[field];
+        const payload: Record<string, any> = { [pending.field]: pending.value };
+        storage.updateProject(id, payload).catch(() => {});
+        syncService.schedulePush(id);
+      }
+    };
   }, [id]);
   const effectiveSongTitle = localSongTitle ?? songTitle;
   const effectiveLyricsCredit = localLyricsCredit ?? lyricsCredit;
