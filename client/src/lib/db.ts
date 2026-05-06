@@ -83,6 +83,17 @@ export interface TelopCheckMarker {
   time: number;
 }
 
+// 削除済みプロジェクトの墓標。
+// 削除した瞬間にここへ id を残しておくことで、別デバイス（または別タブ）の
+// 古いローカル状態が pushLocalOnlyProjects 経由でサーバーに復活させ、それを
+// 自分が pullAndMergeToLocal で取り込んでしまう「ゾンビ復活」事象を防ぐ。
+// pull 時に id がここにあれば、サーバーの値は無視＋もう一度サーバーへ DELETE
+// を送る（他デバイスが上げ直したものを掃除する）。
+export interface TelopDeletedProject {
+  id: string;
+  deletedAt: string;
+}
+
 interface TelopDBSchema extends DBSchema {
   projects: {
     key: string;
@@ -111,10 +122,14 @@ interface TelopDBSchema extends DBSchema {
     value: TelopCheckMarker;
     indexes: { "by-project": string };
   };
+  deletedProjects: {
+    key: string;
+    value: TelopDeletedProject;
+  };
 }
 
 const DB_NAME = "telop-studio";
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 
 let dbInstance: IDBPDatabase<TelopDBSchema> | null = null;
 
@@ -146,6 +161,12 @@ export async function getDB(): Promise<IDBPDatabase<TelopDBSchema>> {
       if (!db.objectStoreNames.contains("checkMarkers")) {
         const markerStore = db.createObjectStore("checkMarkers", { keyPath: "id" });
         markerStore.createIndex("by-project", "projectId");
+      }
+
+      // v4: 削除済みプロジェクトの墓標 store。これより前のバージョンから
+      // 上がってきたユーザーには空の状態で作るだけでよい。
+      if (!db.objectStoreNames.contains("deletedProjects")) {
+        db.createObjectStore("deletedProjects", { keyPath: "id" });
       }
 
       if (oldVersion < 2) {

@@ -1,4 +1,4 @@
-import { getDB, generateId, type TelopProject, type TelopLyricLine, type TelopAudio, type TelopAudioTrack, type TelopCheckMarker } from "./db";
+import { getDB, generateId, type TelopProject, type TelopLyricLine, type TelopAudio, type TelopAudioTrack, type TelopCheckMarker, type TelopDeletedProject } from "./db";
 
 const PROJECT_DEFAULTS: Omit<TelopProject, "id" | "name" | "createdAt" | "updatedAt"> = {
   audioFileName: null,
@@ -116,6 +116,49 @@ export const storage = {
     await tx.objectStore("audio").delete(id);
     await tx.objectStore("projects").delete(id);
     await tx.done;
+  },
+
+  // 削除済みプロジェクトの「墓標」を残す。これがあるかぎり、別デバイスが
+  // 古い状態をサーバーに復活させても、こちらの pull で再削除＋無視される。
+  async recordDeletion(id: string): Promise<void> {
+    const db = await getDB();
+    await db.put("deletedProjects", { id, deletedAt: new Date().toISOString() });
+  },
+
+  // Undo で復活させたとき用。墓標を取り消して、以後の pull/push で普通に扱う。
+  async clearDeletion(id: string): Promise<void> {
+    const db = await getDB();
+    await db.delete("deletedProjects", id);
+  },
+
+  async isDeleted(id: string): Promise<boolean> {
+    const db = await getDB();
+    const rec = await db.get("deletedProjects", id);
+    return !!rec;
+  },
+
+  async getDeletedIds(): Promise<string[]> {
+    const db = await getDB();
+    const all = await db.getAll("deletedProjects");
+    return all.map(d => d.id);
+  },
+
+  // 古い墓標（30日以上前）を掃除する。長期運用で IndexedDB を肥大化させない
+  // ためのメンテナンス。十分時間が経てば、別デバイスにも当該プロジェクトの
+  // ローカルコピーが残っている可能性は実質ゼロ。
+  async pruneOldDeletions(maxAgeDays = 30): Promise<number> {
+    const db = await getDB();
+    const all = await db.getAll("deletedProjects");
+    const cutoff = Date.now() - maxAgeDays * 24 * 60 * 60 * 1000;
+    let pruned = 0;
+    for (const rec of all) {
+      const t = Date.parse(rec.deletedAt);
+      if (!isNaN(t) && t < cutoff) {
+        await db.delete("deletedProjects", rec.id);
+        pruned++;
+      }
+    }
+    return pruned;
   },
 
   async getLyricLines(projectId: string): Promise<TelopLyricLine[]> {

@@ -237,7 +237,21 @@ export const syncService = {
     let added = 0;
     let updated = 0;
 
+    // 墓標 (deletedProjects) に id がある = このブラウザでは「明示的に削除したやつ」。
+    // 別デバイス/別タブが pushLocalOnlyProjects 経由でサーバーに復活させていることが
+    // あるので、ここで「復活してたら無視＋サーバーから再削除」して掃除する。
+    // これがないと、消した曲がリロードや別Macアクセスで戻ってきてしまう。
+    const deletedIds = new Set(await storage.getDeletedIds().catch(() => [] as string[]));
+
     for (const sp of serverData.projects) {
+      if (deletedIds.has(sp.id)) {
+        // 別デバイスからの復活分。サーバーに対してもう一度 DELETE を投げて掃除。
+        // 失敗してもこのブラウザのローカルには再生成しないので、ユーザー体験は守られる。
+        try {
+          await apiFetch(`/api/sync/projects/${sp.id}`, { method: "DELETE" });
+        } catch {}
+        continue;
+      }
       const localProject = await storage.getProject(sp.id);
       const projectData: Partial<Project> & { name: string; version?: number } = {
         name: sp.name,
@@ -513,6 +527,10 @@ export const syncService = {
     try {
       const user = await this.checkAuth();
       if (!user) return;
+      // 古い墓標（30日超）の掃除。長期運用で IndexedDB に消したプロジェクトの id だけが
+      // ずっと溜まり続けるのを防ぐ。十分時間が経てば、別デバイスにも当該データの
+      // ローカルコピーは残ってない想定。
+      try { await storage.pruneOldDeletions(); } catch {}
       const result = await this.pullAndMergeToLocal();
       console.log("[AutoSync] Initial pull:", result);
       // Retroactive fix: push any projects that exist only in this browser's
@@ -536,7 +554,15 @@ export const syncService = {
       const serverData = await this.pullAll();
       const serverIds = new Set(serverData.projects.map((p: any) => p.id));
       const localProjects = await storage.getProjects();
+      // 墓標がある id は「ユーザーが明示的に消したやつ」。たとえローカルに残骸が
+      // あっても再 push したら復活ループの元になるので絶対に push しない（むしろローカル側を消す）。
+      const deletedIds = new Set(await storage.getDeletedIds().catch(() => [] as string[]));
       for (const lp of localProjects) {
+        if (deletedIds.has(lp.id)) {
+          // 削除対象がローカルに残っているのは異常。掃除しておく。
+          try { await storage.deleteProject(lp.id); } catch {}
+          continue;
+        }
         if (!serverIds.has(lp.id)) {
           try {
             await this.pushProject(lp.id);

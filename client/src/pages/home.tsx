@@ -721,6 +721,13 @@ export default function Home() {
       }
 
       await storage.deleteProject(id);
+      // 墓標を残す。別デバイスや別タブの古いローカルが pushLocalOnlyProjects 経由で
+      // この id をサーバーに復活させても、次回 pull で「これは消したやつ」と分かり、
+      // ローカル復活させない＋サーバーに再度 DELETE を送って掃除できる。
+      // これがないと「同じMacでリロードしたら戻ってくる」「他のMacで開いたら戻ってくる」が再発する。
+      try {
+        await storage.recordDeletion(id);
+      } catch {}
       setProjects((prev) => prev.filter((p) => p.id !== id));
       setFolders((prev) => prev.map(f => ({
         ...f,
@@ -730,7 +737,9 @@ export default function Home() {
         pushUndo({
           description: `削除: ${target.name}`,
           undo: async () => {
-            // 復元：ローカルに書き戻し、サーバーへ push して復活させる。
+            // 復元：墓標を取り消してから、ローカルに書き戻し、サーバーへ push して復活させる。
+            // 墓標の取り消しを忘れると、push しても次の pull で再削除されてしまうので注意。
+            try { await storage.clearDeletion(id); } catch {}
             await storage.restoreFullProjectSnapshot(snapshot);
             setProjects(prev => [...prev, target]);
             if (folderRefs.length > 0) {
@@ -742,13 +751,14 @@ export default function Home() {
             } catch {}
           },
           redo: async () => {
-            // 再削除も同様にサーバーを先に・確実に。
+            // 再削除も同様にサーバーを先に・確実に。墓標も再度残す。
             const ok = await deleteProjectFromServer(id);
             if (!ok) {
               toast({ title: "削除できませんでした", variant: "destructive" });
               return;
             }
             await storage.deleteProject(id);
+            try { await storage.recordDeletion(id); } catch {}
             setProjects(prev => prev.filter(p => p.id !== id));
             setFolders(prev => prev.map(f => ({ ...f, projectIds: f.projectIds.filter(pid => pid !== id) })));
           },
