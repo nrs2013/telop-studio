@@ -2632,13 +2632,20 @@ export const TimelineEditor = memo(function TimelineEditor({
               setFadeOutTime(rounded);
               setFadeTimeInput(String(rounded));
               if (rounded > 0) {
-                const updates = lyrics
-                  .filter((l) => l.startTime !== null && ((l.fadeIn ?? 0) > 0 || (l.fadeOut ?? 0) > 0))
-                  .map((l) => ({
-                    id: l.id,
-                    fadeIn: (l.fadeIn ?? 0) > 0 ? rounded : 0,
-                    fadeOut: (l.fadeOut ?? 0) > 0 ? rounded : 0,
-                  }));
+                // 選択行があれば「選択行のフェード値だけ」を新秒数に変更する。
+                // これで「曲全体の中で、この区間だけ別の秒数にしたい」という運用が可能になる。
+                // 何も選択されていなければ、後方互換で「フェードが付いている行を全部一括変更」する
+                // 従来挙動を維持する（一曲を通して同じ秒数にしたい既存の使い方を壊さない）。
+                // 注：フェードがまだ 0 の行は、ここでは触らない（秒数だけ変えても何も起きない）。
+                // フェードを ON にするのは FADE モード + クリックの方の責務。
+                const candidates = selectedIds.size > 0
+                  ? lyrics.filter((l) => selectedIds.has(l.id) && l.startTime !== null && ((l.fadeIn ?? 0) > 0 || (l.fadeOut ?? 0) > 0))
+                  : lyrics.filter((l) => l.startTime !== null && ((l.fadeIn ?? 0) > 0 || (l.fadeOut ?? 0) > 0));
+                const updates = candidates.map((l) => ({
+                  id: l.id,
+                  fadeIn: (l.fadeIn ?? 0) > 0 ? rounded : 0,
+                  fadeOut: (l.fadeOut ?? 0) > 0 ? rounded : 0,
+                }));
                 if (updates.length > 0) onFadesUpdated(updates);
               }
             }}
