@@ -246,10 +246,14 @@ export const syncService = {
     for (const sp of serverData.projects) {
       if (deletedIds.has(sp.id)) {
         // 別デバイスからの復活分。サーバーに対してもう一度 DELETE を投げて掃除。
-        // 失敗してもこのブラウザのローカルには再生成しないので、ユーザー体験は守られる。
-        try {
-          await apiFetch(`/api/sync/projects/${sp.id}`, { method: "DELETE" });
-        } catch {}
+        // 注意：これは fire-and-forget で投げる。await して直列に待つと、
+        // 墓標が多いユーザーで pull が長時間ブロックされ、結果として
+        // 「Dropbox音源追加が極端に遅い」など別のオペレーションを巻き込んで
+        // 遅延させてしまう（同時にサーバー/ブラウザの接続枠を専有するため）。
+        // DELETE 自体は冪等（404 も OK 扱い）なので、何度投げても害はなく、
+        // 次の autoSync で取りこぼし分は再投げされる。
+        // ローカルへ再生成しない（ユーザー体験を守る）目的は continue だけで達成できる。
+        apiFetch(`/api/sync/projects/${sp.id}`, { method: "DELETE" }).catch(() => {});
         continue;
       }
       const localProject = await storage.getProject(sp.id);
