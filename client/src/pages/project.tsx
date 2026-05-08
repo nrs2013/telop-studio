@@ -636,6 +636,11 @@ export default function ProjectPage() {
         await loadLyrics();
         const tracks = await storage.getAudioTracks(id);
         setAudioTracks(tracks);
+        // 同期で音源トラックのメタが入ってきた可能性があるので、音源ロード effect を
+        // 強制再試行する。これがないと「他の人がプロジェクトを初めて開いたとき、
+        // sync完了前に audio load が走って track が見つからず silent return → 警告も出ず
+        // 音源も出ない」状態になる。retryKey を inc すれば effect の deps が変わって再実行される。
+        setAudioRetryKey(k => k + 1);
       };
       syncService.autoSyncOnOpen((result) => {
         if (result.added > 0 || result.updated > 0) reloadAfterSync();
@@ -1976,7 +1981,22 @@ export default function ProjectPage() {
     const loadTrack = async () => {
       try {
         const track = await storage.getAudioTrack(trackId);
-        if (audioLoadEpoch.current !== epoch || !track) return;
+        if (audioLoadEpoch.current !== epoch) return;
+        // track が IndexedDB に無いケース：他の人が初めてこのプロジェクトを
+        // 開いたとき、autoSync が音源トラックメタをまだ pull していないと
+        // ここで undefined になる。silent return すると「音源も警告も出ない」
+        // 不気味な空状態になるので、ユーザーが状況を把握できるよう toast を
+        // 出す。なお reloadAfterSync 側で sync 完了時に audioRetryKey を inc する
+        // ようにしてあるので、その後自動で再試行されて正常に音源が解決される
+        // ことが多い（このメッセージが残るのは本当にメタも来ない異常系のみ）。
+        if (!track) {
+          toast({
+            title: "音源データを取得できませんでした",
+            description: "サーバーとの同期が終わっていない可能性があります。少し待ってからページをリロードしてみてください。",
+            variant: "destructive",
+          });
+          return;
+        }
 
         if (track.arrayBuffer.byteLength > 0) {
           const blob = new Blob([track.arrayBuffer], { type: track.mimeType || "audio/mpeg" });

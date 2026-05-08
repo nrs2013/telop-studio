@@ -93,7 +93,10 @@ export function detectBPMFromSamples(channelData: Float32Array, sampleRate: numb
     if (allCandidates.length === 0) return null;
 
     const merged = mergeCandidates(allCandidates);
-    const result = resolveOctaveErrors(merged);
+    // resolveOctaveErrors は最終段でキック帯域マッチによる精密化を行うため、
+    // 元の channelData / sampleRate を渡す。これがないと内部で参照エラーが
+    // 発生して、検出全体が catch で握りつぶされ「BPM自動検出されない」状態になる。
+    const result = resolveOctaveErrors(merged, channelData, sampleRate);
     console.log("[BPM Detect v2] Top candidates:", merged.sort((a,b) => b.score - a.score).slice(0, 10).map(c => `${Math.round(c.bpm)}(${c.score.toFixed(2)})`).join(", "));
     console.log("[BPM Detect v2] Final BPM:", result);
     return result;
@@ -437,7 +440,11 @@ function mergeCandidates(candidates: BPMCandidate[]): BPMCandidate[] {
   return result;
 }
 
-function resolveOctaveErrors(candidates: BPMCandidate[]): number {
+function resolveOctaveErrors(
+  candidates: BPMCandidate[],
+  channelData: Float32Array,
+  sampleRate: number,
+): number {
   candidates.sort((a, b) => b.score - a.score);
 
   const normalized: BPMCandidate[] = candidates.map((c) => {
