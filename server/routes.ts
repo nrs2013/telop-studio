@@ -748,8 +748,7 @@ export async function registerRoutes(
       // cropY が負の sentinel として送られてくる。このときフレームは 1920x1080 など
       // フル解像度になり、従来の cropped (例: 1920x230) と比較して面積 4 倍以上に
       // なる。Railway のメモリ枠を超えて FFmpeg が OOM kill されることがあるので、
-      // フルフレームのときは保守設定にダウングレードする（このコード上の歴史的に
-      // "known good" な baseline）。
+      // フルフレームのときは段階的にメモリを絞る。
       const isFullFrame = reqCropY < 0;
       ffmpegArgs.push(
         "-c:v", "libvpx-vp9",
@@ -760,22 +759,33 @@ export async function registerRoutes(
         "-b:v", "0",
         "-r", String(fpsNum),
         "-deadline", "good",
-        "-cpu-used", "5",
       );
       if (isFullFrame) {
-        // 軽量設定：threads=2、row-mt と tile-columns は外す（メモリ重くする要因なので）。
-        ffmpegArgs.push("-threads", "2");
-        console.log("[FFmpeg] Full-frame VP9: using conservative settings (threads=2, no row-mt/tile-columns) to avoid OOM");
+        // フルフレーム = 1920x1080 で yuva420p 出力 = 1フレーム約 3MB。
+        // libvpx-vp9 の alpha-aware エンコーダは color と alpha の二系統を持つため
+        // 内部バッファが膨らむ（ピーク 1.5GB 級まで観測例あり）。Railway の 512MB
+        // インスタンスでは 4 threads + row-mt + tile-columns はもちろん、threads=2
+        // でも OOM kill されることが分かったので、ほぼ最小設定にする。
+        // - threads=1 → 並列バッファを増やさない
+        // - cpu-used=8 → 最も軽量・高速（品質は下がるが OOM で書き出せないより遥かにマシ）
+        // - max_muxing_queue_size を増やすと RAM を食うので減らす
+        ffmpegArgs.push(
+          "-cpu-used", "8",
+          "-threads", "1",
+          "-max_muxing_queue_size", "256",
+        );
+        console.log("[FFmpeg] Full-frame VP9: minimum-memory settings (threads=1, cpu-used=8) to fit in Railway's container");
       } else {
         // クロップ版（縦が短いので軽い）：高速設定で OK。
         ffmpegArgs.push(
+          "-cpu-used", "5",
           "-threads", "4",
           "-row-mt", "1",
           "-tile-columns", "2",
+          "-max_muxing_queue_size", "1024",
         );
       }
       ffmpegArgs.push(
-        "-max_muxing_queue_size", "1024",
         "-metadata:s:v:0", "alpha_mode=1",
       );
       if (audioPath && fs.existsSync(audioPath)) {
