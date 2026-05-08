@@ -124,6 +124,21 @@ import { pgTable, varchar, text, integer, real, timestamp, doublePrecision, inde
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   });
 
+  // サーバー側のプロジェクト削除墓標。ある PC が削除したプロジェクトを、
+  // 別の PC が（自分のローカルにまだ残ってるという理由で）pushLocalOnlyProjects
+  // 経由でサーバーに復活させてしまう「ゾンビ復活ループ」を断つために、
+  // 削除された ID をここに記録する。
+  // - DELETE エンドポイントが projects から消すと同時に行を insert
+  // - pull-all は deletedProjectIds を返す → クライアントはローカルからも消す
+  // - push は墓標がある id を拒否（410 Gone）→ 復活ループ自体が起きない
+  // 30日経った墓標は cron 等で消してもよい（クライアントの墓標も同時期に
+  // 消えるので、それ以上の保持は IndexedDB / DB 双方で意味が薄い）
+  export const deletedProjects = pgTable("deleted_projects", {
+    id: varchar("id", { length: 64 }).primaryKey(),
+    deletedAt: timestamp("deleted_at").defaultNow().notNull(),
+  });
+  export type ServerDeletedProject = typeof deletedProjects.$inferSelect;
+
   export interface AudioTrack {
     id: string;
     projectId: string;

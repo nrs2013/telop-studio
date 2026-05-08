@@ -172,6 +172,17 @@ export const syncService = {
 
     const data = await res.json();
     if (!res.ok) {
+      // 410 Gone: サーバー側でこの id は「削除済み」墓標が立っている。
+      // 復活させようとしているのは古いローカルなので、こっちのローカルも消し
+      // ローカル墓標にも記録する。これで以後この id を pushLocalOnly が再 push
+      // しようとしなくなる（復活ループの根本治癒）。
+      if (res.status === 410) {
+        try {
+          await storage.deleteProject(projectId);
+          await storage.recordDeletion(projectId);
+        } catch {}
+        return { success: false, message: data.message || "このプロジェクトは削除されています" };
+      }
       // Version conflict: rebase local version to server's, then retry once. If the retry
       // also conflicts, surface the error to the user instead of looping forever.
       if (res.status === 409 && data.serverVersion) {
@@ -226,7 +237,7 @@ export const syncService = {
     return { success: true, version: data.version };
   },
 
-  async pullAll(): Promise<{ projects: any[]; lyrics: Record<string, any[]>; audioTracks: Record<string, any[]>; markers: Record<string, any[]> }> {
+  async pullAll(): Promise<{ projects: any[]; lyrics: Record<string, any[]>; audioTracks: Record<string, any[]>; markers: Record<string, any[]>; deletedProjectIds?: string[] }> {
     const res = await apiFetch("/api/sync/pull-all");
     if (!res.ok) throw new Error("Pull failed");
     return res.json();
@@ -237,11 +248,29 @@ export const syncService = {
     let added = 0;
     let updated = 0;
 
+    // サーバー側の削除墓標（deletedProjectIds）を最優先で処理する。
+    // これがあると、自分が削除してなくても（＝別 PC が削除した曲でも）、
+    // 自分のローカルから当該プロジェクトを消し、自分のローカル墓標にも追加する。
+    // 結果、以後この PC が pushLocalOnlyProjects で復活させてしまう経路が断たれる。
+    // これが「消した曲が他の人のところで残る」問題の根本治癒。
+    const serverDeletedIds: string[] = Array.isArray(serverData.deletedProjectIds) ? serverData.deletedProjectIds : [];
+    for (const sid of serverDeletedIds) {
+      try {
+        const local = await storage.getProject(sid);
+        if (local) {
+          await storage.deleteProject(sid);
+        }
+        // ローカル墓標へも追加。次回以降の pull/push でも自動的にこの id は除外される。
+        await storage.recordDeletion(sid);
+      } catch {}
+    }
+
     // 墓標 (deletedProjects) に id がある = このブラウザでは「明示的に削除したやつ」。
     // 別デバイス/別タブが pushLocalOnlyProjects 経由でサーバーに復活させていることが
     // あるので、ここで「復活してたら無視＋サーバーから再削除」して掃除する。
     // これがないと、消した曲がリロードや別Macアクセスで戻ってきてしまう。
     const deletedIds = new Set(await storage.getDeletedIds().catch(() => [] as string[]));
+    for (const sid of serverDeletedIds) deletedIds.add(sid);
 
     for (const sp of serverData.projects) {
       if (deletedIds.has(sp.id)) {

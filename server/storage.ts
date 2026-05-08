@@ -1,6 +1,6 @@
 import { db } from "./db";
-import { users, projects, lyricLines, audioTrackMeta, checkMarkers } from "@shared/schema";
-import type { SelectUser, ServerProject, ServerLyric, ServerAudioTrackMeta, ServerCheckMarker } from "@shared/schema";
+import { users, projects, lyricLines, audioTrackMeta, checkMarkers, deletedProjects } from "@shared/schema";
+import type { SelectUser, ServerProject, ServerLyric, ServerAudioTrackMeta, ServerCheckMarker, ServerDeletedProject } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import crypto from "crypto";
 import bcrypt from "bcryptjs";
@@ -109,6 +109,32 @@ export const serverStorage = {
     await db.delete(audioTrackMeta).where(eq(audioTrackMeta.projectId, id));
     await db.delete(checkMarkers).where(eq(checkMarkers.projectId, id));
     await db.delete(projects).where(eq(projects.id, id));
+    // 墓標を残す。これがあれば、別 PC のローカルがまだ「自分は曲Pを持ってる」
+    // と思ってサーバーに push し直そうとしても拒否でき、また pull 経路でも
+    // 別 PC のローカル側を強制削除させられる（復活ループの根本治癒）。
+    await db
+      .insert(deletedProjects)
+      .values({ id, deletedAt: new Date() })
+      .onConflictDoUpdate({
+        target: deletedProjects.id,
+        set: { deletedAt: new Date() },
+      });
+  },
+
+  async getDeletedProjectIds(): Promise<string[]> {
+    const rows = await db.select().from(deletedProjects);
+    return rows.map((r: ServerDeletedProject) => r.id);
+  },
+
+  async isProjectTombstoned(id: string): Promise<boolean> {
+    const [row] = await db.select().from(deletedProjects).where(eq(deletedProjects.id, id));
+    return !!row;
+  },
+
+  // Undo（プロジェクト復活）など、明示的に「やっぱり削除取り消し」する場合に
+  // 使うヘルパ。墓標を消さないと push しても 410 Gone で拒否されるので必須。
+  async clearTombstone(id: string): Promise<void> {
+    await db.delete(deletedProjects).where(eq(deletedProjects.id, id));
   },
 
   async getLyrics(projectId: string): Promise<ServerLyric[]> {

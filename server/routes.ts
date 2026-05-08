@@ -326,6 +326,17 @@ export async function registerRoutes(
     if (!project || !project.id) return res.status(400).json({ message: "Project data required" });
     const userId = req.session.userId!;
 
+    // 削除墓標がある id への push は拒否。これがないと、別 PC のローカルに
+    // 残った古いコピーが pushLocalOnlyProjects 経由で復活させてしまう。
+    // 410 Gone を返してクライアントに「これは削除済み」と伝え、ローカルから
+    // 消すヒントにする。
+    if (await serverStorage.isProjectTombstoned(project.id)) {
+      return res.status(410).json({
+        message: "このプロジェクトは削除されています",
+        tombstoned: true,
+      });
+    }
+
     const serverProject = await serverStorage.getProject(project.id);
     // TEAM SHARING: any authenticated user can push. ownerId is preserved as audit metadata only.
     if (serverProject && serverProject.version > (project.version || 0)) {
@@ -379,11 +390,22 @@ export async function registerRoutes(
   app.get("/api/sync/pull-all", requireAuth, async (req: Request, res: Response) => {
     const userId = req.session.userId!;
     const allProjects = await serverStorage.getProjectsForUser(userId);
-    const result: { projects: any[]; lyrics: Record<string, any[]>; audioTracks: Record<string, any[]>; markers: Record<string, any[]> } = {
+    // サーバー側の削除墓標も一緒に返す。クライアントは pull 後にこれを見て、
+    // ローカルにまだ残っているプロジェクトを強制的に消し、自分のローカル墓標
+    // にも追加する（→ 以後 pushLocalOnlyProjects で復活させない）。
+    const deletedProjectIds = await serverStorage.getDeletedProjectIds();
+    const result: {
+      projects: any[];
+      lyrics: Record<string, any[]>;
+      audioTracks: Record<string, any[]>;
+      markers: Record<string, any[]>;
+      deletedProjectIds: string[];
+    } = {
       projects: allProjects,
       lyrics: {},
       audioTracks: {},
       markers: {},
+      deletedProjectIds,
     };
     for (const p of allProjects) {
       result.lyrics[p.id] = await serverStorage.getLyrics(p.id);

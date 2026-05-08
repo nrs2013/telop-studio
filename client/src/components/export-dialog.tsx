@@ -36,7 +36,10 @@ interface ExportDialogProps {
   audioFileName?: string | null;
 }
 
-type ExportMode = "server" | "prores" | "zip";
+// "prores"        … 既存：テロップ描画範囲を自動クロップして縦を切り詰める。Arenaでは Y 座標で再配置必要。
+// "prores-fullframe" … 新規：自動クロップを行わず、プロジェクト出力解像度（典型 1920x1080 = 16:9）の
+//                     ProRes 4444 を生成。Resolume Arena に放り込めば手動配置不要でそのまま 16:9 全画面に乗る。
+type ExportMode = "server" | "prores" | "prores-fullframe" | "zip";
 
 
 
@@ -919,45 +922,58 @@ export function ExportDialog({
       setStatus("描画エリア解析中...");
       setProgress(1);
 
-      const scanCanvas = document.createElement("canvas");
-      scanCanvas.width = outputWidth;
-      scanCanvas.height = outputHeight;
-      const scanCtx = scanCanvas.getContext("2d", { alpha: true })!;
-      let globalMinY = outputHeight;
-      let globalMaxY = 0;
-      const SCAN_STEP = Math.max(1, Math.floor(segs.length / 40));
-      for (let i = 0; i < segs.length; i += SCAN_STEP) {
-        const seg = segs[i];
-        drawFrame(scanCtx, seg.time + 0.001, sortedLyrics);
-        const imgData = scanCtx.getImageData(0, 0, outputWidth, outputHeight);
-        const d = imgData.data;
-        for (let row = 0; row < outputHeight; row++) {
-          const rowStart = row * outputWidth * 4;
-          for (let col = 0; col < outputWidth; col++) {
-            if (d[rowStart + col * 4 + 3] > 0) {
-              if (row < globalMinY) globalMinY = row;
-              if (row > globalMaxY) globalMaxY = row;
-              break;
+      // Resolume Arena 等の VJ ソフトに「16:9 のまま」流し込みたい運用がある。
+      // その場合はテキスト描画範囲の自動クロップを行わず、フル解像度（出力サイズ）
+      // のままエンコードする。 exportMode が "prores-fullframe" のときに有効化される。
+      const fullFrameMode = exportMode === "prores-fullframe";
+
+      let cropActive = false;
+      let cropY = 0;
+      const encWidth = outputWidth;
+      let encHeight = outputHeight % 2 === 0 ? outputHeight : outputHeight - 1;
+
+      if (!fullFrameMode) {
+        const scanCanvas = document.createElement("canvas");
+        scanCanvas.width = outputWidth;
+        scanCanvas.height = outputHeight;
+        const scanCtx = scanCanvas.getContext("2d", { alpha: true })!;
+        let globalMinY = outputHeight;
+        let globalMaxY = 0;
+        const SCAN_STEP = Math.max(1, Math.floor(segs.length / 40));
+        for (let i = 0; i < segs.length; i += SCAN_STEP) {
+          const seg = segs[i];
+          drawFrame(scanCtx, seg.time + 0.001, sortedLyrics);
+          const imgData = scanCtx.getImageData(0, 0, outputWidth, outputHeight);
+          const d = imgData.data;
+          for (let row = 0; row < outputHeight; row++) {
+            const rowStart = row * outputWidth * 4;
+            for (let col = 0; col < outputWidth; col++) {
+              if (d[rowStart + col * 4 + 3] > 0) {
+                if (row < globalMinY) globalMinY = row;
+                if (row > globalMaxY) globalMaxY = row;
+                break;
+              }
             }
           }
         }
-      }
 
-      if (globalMinY >= globalMaxY) {
-        globalMinY = 0;
-        globalMaxY = outputHeight - 1;
+        if (globalMinY >= globalMaxY) {
+          globalMinY = 0;
+          globalMaxY = outputHeight - 1;
+        }
+        const CROP_PAD = 30;
+        const cropTop = Math.max(0, globalMinY - CROP_PAD);
+        const cropBottom = Math.min(outputHeight - 1, globalMaxY + CROP_PAD);
+        const rawCropHeight = cropBottom - cropTop + 1;
+        cropActive = cropBottom > cropTop && rawCropHeight < outputHeight * 0.85;
+        cropY = cropActive ? cropTop : 0;
+        // VP9 (yuva420p) / ProRes どちらも width/height が偶数必須。奇数だとエンコード失敗。
+        // 下端を1px削って偶数に揃える(表示範囲内なので安全)。
+        const rawEncHeight = cropActive ? rawCropHeight : outputHeight;
+        encHeight = rawEncHeight % 2 === 0 ? rawEncHeight : rawEncHeight - 1;
+      } else {
+        console.log(`[ProRes Export] フルフレーム 16:9 モード: ${encWidth}x${encHeight}（自動クロップは行わない）`);
       }
-      const CROP_PAD = 30;
-      const cropTop = Math.max(0, globalMinY - CROP_PAD);
-      const cropBottom = Math.min(outputHeight - 1, globalMaxY + CROP_PAD);
-      const rawCropHeight = cropBottom - cropTop + 1;
-      const cropActive = cropBottom > cropTop && rawCropHeight < outputHeight * 0.85;
-      const cropY = cropActive ? cropTop : 0;
-      const encWidth = outputWidth;
-      // VP9 (yuva420p) / ProRes どちらも width/height が偶数必須。奇数だとエンコード失敗。
-      // 下端を1px削って偶数に揃える(表示範囲内なので安全)。
-      const rawEncHeight = cropActive ? rawCropHeight : outputHeight;
-      const encHeight = rawEncHeight % 2 === 0 ? rawEncHeight : rawEncHeight - 1;
 
       if (cropActive) {
         console.log(`[ProRes Export] Auto-crop: Y=${cropY} H=${encHeight} (原寸: ${outputWidth}x${outputHeight})`);
@@ -1119,7 +1135,11 @@ export function ExportDialog({
       if (cancelRef.current) { setExporting(false); setProgress(0); setStatus(""); return; }
 
       const safeName = (projectName || "telop").replace(/[^\w\u3000-\u9fff\uff00-\uffef]/g, "_");
-      const yTag = cropActive ? `_Y${cropY}_H${encHeight}` : "";
+      // Resolume Arena 等にそのまま読み込ませる用途のため、フルフレーム書き出しは
+      // ファイル名で見分けられるよう "_arena16x9" を付ける（クロップ版と取り違えない）。
+      const yTag = fullFrameMode
+        ? `_arena16x9`
+        : cropActive ? `_Y${cropY}_H${encHeight}` : "";
       const movFileName = `【TELOP】${safeName}_prores4444${yTag}.mov`;
       const presetVal = project.preset || "other";
 
@@ -1198,7 +1218,9 @@ export function ExportDialog({
     setExporting(false);
     setProgress(0);
     setStatus("");
-  }, [timedLyrics, fps, videoBitrate, audioBitrate, audioUrl, project, presetConfig, activeAudioTrackId]);
+    // exportMode を依存に入れる：fullframe か通常クロップかを内部で分岐させるため、
+    // 値を最新で読みたい（依存に入れていないと古い値で固まる）。
+  }, [timedLyrics, fps, videoBitrate, audioBitrate, audioUrl, project, presetConfig, activeAudioTrackId, exportMode]);
 
   const generateConcatTxt = (segments: { frame: number; duration: number }[]): string => {
     const lines: string[] = [];
@@ -1371,7 +1393,9 @@ export function ExportDialog({
   const handleExport = () => {
     if (exportMode === "server") {
       handleServerExport();
-    } else if (exportMode === "prores") {
+    } else if (exportMode === "prores" || exportMode === "prores-fullframe") {
+      // 同じ書き出し関数を使うが、内部で exportMode を見て自動クロップを
+      // するかしないかを切り替える（"prores-fullframe" のときはフル 16:9）。
       handleProResExport();
     } else {
       handleZipExport();
@@ -1517,7 +1541,8 @@ export function ExportDialog({
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="server">WebM VP9 Alpha (推奨・最速)</SelectItem>
-                    <SelectItem value="prores">ProRes 4444 MOV (Arena用・アルファ確実)</SelectItem>
+                    <SelectItem value="prores">ProRes 4444 MOV (テロップ部分のみ・縦切り詰め)</SelectItem>
+                    <SelectItem value="prores-fullframe">ProRes 4444 MOV (16:9フル・Resolume Arena用)</SelectItem>
                     <SelectItem value="zip">フレームパック ZIP (オフライン変換用)</SelectItem>
                   </SelectContent>
                 </Select>
@@ -1540,12 +1565,28 @@ export function ExportDialog({
                 <div className="bg-green-500/10 border border-green-500/30 rounded-md p-3 space-y-2 text-sm">
                   <p className="font-medium flex items-center gap-1.5">
                     <Film className="w-4 h-4 text-green-400" />
-                    ProRes 4444 MOV (Arena用)
+                    ProRes 4444 MOV (テロップ部分のみ)
                   </p>
                   <p className="text-xs text-muted-foreground">
                     テキスト描画エリアを自動検出 → クロップ → ProRes 4444 (yuva444p10le) で高速エンコード。
                     FFmpeg 7.0 互換コンテナで Apple Silicon でも確実にアルファ透過。
                     Y座標はファイル名に埋め込み、Arenaで手動配置。
+                  </p>
+                </div>
+              )}
+
+              {exportMode === "prores-fullframe" && (
+                <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-md p-3 space-y-2 text-sm">
+                  <p className="font-medium flex items-center gap-1.5">
+                    <Film className="w-4 h-4 text-emerald-400" />
+                    ProRes 4444 MOV (16:9 フル・Resolume Arena 用)
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    自動クロップは行わず、プロジェクトの出力解像度（{outputWidth}×{outputHeight}）のまま
+                    ProRes 4444 (yuva444p10le) でエンコード。Resolume Arena に放り込めば
+                    そのまま 16:9 全画面に重ねられて、Y 座標を手動で合わせる必要がありません。
+                    ファイル名末尾に <span className="font-mono">_arena16x9</span> が付くので、
+                    縦切り詰め版と取り違える心配なし。
                   </p>
                 </div>
               )}
