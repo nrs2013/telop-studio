@@ -744,6 +744,13 @@ export async function registerRoutes(
       // track intact — the 2-pass bitrate-controlled path conflicts with
       // the alpha encoder context. Do not switch to `-b:v <bitrate>` or
       // enable alt-ref without re-verifying the alpha stream in libvpx-vp9.
+      // クライアント側で「フルフレーム書き出し」（自動クロップなし）が選ばれると
+      // cropY が負の sentinel として送られてくる。このときフレームは 1920x1080 など
+      // フル解像度になり、従来の cropped (例: 1920x230) と比較して面積 4 倍以上に
+      // なる。Railway のメモリ枠を超えて FFmpeg が OOM kill されることがあるので、
+      // フルフレームのときは保守設定にダウングレードする（このコード上の歴史的に
+      // "known good" な baseline）。
+      const isFullFrame = reqCropY < 0;
       ffmpegArgs.push(
         "-c:v", "libvpx-vp9",
         "-vf", "format=yuva420p",
@@ -754,9 +761,20 @@ export async function registerRoutes(
         "-r", String(fpsNum),
         "-deadline", "good",
         "-cpu-used", "5",
-        "-threads", "4",
-        "-row-mt", "1",
-        "-tile-columns", "2",
+      );
+      if (isFullFrame) {
+        // 軽量設定：threads=2、row-mt と tile-columns は外す（メモリ重くする要因なので）。
+        ffmpegArgs.push("-threads", "2");
+        console.log("[FFmpeg] Full-frame VP9: using conservative settings (threads=2, no row-mt/tile-columns) to avoid OOM");
+      } else {
+        // クロップ版（縦が短いので軽い）：高速設定で OK。
+        ffmpegArgs.push(
+          "-threads", "4",
+          "-row-mt", "1",
+          "-tile-columns", "2",
+        );
+      }
+      ffmpegArgs.push(
         "-max_muxing_queue_size", "1024",
         "-metadata:s:v:0", "alpha_mode=1",
       );
