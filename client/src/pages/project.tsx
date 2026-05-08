@@ -401,8 +401,21 @@ const FONTS = [
 export default function ProjectPage() {
   const { id } = useParams<{ id: string }>();
   const [, navigate] = useLocation();
-  const { toast } = useToast();
+  const { toast, dismiss: dismissToast } = useToast();
   const { undo, redo, canUndo, canRedo, push: pushUndo, clear: clearUndo, undoDescription, redoDescription } = useUndo(projectUndoManager);
+
+  // プロジェクト切替（id 変更）の度に、前のプロジェクトで出した古いトーストを
+  // 全部消す。これがないと、TOAST_LIMIT = 1 + 自動消去ほぼ無限の組み合わせで、
+  // 別プロジェクトの「リンクし直しました」「音源が見つかりません」等のトーストが
+  // 残ったまま、新しいプロジェクトを開いても本来出すべき警告が表示されない
+  // （TOAST_LIMITに引っかかって新しいトーストが出ない）状態になる。
+  // 注：dismissToast は useToast の戻り値で毎レンダー新しい参照になるので
+  // deps には入れない（無限ループ回避）。dispatch を呼ぶだけの薄いラッパなので
+  // stale closure 問題は起きない。
+  useEffect(() => {
+    dismissToast();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
   const [exportOpen, setExportOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [metadataOpen, setMetadataOpen] = useState(false);
