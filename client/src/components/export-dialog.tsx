@@ -1460,7 +1460,11 @@ export function ExportDialog({
         <DialogHeader>
           <DialogTitle data-testid="text-export-title">動画書き出し</DialogTitle>
           <DialogDescription>
-            VP9 + Alpha (yuva420p) WebM を生成
+            {exportMode === "server" && "VP9 + Alpha (yuva420p) WebM を生成（テロップ部分のみ）"}
+            {exportMode === "server-fullframe" && "VP9 + Alpha (yuva420p) WebM を生成（16:9フル）"}
+            {exportMode === "prores" && "ProRes 4444 (yuva444p10le) MOV を生成（テロップ部分のみ）"}
+            {exportMode === "prores-fullframe" && "ProRes 4444 (yuva444p10le) MOV を生成（16:9フル・Resolume Arena 用）"}
+            {exportMode === "zip" && "オフライン変換用にフレーム連番ZIPを生成"}
           </DialogDescription>
         </DialogHeader>
 
@@ -1797,7 +1801,7 @@ export function ExportDialog({
               <div className="flex flex-col gap-2 pt-2">
                 {!exporting ? (
                   <>
-                    {exportMode === "server" ? (
+                    {exportMode === "server" || exportMode === "server-fullframe" ? (
                       <>
                         <Button
                           onClick={() => handleExport()}
