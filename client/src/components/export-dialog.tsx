@@ -102,7 +102,10 @@ export function ExportDialog({
   const effectiveRightTitle = project.creditRightTitle || songTitle || "";
   const rightTitleText = effectiveRightTitle.trim();
   const [fps, setFps] = useState("30");
-  const [videoBitrate, setVideoBitrate] = useState("4M");
+  // ドロップダウン側の選択肢に合わせた既定値。
+  // 旧「4M」だと <SelectItem> に該当値がなく、表示が空欄になり、
+  // ユーザーから「映像品質が選べない」と誤解されていた。
+  const [videoBitrate, setVideoBitrate] = useState("2M");
   const [audioBitrate, setAudioBitrate] = useState("64k");
   const [exportMode, setExportMode] = useState<ExportMode>("server");
   const [exporting, setExporting] = useState(false);
@@ -1134,7 +1137,9 @@ export function ExportDialog({
           if (statusRes.status === 304) { continue; }
           if (!statusRes.ok) {
             pollErrors++;
-            if (pollErrors >= 3) throw new Error("変換状態の確認に失敗しました");
+            // 16:9フル等の重いエンコードや一時的なサーバー混雑では、status の取得が
+            // 一瞬詰まることがある。3回程度では諦めず、長めに粘る（合計 ~30秒の連続失敗で打ち切り）。
+            if (pollErrors >= 15) throw new Error(`変換状態の確認に失敗しました（HTTP ${statusRes.status}）`);
             continue;
           }
           pollErrors = 0;
@@ -1148,9 +1153,9 @@ export function ExportDialog({
             setStatus(`サーバーでProRes 4444 変換中... ${pollCount * 2}秒経過`);
           }
         } catch (e: any) {
-          if (e.message === "変換状態の確認に失敗しました" || e.message?.includes("ProRes変換に失敗")) throw e;
+          if (e.message?.startsWith("変換状態の確認に失敗しました") || e.message?.includes("ProRes変換に失敗")) throw e;
           pollErrors++;
-          if (pollErrors >= 3) throw new Error("変換状態の確認に失敗しました");
+          if (pollErrors >= 15) throw new Error(`変換状態の確認に失敗しました（${e.message || "不明なエラー"}）`);
         }
       }
       if (cancelRef.current) { setExporting(false); setProgress(0); setStatus(""); return; }
