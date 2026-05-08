@@ -36,10 +36,12 @@ interface ExportDialogProps {
   audioFileName?: string | null;
 }
 
-// "prores"        … 既存：テロップ描画範囲を自動クロップして縦を切り詰める。Arenaでは Y 座標で再配置必要。
-// "prores-fullframe" … 新規：自動クロップを行わず、プロジェクト出力解像度（典型 1920x1080 = 16:9）の
-//                     ProRes 4444 を生成。Resolume Arena に放り込めば手動配置不要でそのまま 16:9 全画面に乗る。
-type ExportMode = "server" | "prores" | "prores-fullframe" | "zip";
+// "server"          … 既存：WebM VP9 Alpha（テロップ部分自動クロップ・縦切り詰め）。
+// "server-fullframe"… 新規：WebM VP9 Alpha を 16:9 フル解像度（典型 1920x1080）で書き出す。
+//                     クロップしないので素材そのまま重ねたい用途で楽。
+// "prores"          … 既存：ProRes 4444 自動クロップ版。Arena で Y 座標再配置が必要。
+// "prores-fullframe"… 既存：ProRes 4444 16:9 フル版。Arena に放り込むだけで OK。
+type ExportMode = "server" | "server-fullframe" | "prores" | "prores-fullframe" | "zip";
 
 
 
@@ -632,48 +634,62 @@ export function ExportDialog({
       setStatus("コンテンツ領域スキャン中...");
       setProgress(1);
 
-      const scanCanvas = document.createElement("canvas");
-      scanCanvas.width = outputWidth;
-      scanCanvas.height = outputHeight;
-      const scanCtx = scanCanvas.getContext("2d", { alpha: true })!;
-      let globalMinY = outputHeight;
-      let globalMaxY = 0;
-      const SCAN_STEP = Math.max(1, Math.floor(segs.length / 40));
-      for (let i = 0; i < segs.length; i += SCAN_STEP) {
-        const seg = segs[i];
-        drawFrame(scanCtx, seg.time + 0.001, sortedLyrics);
-        const imgData = scanCtx.getImageData(0, 0, outputWidth, outputHeight);
-        const d = imgData.data;
-        for (let row = 0; row < outputHeight; row++) {
-          const rowStart = row * outputWidth * 4;
-          for (let col = 0; col < outputWidth; col++) {
-            if (d[rowStart + col * 4 + 3] > 0) {
-              if (row < globalMinY) globalMinY = row;
-              if (row > globalMaxY) globalMaxY = row;
-              break;
+      // exportMode が "server-fullframe" のときは「16:9 フル解像度」運用なので、
+      // テキスト範囲の自動クロップ自体をスキップして、プロジェクト出力解像度のまま
+      // エンコードする。VJ ソフトや既存の合成パイプラインに「素材を 16:9 そのままで」
+      // 渡したい用途のための分岐。
+      const fullFrameMode = exportMode === "server-fullframe";
+
+      let cropActive = false;
+      let cropY = 0;
+      const encWidth = outputWidth;
+      let encHeight = outputHeight % 2 === 0 ? outputHeight : outputHeight - 1;
+
+      if (!fullFrameMode) {
+        const scanCanvas = document.createElement("canvas");
+        scanCanvas.width = outputWidth;
+        scanCanvas.height = outputHeight;
+        const scanCtx = scanCanvas.getContext("2d", { alpha: true })!;
+        let globalMinY = outputHeight;
+        let globalMaxY = 0;
+        const SCAN_STEP = Math.max(1, Math.floor(segs.length / 40));
+        for (let i = 0; i < segs.length; i += SCAN_STEP) {
+          const seg = segs[i];
+          drawFrame(scanCtx, seg.time + 0.001, sortedLyrics);
+          const imgData = scanCtx.getImageData(0, 0, outputWidth, outputHeight);
+          const d = imgData.data;
+          for (let row = 0; row < outputHeight; row++) {
+            const rowStart = row * outputWidth * 4;
+            for (let col = 0; col < outputWidth; col++) {
+              if (d[rowStart + col * 4 + 3] > 0) {
+                if (row < globalMinY) globalMinY = row;
+                if (row > globalMaxY) globalMaxY = row;
+                break;
+              }
             }
           }
         }
-      }
 
-      if (globalMinY >= globalMaxY) {
-        globalMinY = 0;
-        globalMaxY = outputHeight - 1;
-      }
-      const CROP_PAD = 30;
-      const cropTop = Math.max(0, globalMinY - CROP_PAD);
-      const cropBottom = Math.min(outputHeight - 1, globalMaxY + CROP_PAD);
-      const rawCropHeight = cropBottom - cropTop + 1;
-      const cropActive = cropBottom > cropTop && rawCropHeight < outputHeight * 0.85;
-      const cropY = cropActive ? cropTop : 0;
-      const encWidth = outputWidth;
-      // VP9 (yuva420p) / ProRes どちらも width/height が偶数必須。奇数だとエンコード失敗。
-      // 下端を1px削って偶数に揃える(表示範囲内なので安全)。
-      const rawEncHeight = cropActive ? rawCropHeight : outputHeight;
-      const encHeight = rawEncHeight % 2 === 0 ? rawEncHeight : rawEncHeight - 1;
+        if (globalMinY >= globalMaxY) {
+          globalMinY = 0;
+          globalMaxY = outputHeight - 1;
+        }
+        const CROP_PAD = 30;
+        const cropTop = Math.max(0, globalMinY - CROP_PAD);
+        const cropBottom = Math.min(outputHeight - 1, globalMaxY + CROP_PAD);
+        const rawCropHeight = cropBottom - cropTop + 1;
+        cropActive = cropBottom > cropTop && rawCropHeight < outputHeight * 0.85;
+        cropY = cropActive ? cropTop : 0;
+        // VP9 (yuva420p) / ProRes どちらも width/height が偶数必須。奇数だとエンコード失敗。
+        // 下端を1px削って偶数に揃える(表示範囲内なので安全)。
+        const rawEncHeight = cropActive ? rawCropHeight : outputHeight;
+        encHeight = rawEncHeight % 2 === 0 ? rawEncHeight : rawEncHeight - 1;
 
-      if (cropActive) {
-        console.log(`[WebM Export] Auto-crop: Y=${cropY} H=${encHeight} (原寸: ${outputWidth}x${outputHeight})`);
+        if (cropActive) {
+          console.log(`[WebM Export] Auto-crop: Y=${cropY} H=${encHeight} (原寸: ${outputWidth}x${outputHeight})`);
+        }
+      } else {
+        console.log(`[WebM Export] フルフレーム 16:9 モード: ${encWidth}x${encHeight}（自動クロップは行わない）`);
       }
 
       setStatus(cropActive ? `クロップ: ${encWidth}x${encHeight} (Y=${cropY}) フレーム生成中` : `フル解像度: ${encWidth}x${outputHeight} フレーム生成中`);
@@ -874,7 +890,10 @@ export function ExportDialog({
       if (!dlRes.ok) throw new Error("ダウンロードに失敗しました");
       const outputBlob = await dlRes.blob();
       const safeName = (projectName || "telop").replace(/[^\w\u3000-\u9fff\uff00-\uffef]/g, "_");
-      const yTag = cropActive ? `_Y${cropY}_H${encHeight}` : "";
+      // フルフレーム書き出しは縦切り詰め版と取り違えないよう "_16x9" を付ける。
+      const yTag = fullFrameMode
+        ? `_16x9`
+        : cropActive ? `_Y${cropY}_H${encHeight}` : "";
       const webmFileName = `【TELOP】${safeName}_vp9_alpha${yTag}.webm`;
       const url = URL.createObjectURL(outputBlob);
       const a = document.createElement("a");
@@ -902,7 +921,9 @@ export function ExportDialog({
     setExporting(false);
     setProgress(0);
     setStatus("");
-  }, [timedLyrics, fps, videoBitrate, audioBitrate, audioUrl, project, presetConfig, activeAudioTrackId]);
+    // exportMode を依存に入れる：fullframe か通常クロップかを内部で分岐させるため、
+    // 値を最新で読みたい（依存に入れていないと古い値で固まる）。
+  }, [timedLyrics, fps, videoBitrate, audioBitrate, audioUrl, project, presetConfig, activeAudioTrackId, exportMode]);
 
   const handleProResExport = useCallback(async () => {
     if (timedLyrics.length === 0) return;
@@ -1391,7 +1412,9 @@ export function ExportDialog({
   }, [timedLyrics, fps, videoBitrate, audioBitrate, audioUrl, audioFileName, project, presetConfig, onOpenChange]);
 
   const handleExport = () => {
-    if (exportMode === "server") {
+    if (exportMode === "server" || exportMode === "server-fullframe") {
+      // server / server-fullframe どちらも同じ関数を通す。内部で exportMode を見て
+      // 自動クロップするかしないかを切り替える（"server-fullframe" のときフル 16:9）。
       handleServerExport();
     } else if (exportMode === "prores" || exportMode === "prores-fullframe") {
       // 同じ書き出し関数を使うが、内部で exportMode を見て自動クロップを
@@ -1540,7 +1563,8 @@ export function ExportDialog({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="server">WebM VP9 Alpha (推奨・最速)</SelectItem>
+                    <SelectItem value="server">WebM VP9 Alpha (テロップ部分のみ・縦切り詰め)</SelectItem>
+                    <SelectItem value="server-fullframe">WebM VP9 Alpha (16:9フル・アルファ付き)</SelectItem>
                     <SelectItem value="prores">ProRes 4444 MOV (テロップ部分のみ・縦切り詰め)</SelectItem>
                     <SelectItem value="prores-fullframe">ProRes 4444 MOV (16:9フル・Resolume Arena用)</SelectItem>
                     <SelectItem value="zip">フレームパック ZIP (オフライン変換用)</SelectItem>
@@ -1552,11 +1576,28 @@ export function ExportDialog({
                 <div className="bg-blue-500/10 border border-blue-500/30 rounded-md p-3 space-y-2 text-sm">
                   <p className="font-medium flex items-center gap-1.5">
                     <Zap className="w-4 h-4 text-blue-400" />
-                    サーバーエンコード (最速)
+                    サーバーエンコード (最速・テロップ部分のみ)
                   </p>
                   <p className="text-xs text-muted-foreground">
                     ネイティブFFmpegでマルチスレッド高速エンコード。
                     VFR最適化でフレーム数を最小限に抑え、サーバーに送信して処理します。
+                    自動クロップで縦が切り詰められます。
+                  </p>
+                </div>
+              )}
+
+              {exportMode === "server-fullframe" && (
+                <div className="bg-sky-500/10 border border-sky-500/30 rounded-md p-3 space-y-2 text-sm">
+                  <p className="font-medium flex items-center gap-1.5">
+                    <Zap className="w-4 h-4 text-sky-400" />
+                    WebM VP9 Alpha (16:9 フル・アルファ付き)
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    自動クロップは行わず、プロジェクトの出力解像度（{outputWidth}×{outputHeight}）のまま
+                    VP9 + アルファチャンネル付き WebM でエンコード。フレームレートは下の「FPS」で
+                    指定したものを使います（30 推奨）。
+                    ファイル名末尾に <span className="font-mono">_16x9</span> が付くので、
+                    縦切り詰め版と取り違える心配なし。
                   </p>
                 </div>
               )}
