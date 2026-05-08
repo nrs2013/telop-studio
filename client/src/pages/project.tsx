@@ -535,6 +535,10 @@ export default function ProjectPage() {
   const waveformEndTimeRef = useRef<number | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [audioArrayBuffer, setAudioArrayBuffer] = useState<ArrayBuffer | null>(null);
+  // reloadAfterSync 内から「いま音源が正常にロードされてるか」をチェックするための ref。
+  // ref で保持しないと、最新値を見たい reloadAfterSync の closure が古いものを掴んでしまう。
+  const audioArrayBufferRef = useRef<ArrayBuffer | null>(null);
+  audioArrayBufferRef.current = audioArrayBuffer;
   const [audioTracks, setAudioTracks] = useState<{ id: string; label: string; fileName: string; createdAt: string; dropboxPath?: string }[]>([]);
   const [dropboxPickerOpen, setDropboxPickerOpen] = useState(false);
   const [dropboxUploading, setDropboxUploading] = useState(false);
@@ -649,11 +653,15 @@ export default function ProjectPage() {
         await loadLyrics();
         const tracks = await storage.getAudioTracks(id);
         setAudioTracks(tracks);
-        // 同期で音源トラックのメタが入ってきた可能性があるので、音源ロード effect を
-        // 強制再試行する。これがないと「他の人がプロジェクトを初めて開いたとき、
-        // sync完了前に audio load が走って track が見つからず silent return → 警告も出ず
-        // 音源も出ない」状態になる。retryKey を inc すれば effect の deps が変わって再実行される。
-        setAudioRetryKey(k => k + 1);
+        // 音源がまだ正常にロードできていない（= ArrayBuffer が空）場合だけ
+        // 再試行する。ロード済みの場合に毎回 inc すると、編集中に 2 分ごとに
+        // 音源が勝手にリロードされてしまう（オーディオ再生が止まる事象）。
+        // 「他の人が初めて開いて track メタがまだ無い」シナリオは初回 sync の
+        // タイミングで未ロード状態のはずなので、この条件で必要な再試行はカバーできる。
+        const ab = audioArrayBufferRef.current;
+        if (!ab || ab.byteLength === 0) {
+          setAudioRetryKey(k => k + 1);
+        }
       };
       syncService.autoSyncOnOpen((result) => {
         if (result.added > 0 || result.updated > 0) reloadAfterSync();
