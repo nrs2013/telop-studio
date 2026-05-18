@@ -1694,6 +1694,11 @@ export const TimelineEditor = memo(function TimelineEditor({
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // IME 確定中（日本語入力の変換中）は Delete/Backspace/Ctrl+Z/Ctrl+A/Ctrl+C/Ctrl+V
+      // などのタイムライン側ショートカットを発火させない。確定エンターを打った瞬間に
+      // 選択中の歌詞ブロックが消える、変換途中で undo が走る等の事故を防ぐ。
+      // project.tsx の global keydown と同じガード。
+      if (e.isComposing || (e as any).keyCode === 229) return;
       const inInput = e.target && (e.target as HTMLElement).closest("input, textarea, select, [contenteditable]");
       if ((e.key === "Delete" || e.key === "Backspace") && !inInput) {
         if (creditBarSelectedRef.current) {

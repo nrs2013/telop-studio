@@ -32,7 +32,33 @@ let recordingActive = false;
 let autoSyncInterval: ReturnType<typeof setInterval> | null = null;
 let autoPushCallback: (() => void) | null = null;
 let isSyncing = false;
-const dirtyProjects = new Set<string>();
+
+// dirtyProjects は元々モジュール内メモリのみだったため、ユーザーが編集して 3 秒の
+// debounce が走っている間にタブを閉じると schedulePush が発火せず、次回起動時の
+// pull が server 側の古いデータでローカルを上書きしてしまう（編集消失）。
+// localStorage に永続化して、起動時に「未送信フラグの立っている project」を
+// 真っ先に push してから pull に入ることで穴を塞ぐ。
+const DIRTY_STORAGE_KEY = "telop-studio:dirtyProjects";
+function loadDirty(): Set<string> {
+  try {
+    const raw = typeof localStorage !== "undefined" ? localStorage.getItem(DIRTY_STORAGE_KEY) : null;
+    if (!raw) return new Set();
+    const arr = JSON.parse(raw);
+    if (!Array.isArray(arr)) return new Set();
+    return new Set(arr.filter((v) => typeof v === "string"));
+  } catch {
+    return new Set();
+  }
+}
+function persistDirty() {
+  try {
+    if (typeof localStorage === "undefined") return;
+    localStorage.setItem(DIRTY_STORAGE_KEY, JSON.stringify(Array.from(dirtyProjects)));
+  } catch {
+    // QuotaExceeded 等は無視。次回呼び出し時にもう一度試みる。
+  }
+}
+const dirtyProjects = loadDirty();
 
 const AUTO_PUSH_DELAY = 3000;
 const AUTO_SYNC_INTERVAL = 120000;
@@ -422,6 +448,7 @@ export const syncService = {
 
   markDirty(projectId: string) {
     dirtyProjects.add(projectId);
+    persistDirty();
   },
 
   isDirty(projectId: string): boolean {
@@ -430,6 +457,7 @@ export const syncService = {
 
   async immediatePush(projectId: string) {
     dirtyProjects.add(projectId);
+    persistDirty();
     if (autoPushTimer) clearTimeout(autoPushTimer);
     autoPushTimer = null;
     autoPushProjectId = null;
@@ -448,6 +476,7 @@ export const syncService = {
       if (!user || !navigator.onLine) return;
       await this.pushProject(projectId);
       dirtyProjects.delete(projectId);
+      persistDirty();
       console.log("[AutoSync] Immediate push completed for", projectId);
     } catch (err: any) {
       console.warn("[AutoSync] Immediate push failed:", err.message);
@@ -459,9 +488,11 @@ export const syncService = {
   schedulePush(projectId: string, onComplete?: () => void) {
     if (recordingActive) {
       dirtyProjects.add(projectId);
+      persistDirty();
       return;
     }
     dirtyProjects.add(projectId);
+    persistDirty();
     if (autoPushTimer) clearTimeout(autoPushTimer);
     autoPushProjectId = projectId;
     if (onComplete) autoPushCallback = onComplete;
@@ -480,6 +511,7 @@ export const syncService = {
         if (!user || !navigator.onLine) return;
         await this.pushProject(pid);
         dirtyProjects.delete(pid);
+        persistDirty();
         console.log("[AutoSync] Push completed for", pid);
         if (cb) cb();
       } catch (err: any) {
@@ -536,6 +568,7 @@ export const syncService = {
           try {
             await this.pushProject(pid);
             dirtyProjects.delete(pid);
+            persistDirty();
             console.log("[AutoSync] Periodic push for dirty project:", pid);
           } catch (e: any) {
             console.warn("[AutoSync] Periodic push failed for", pid, e.message);
@@ -568,6 +601,23 @@ export const syncService = {
       // ずっと溜まり続けるのを防ぐ。十分時間が経てば、別デバイスにも当該データの
       // ローカルコピーは残ってない想定。
       try { await storage.pruneOldDeletions(); } catch {}
+      // 前回セッションで schedulePush の debounce が flush されずに終了した
+      // プロジェクト（タブを即閉じた等）の救済。pull より先に push して
+      // ローカルの未送信編集を必ずサーバへ反映させる。dirty フラグは
+      // localStorage 永続化済みなのでクロスセッションで生き残っている。
+      if (dirtyProjects.size > 0) {
+        const pendingIds = Array.from(dirtyProjects);
+        console.log("[AutoSync] Flushing persisted dirty projects before initial pull:", pendingIds);
+        for (const pid of pendingIds) {
+          try {
+            await this.pushProject(pid);
+            dirtyProjects.delete(pid);
+            persistDirty();
+          } catch (e: any) {
+            console.warn("[AutoSync] Pending push failed for", pid, e.message);
+          }
+        }
+      }
       const result = await this.pullAndMergeToLocal();
       console.log("[AutoSync] Initial pull:", result);
       // Retroactive fix: push any projects that exist only in this browser's

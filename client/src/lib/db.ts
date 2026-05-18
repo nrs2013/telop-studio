@@ -137,6 +137,27 @@ export async function getDB(): Promise<IDBPDatabase<TelopDBSchema>> {
   if (dbInstance) return dbInstance;
 
   dbInstance = await openDB<TelopDBSchema>(DB_NAME, DB_VERSION, {
+    // 別タブのアプリ更新で IDB スキーマが上がった時、現タブの古い handle を
+    // 掴んだまま放置すると、その後の書き込みが silent に失敗してユーザーが
+    // 編集を「保存できたつもり」で消失する事象が起きる。
+    // - blocking: 自分が新版の起動をブロックしている時。即 close して別タブを通す。
+    // - blocked: 自分が新版を開こうとしたが他タブが古い handle で塞いでる時。
+    //            次回 getDB で再オープンするように null 化。
+    // - terminated: 何らかの理由（DevTools の Clear storage 等）で接続が
+    //               切れた時。同様に再オープンに任せる。
+    blocking() {
+      console.warn("[IDB] Another tab is upgrading the database. Closing current handle so it can proceed.");
+      try { dbInstance?.close(); } catch {}
+      dbInstance = null;
+    },
+    blocked() {
+      console.warn("[IDB] Database upgrade blocked by another tab. Will retry on next access.");
+      dbInstance = null;
+    },
+    terminated() {
+      console.warn("[IDB] Database connection terminated unexpectedly. Will reopen on next access.");
+      dbInstance = null;
+    },
     upgrade(db, oldVersion, _newVersion, transaction) {
       if (!db.objectStoreNames.contains("projects")) {
         const projectStore = db.createObjectStore("projects", { keyPath: "id" });

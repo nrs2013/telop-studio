@@ -4,6 +4,7 @@ import { createServer, type Server } from "http";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
+import crypto from "crypto";
 import { spawn, spawnSync } from "child_process";
 import archiver from "archiver";
 
@@ -511,12 +512,24 @@ export async function registerRoutes(
     };
   }>();
 
+  // セッションのオンディスク資産を一括で消す。session.dir 配下のフレームや
+  // 中間 webm/mov に加え、session.audioPath（multer の `dest` 指定により
+  // `uploads/audio_tmp/<random>` に書かれている＝session.dir の外）も
+  // 同じタイミングで掃除しないと、長期運用で audio_tmp に未使用ファイルが
+  // 溜まり続けてしまう。
+  function cleanupSession(sessionId: string | string[] | undefined, session: { dir: string; audioPath?: string }) {
+    try { fs.rmSync(session.dir, { recursive: true, force: true }); } catch {}
+    if (session.audioPath) {
+      try { fs.rmSync(session.audioPath, { force: true }); } catch {}
+    }
+    if (sessionId !== undefined) exportSessions.delete(String(sessionId));
+  }
+
   setInterval(() => {
     const now = Date.now();
     for (const [sid, session] of exportSessions) {
       if (now - session.createdAt > 10 * 60 * 1000) {
-        fs.rmSync(session.dir, { recursive: true, force: true });
-        exportSessions.delete(sid);
+        cleanupSession(sid, session);
       }
     }
   }, 60_000);
@@ -527,10 +540,16 @@ export async function registerRoutes(
   // subsequent POST would 404 with "Session not found" and the whole
   // export would fail. Here we rebuild the session on demand from the
   // on-disk directory so mid-flight exports survive a redeploy.
-  function getOrRevive(sessionId: string) {
-    let session = exportSessions.get(sessionId);
+  // Express 5 + middleware の組み合わせで `req.params.sessionId` の推論が
+  // `string | string[]` まで広がる箇所があるため、ここで一括して受け取り、
+  // 各ハンドラ側の型キャストを不要にする（不正値は exportSessions に存在せず
+  // undefined を返す挙動はそのまま）。
+  function getOrRevive(sessionId: string | string[] | undefined) {
+    if (sessionId === undefined) return undefined;
+    const sid = String(sessionId);
+    let session = exportSessions.get(sid);
     if (session) return session;
-    const dir = path.join(uploadDir, "export_sessions", sessionId);
+    const dir = path.join(uploadDir, "export_sessions", sid);
     if (!fs.existsSync(dir)) return undefined;
     const existingFrames = fs.readdirSync(dir).filter(f => /^frame_\d{6}\.(png|tga)$/.test(f));
     session = {
@@ -538,8 +557,8 @@ export async function registerRoutes(
       frameCount: existingFrames.length,
       createdAt: Date.now(),
     };
-    exportSessions.set(sessionId, session);
-    console.log(`[Export] Revived session ${sessionId} from disk (${existingFrames.length} frames).`);
+    exportSessions.set(sid, session);
+    console.log(`[Export] Revived session ${sid} from disk (${existingFrames.length} frames).`);
     return session;
   }
 
@@ -561,8 +580,12 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/export/session", async (_req, res) => {
-    const sessionId = `export_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  app.post("/api/export/session", requireAuth, async (_req, res) => {
+    // crypto.randomBytes で 128bit エントロピー。以前は `Math.random` の 6 文字
+    // (~31bit) しか無かったため、未認証で公開されていた頃は理論上ブルートフォース
+    // で他人の export ディレクトリを覗ける状態だった。auth ゲート追加と合わせて
+    // ID 自体も推測困難にする。
+    const sessionId = `export_${Date.now()}_${crypto.randomBytes(16).toString("hex")}`;
     const dir = path.join(uploadDir, "export_sessions", sessionId);
     fs.mkdirSync(dir, { recursive: true });
     exportSessions.set(sessionId, { dir, frameCount: 0, createdAt: Date.now() });
@@ -571,6 +594,7 @@ export async function registerRoutes(
 
   app.post(
     "/api/export/:sessionId/frames",
+    requireAuth,
     frameUpload.array("frames", 500),
     async (req, res) => {
       const session = getOrRevive(req.params.sessionId);
@@ -595,6 +619,7 @@ export async function registerRoutes(
 
   app.post(
     "/api/export/:sessionId/audio",
+    requireAuth,
     audioUpload.single("audio"),
     async (req, res) => {
       const session = getOrRevive(req.params.sessionId);
@@ -605,12 +630,15 @@ export async function registerRoutes(
     }
   );
 
-  app.post("/api/export/:sessionId/encode", async (req, res) => {
+  app.post("/api/export/:sessionId/encode", requireAuth, async (req, res) => {
     const session = getOrRevive(req.params.sessionId);
     if (!session) return res.status(404).json({ message: "Session not found" });
 
     const { fps = 30, audioBitrate = 64000, videoBitrate = "800K", segments, codec = "vp9", async: asyncMode } = req.body;
-    const fpsNum = parseInt(String(fps));
+    // 上限 120fps / 下限 1fps にクランプ。クライアントから fps=10000 のような値が
+    // 来ても ffmpeg を巻き込んだ OOM や暴走を防ぐ。
+    const fpsRaw = parseInt(String(fps));
+    const fpsNum = Number.isFinite(fpsRaw) ? Math.min(Math.max(fpsRaw, 1), 120) : 30;
     const isProRes = codec === "prores";
 
     const audioPath = session.audioPath || null;
@@ -891,11 +919,16 @@ export async function registerRoutes(
         } else {
           session.encodeStatus = "error";
           session.encodeError = "Output file not created";
+          // 出力が無い時点で何百MBの中間ファイル（フレーム/CFR symlink）が残るだけ
+          // なので、エラー側は早めに掃除する。10分後のインターバル掃除を待つと
+          // OOM 連発時にディスクが詰まる。
+          cleanupSession(req.params.sessionId, session);
         }
       }).catch((err) => {
         session.encodeStatus = "error";
         session.encodeError = err.message;
         console.error("[FFmpeg] Async encode error:", err.message);
+        cleanupSession(req.params.sessionId, session);
       });
       return;
     }
@@ -903,10 +936,12 @@ export async function registerRoutes(
     try {
       await runEncode();
     } catch (err: any) {
+      cleanupSession(req.params.sessionId, session);
       return res.status(500).json({ message: `Encode failed: ${err.message}` });
     }
 
     if (!fs.existsSync(outputPath)) {
+      cleanupSession(req.params.sessionId, session);
       return res.status(500).json({ message: "Output file not created" });
     }
 
@@ -923,12 +958,11 @@ export async function registerRoutes(
     stream.pipe(res);
 
     stream.on("close", () => {
-      fs.rmSync(session.dir, { recursive: true, force: true });
-      exportSessions.delete(req.params.sessionId);
+      cleanupSession(req.params.sessionId, session);
     });
   });
 
-  app.get("/api/export/:sessionId/status", (req, res) => {
+  app.get("/api/export/:sessionId/status", requireAuth, (req, res) => {
     const session = getOrRevive(req.params.sessionId);
     if (!session) return res.status(404).json({ message: "Session not found" });
     const status = session.encodeStatus || "idle";
@@ -942,7 +976,7 @@ export async function registerRoutes(
     res.json({ status, error, fileSize, progress: session.encodeProgress || null });
   });
 
-  app.get("/api/export/:sessionId/download", (req, res) => {
+  app.get("/api/export/:sessionId/download", requireAuth, (req, res) => {
     const session = getOrRevive(req.params.sessionId);
     if (!session) return res.status(404).json({ message: "Session not found" });
     if (session.encodeStatus !== "done" || !session.outputPath || !fs.existsSync(session.outputPath)) {
@@ -957,12 +991,12 @@ export async function registerRoutes(
     const stream = fs.createReadStream(session.outputPath);
     stream.pipe(res);
     stream.on("close", () => {
-      fs.rmSync(session.dir, { recursive: true, force: true });
-      exportSessions.delete(req.params.sessionId);
+      cleanupSession(req.params.sessionId, session);
     });
   });
 
   app.post("/api/export/webm-to-prores",
+    requireAuth,
     multer({ storage: multer.memoryStorage(), limits: { fileSize: 500 * 1024 * 1024 } }).fields([
       { name: "webm", maxCount: 1 },
       { name: "audio", maxCount: 1 },
@@ -1051,11 +1085,14 @@ export async function registerRoutes(
           session.encodeError = err.message;
         }
         console.error("[FFmpeg] ProRes encode error:", err.message);
+        // ProRes 失敗時の中間ファイル（入力 webm/音源/出力 mov の書きかけ）を即時掃除。
+        try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+        exportSessions.delete(sessionId);
       }
     }
   );
 
-  app.post("/api/export/zip-frames", frameUpload.array("frames", 100000), async (req, res) => {
+  app.post("/api/export/zip-frames", requireAuth, frameUpload.array("frames", 100000), async (req, res) => {
     const files = req.files as Express.Multer.File[];
     if (!files || files.length === 0) {
       return res.status(400).json({ message: "No frames" });
@@ -1099,7 +1136,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/dropbox/files", async (req, res) => {
+  app.get("/api/dropbox/files", requireAuth, async (req, res) => {
     try {
       const preset = req.query.preset as string | undefined;
       const files = await listDropboxFiles(preset || undefined);
@@ -1110,7 +1147,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/dropbox/browse", async (req, res) => {
+  app.get("/api/dropbox/browse", requireAuth, async (req, res) => {
     try {
       const folderPath = (req.query.path as string) || "";
       const entries = await browseDropboxFolder(folderPath);
@@ -1121,7 +1158,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/dropbox/search", async (req, res) => {
+  app.get("/api/dropbox/search", requireAuth, async (req, res) => {
     try {
       const query = (req.query.q as string) || "";
       if (!query.trim()) return res.json({ results: [] });
@@ -1133,7 +1170,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/dropbox/download", async (req, res) => {
+  app.get("/api/dropbox/download", requireAuth, async (req, res) => {
     const dropboxPath = req.query.path as string;
     const convertToMp3 = req.query.convert === "mp3";
     if (!dropboxPath) return res.status(400).json({ message: "path is required" });
@@ -1246,7 +1283,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/audio/convert-to-mp3", express.raw({ type: "*/*", limit: "200mb" }), async (req, res) => {
+  app.post("/api/audio/convert-to-mp3", requireAuth, express.raw({ type: "*/*", limit: "200mb" }), async (req, res) => {
     try {
       const inputBuffer = req.body as Buffer;
       if (!inputBuffer || inputBuffer.length === 0) return res.status(400).json({ message: "No audio data" });
@@ -1285,7 +1322,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/dropbox/diagnostic", async (req, res) => {
+  app.get("/api/dropbox/diagnostic", requireAuth, async (req, res) => {
     try {
       const result = await diagnoseDrpboxStructure();
       console.log('[Dropbox] Diagnostic result:', JSON.stringify(result, null, 2));
@@ -1317,7 +1354,7 @@ export async function registerRoutes(
   //     user to choose. `none` returns empty candidates.
   //   - NEVER silently pick one of multiple matches. NEVER fall back to
   //     substring matching. That is the whole point of this rewrite.
-  app.get("/api/dropbox/find", async (req, res) => {
+  app.get("/api/dropbox/find", requireAuth, async (req, res) => {
     try {
       const fileName = req.query.fileName as string;
       if (!fileName) return res.status(400).json({ message: "fileName is required" });
@@ -1407,7 +1444,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/dropbox/check-exists", async (req, res) => {
+  app.get("/api/dropbox/check-exists", requireAuth, async (req, res) => {
     try {
       const preset = (req.query.preset as string) || "other";
       const fileName = req.query.fileName as string;
@@ -1420,7 +1457,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/dropbox/delete", async (req, res) => {
+  app.post("/api/dropbox/delete", requireAuth, async (req, res) => {
     try {
       const { dropboxPath } = req.body;
       console.log("[Dropbox] Delete request received, path:", dropboxPath);
@@ -1438,7 +1475,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/dropbox/rename", async (req, res) => {
+  app.post("/api/dropbox/rename", requireAuth, async (req, res) => {
     try {
       const { fromPath, toPath } = req.body;
       if (!fromPath || !toPath || typeof fromPath !== "string" || typeof toPath !== "string") {
@@ -1457,7 +1494,7 @@ export async function registerRoutes(
     limits: { fileSize: 200 * 1024 * 1024 },
   });
 
-  app.post("/api/dropbox/upload", dropboxAudioUpload.single("audio"), async (req, res) => {
+  app.post("/api/dropbox/upload", requireAuth, dropboxAudioUpload.single("audio"), async (req, res) => {
     try {
       if (!req.file) return res.status(400).json({ message: "音声ファイルが必要です" });
       const preset = (req.body.preset as string) || "other";
@@ -1514,7 +1551,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/dropbox/upload-telop", express.json({ limit: "200mb" }), async (req, res) => {
+  app.post("/api/dropbox/upload-telop", requireAuth, express.json({ limit: "200mb" }), async (req, res) => {
     try {
       const { fileName, content, preset } = req.body;
       if (!fileName || !content) return res.status(400).json({ message: "fileName and content are required" });
@@ -1535,7 +1572,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/export/:sessionId/upload-to-dropbox", async (req, res) => {
+  app.post("/api/export/:sessionId/upload-to-dropbox", requireAuth, async (req, res) => {
     try {
       const session = getOrRevive(req.params.sessionId);
       if (!session) return res.status(404).json({ message: "Session not found" });
@@ -1586,8 +1623,7 @@ export async function registerRoutes(
         console.warn("[Dropbox] Failed to get temporary link:", e.message);
       }
 
-      fs.rmSync(session.dir, { recursive: true, force: true });
-      exportSessions.delete(req.params.sessionId);
+      cleanupSession(req.params.sessionId, session);
 
       console.log(`[Dropbox] ProRes uploaded: ${dropboxPath} (${fileBuffer.length} bytes)`);
       res.json({ dropboxPath, downloadUrl, size: fileBuffer.length });
@@ -1607,7 +1643,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/dropbox/oauth/start", (req, res) => {
+  app.get("/api/dropbox/oauth/start", requireAuth, (req, res) => {
     const appKey = process.env.DROPBOX_APP_KEY;
     if (!appKey) {
       return res.status(400).send("DROPBOX_APP_KEY is not set. Please add it to environment secrets.");
@@ -1673,7 +1709,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/dropbox/oauth/disconnect", async (_req, res) => {
+  app.post("/api/dropbox/oauth/disconnect", requireAuth, async (_req, res) => {
     try {
       await disconnectDropboxCustom();
       res.json({ success: true });
@@ -1682,7 +1718,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/dropbox/upload-movie", multer({ storage: multer.memoryStorage(), limits: { fileSize: 500 * 1024 * 1024 } }).single("movie"), async (req, res) => {
+  app.post("/api/dropbox/upload-movie", requireAuth, multer({ storage: multer.memoryStorage(), limits: { fileSize: 500 * 1024 * 1024 } }).single("movie"), async (req, res) => {
     try {
       if (!req.file) return res.status(400).json({ message: "動画ファイルが必要です" });
       const preset = (req.body.preset as string) || "other";
