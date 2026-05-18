@@ -2141,6 +2141,13 @@ export default function ProjectPage() {
                 const result = await tryDownload(resolvedDropboxPath);
                 ab = result.data;
                 lastStatus = result.status;
+                if (!ab) {
+                  console.warn(`[audio-load] Initial Dropbox download failed: path="${resolvedDropboxPath}" status=${lastStatus} (track.dropboxPath=${track.dropboxPath ? '"' + track.dropboxPath + '"' : 'null'}, track.fileName="${track.fileName}")`);
+                } else {
+                  console.log(`[audio-load] Downloaded OK: path="${resolvedDropboxPath}" bytes=${ab.byteLength}`);
+                }
+              } else {
+                console.warn(`[audio-load] No resolvedDropboxPath; track.fileName="${track.fileName}", project.preset="${projectRef.current?.preset}"`);
               }
 
               const isPathNotFound = !ab && (lastStatus === 500 || lastStatus === 404 || lastStatus === 409);
@@ -2267,9 +2274,13 @@ export default function ProjectPage() {
                 await storage.updateAudioTrackDropboxPath(trackId, finalPath);
                 // Push the new path to the server immediately so autoSync
                 // doesn't pull the stale server row back over our new link.
+                // immediatePush で確実に「サーバ側を先に正しい path に」しておく。
                 if (id) {
                   syncService.markDirty(id);
-                  syncService.schedulePush(id);
+                  syncService.immediatePush(id).catch((e) => {
+                    console.warn("[auto-link] immediatePush failed; falling back to schedulePush:", e);
+                    syncService.schedulePush(id);
+                  });
                 }
                 const blob = new Blob([ab], { type: "audio/mpeg" });
                 objectUrl = URL.createObjectURL(blob);
@@ -2331,7 +2342,14 @@ export default function ProjectPage() {
                           await storage.updateAudioTrackDropboxPath(trackId, candidatePath);
                           if (id) {
                             syncService.markDirty(id);
-                            syncService.schedulePush(id);
+                            // 即サーバ反映：schedulePush（3秒後）の間に autoSync が走ると
+                            // 古い path がローカルに降りてくるリスクがあるので、ここは
+                            // immediatePush で確実にサーバ側を先に書き換える。
+                            // fire-and-forget で UI 体験は阻害しない。
+                            syncService.immediatePush(id).catch((e) => {
+                              console.warn("[fuzzy-relink] immediatePush failed; falling back to schedulePush:", e);
+                              syncService.schedulePush(id);
+                            });
                           }
                           // 即座に再生できるよう URL も差し替える。
                           if (objectUrl) URL.revokeObjectURL(objectUrl);

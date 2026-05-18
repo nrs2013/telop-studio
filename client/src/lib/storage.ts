@@ -770,7 +770,21 @@ export const storage = {
       existing.label = trackMeta.label;
       existing.fileName = trackMeta.fileName;
       existing.mimeType = trackMeta.mimeType;
-      if (trackMeta.dropboxPath) existing.dropboxPath = trackMeta.dropboxPath;
+      // dropboxPath の上書き保護（リンク切れ事故対策）：
+      //   - ローカルに有効な path が無い／空 → サーバ値で初期化（OK）
+      //   - basename が同じ（ディレクトリ移動のみ）→ サーバ値で上書き（OK）
+      //   - basename が違う（race condition で壊れる典型ケース）→ 上書き拒否し、警告だけ残す
+      // これがないと、ローカルで「リンクし直す」をした直後の autoSync で、
+      // まだサーバ側に push が間に合っていない古い path が降ってきて壊される事故が起きる。
+      if (trackMeta.dropboxPath) {
+        const localBase = existing.dropboxPath ? existing.dropboxPath.replace(/^.*\//, "") : "";
+        const serverBase = trackMeta.dropboxPath.replace(/^.*\//, "");
+        if (!existing.dropboxPath || localBase === serverBase) {
+          existing.dropboxPath = trackMeta.dropboxPath;
+        } else {
+          console.warn(`[storage] dropboxPath basename mismatch — keeping local: "${existing.dropboxPath}" (server tried to set "${trackMeta.dropboxPath}")`);
+        }
+      }
       await db.put("audioTracks", existing);
     } else {
       const newTrack: TelopAudioTrack = {
