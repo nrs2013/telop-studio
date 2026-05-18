@@ -106,10 +106,15 @@ export function FullscreenPreview({ sourceCanvasRef, onClose, isPlaying, audioRe
       if (e.key === "Escape") {
         if (showStylePanel) setShowStylePanel(false);
         else onClose();
+        // 同じ ESC を別の window listener（project.tsx の global handler や
+        // 他の fullscreen overlay）に伝播させないよう、ここで止める。
+        // capture phase で先に呼ばれているので他の handler は実行されない。
+        e.stopImmediatePropagation();
       }
     };
-    window.addEventListener("keydown", handleKey);
-    return () => window.removeEventListener("keydown", handleKey);
+    // capture phase で登録することで、project.tsx の bubble listener より先に呼ばれる
+    window.addEventListener("keydown", handleKey, true);
+    return () => window.removeEventListener("keydown", handleKey, true);
   }, [onClose, showStylePanel]);
 
   const updateVisuals = useCallback((pct: number) => {

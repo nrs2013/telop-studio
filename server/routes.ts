@@ -38,6 +38,7 @@ import { serverStorage, verifyPassword, upgradePasswordIfNeeded } from "./storag
 import session from "express-session";
 import connectPgSimple from "connect-pg-simple";
 import pg from "pg";
+import rateLimit from "express-rate-limit";
 import { uploadToDropbox, downloadFromDropbox, downloadFromDropboxStream, listDropboxFiles, searchDropboxFiles, checkDropboxConnection, checkDropboxFileExists, deleteFromDropbox, renameInDropbox, getUncachableDropboxClient, getTeamDropboxClient, getDropboxAuthUrl, exchangeDropboxCode, disconnectDropboxCustom, getDropboxOAuthStatus, browseDropboxFolder, diagnoseDrpboxStructure } from "./dropbox";
 import { Readable } from "stream";
 import { findExactMatches, findFuzzyMatches, type DropboxEntry } from "./dropboxMatch";
@@ -168,6 +169,35 @@ export async function registerRoutes(
       sameSite: "lax",
     },
   }));
+
+  // ── Rate limiting ────────────────────────────────────────────────
+  // 認証系（login/register）はブルートフォース対策で厳しめに、
+  // 全 API は本番運用中のスパイクを許容しつつ DoS を防ぐ程度の上限に設定。
+  // standardHeaders: true で `RateLimit-*` ヘッダを返し、クライアントが残り回数を見られるようにする。
+  const authLimiter = rateLimit({
+    windowMs: 60 * 1000, // 1 分
+    max: 10, // 1 IP につき 1 分で 10 回まで
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { message: "リクエストが多すぎます。しばらくしてからやり直してください。" },
+  });
+  const registerLimiter = rateLimit({
+    windowMs: 60 * 60 * 1000, // 1 時間
+    max: 5, // 1 IP につき 1 時間で 5 回まで（量産アカウント防止）
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { message: "新規登録の試行が多すぎます。しばらくしてからやり直してください。" },
+  });
+  const apiLimiter = rateLimit({
+    windowMs: 60 * 1000, // 1 分
+    max: 300, // 通常の編集・同期用途で 300 req/min は余裕（本番運用テストを通過した値）
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { message: "リクエストが多すぎます。少し待ってからやり直してください。" },
+  });
+  app.use("/api/", apiLimiter);
+  app.use("/api/auth/login", authLimiter);
+  app.use("/api/auth/register", registerLimiter);
 
   app.post("/api/auth/register", async (req: Request, res: Response) => {
     const { username, password, displayName } = req.body;

@@ -71,15 +71,20 @@ app.use((req, res, next) => {
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
-    const message = err.message || "Internal Server Error";
-
     console.error("Internal Server Error:", err);
 
     if (res.headersSent) {
       return next(err);
     }
 
-    return res.status(status).json({ message });
+    // 本番では 5xx の内部メッセージをクライアントに漏らさない（情報リーク対策）。
+    // 4xx はバリデーションエラー等でユーザーへの表示が必要なのでそのまま返す。
+    const isProd = process.env.NODE_ENV === "production";
+    const exposedMessage = isProd && status >= 500
+      ? "Internal Server Error"
+      : (err.message || "Internal Server Error");
+
+    return res.status(status).json({ message: exposedMessage });
   });
 
   if (process.env.NODE_ENV === "production") {

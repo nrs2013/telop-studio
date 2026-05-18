@@ -222,6 +222,9 @@ export const TimelineEditor = memo(function TimelineEditor({
       setAudioDragOver(true);
     } else if (e.dataTransfer.types.includes("application/x-lyric-id") || e.dataTransfer.types.includes("application/x-credit-title")) {
       e.preventDefault();
+      // lyric/credit のドラッグ中も親側 listener にバブルすると、
+      // 親で別の dragover ハンドラが走って二重処理されるので止めておく
+      e.stopPropagation();
     }
   }, []);
 

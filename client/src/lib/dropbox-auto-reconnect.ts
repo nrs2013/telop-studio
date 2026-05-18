@@ -29,8 +29,10 @@ export async function triggerDropboxReconnect(): Promise<void> {
 
     if (!popup) {
       // ポップアップブロックされた場合は同タブ遷移にフォールバック
+      // 遷移が走るので resolve は呼ばれないが、万一遷移が CSP 等で失敗したケースに
+      // 備えて activeReconnectPromise を null に戻しておく（次回の dedupe が固まらないため）
+      activeReconnectPromise = null;
       window.location.href = "/api/dropbox/oauth/start";
-      // 遷移するので resolve は呼ばれない
       return;
     }
 

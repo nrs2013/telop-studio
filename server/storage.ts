@@ -5,7 +5,9 @@ import { eq } from "drizzle-orm";
 import crypto from "crypto";
 import bcrypt from "bcryptjs";
 
-const BCRYPT_ROUNDS = 10;
+// 新規ユーザーの bcrypt ラウンド数。12 ラウンドは 2025 年時点で OWASP 推奨水準（~250ms/hash）。
+// 既存ユーザーの古いハッシュ（sha256 や bcrypt rounds<12）はログイン成功時に裏で再ハッシュして昇格。
+const BCRYPT_ROUNDS = 12;
 
 // Legacy SHA256 hashing — kept for backward compatibility with existing user records.
 // All new passwords use bcrypt.
@@ -30,10 +32,24 @@ export async function verifyPassword(password: string, storedHash: string): Prom
   return false;
 }
 
-// Returns new bcrypt hash if the stored hash needs upgrading from sha256, otherwise null.
+// 既存ハッシュが古い形式（sha256 もしくは bcrypt の低ラウンド）なら、新しい bcrypt ハッシュを返す。
+// アップグレード不要なら null。呼び出し側はログイン成功直後に DB を更新する想定。
 export async function upgradePasswordIfNeeded(password: string, storedHash: string): Promise<string | null> {
-  if (storedHash && storedHash.startsWith("$2")) return null;
-  return hashPassword(password);
+  // sha256 など bcrypt 以外は必ず昇格
+  if (!storedHash || !storedHash.startsWith("$2")) {
+    return hashPassword(password);
+  }
+  // bcrypt だがラウンド数が現行の推奨より低い場合も昇格
+  try {
+    const currentRounds = bcrypt.getRounds(storedHash);
+    if (currentRounds < BCRYPT_ROUNDS) {
+      return hashPassword(password);
+    }
+  } catch {
+    // getRounds が失敗するような壊れたハッシュは念のため再ハッシュ
+    return hashPassword(password);
+  }
+  return null;
 }
 
 export const serverStorage = {

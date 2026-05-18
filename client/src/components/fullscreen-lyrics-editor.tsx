@@ -36,10 +36,17 @@ export function FullscreenLyricsEditor({ lyricsText, onLyricsChange, lyrics: _ly
 
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") {
+        // IME 確定中の ESC は IME 取り消しなので無視（textarea 入力中の誤発火防止）
+        if (e.isComposing || (e as any).keyCode === 229) return;
+        onClose();
+        // 他の window listener（project.tsx の global handler や preview overlay）に
+        // 伝播させない。capture phase で先に呼ばれているので他は実行されない。
+        e.stopImmediatePropagation();
+      }
     };
-    window.addEventListener("keydown", handleKey);
-    return () => window.removeEventListener("keydown", handleKey);
+    window.addEventListener("keydown", handleKey, true);
+    return () => window.removeEventListener("keydown", handleKey, true);
   }, [onClose]);
 
   useEffect(() => {

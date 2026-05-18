@@ -282,7 +282,11 @@ export const syncService = {
         // DELETE 自体は冪等（404 も OK 扱い）なので、何度投げても害はなく、
         // 次の autoSync で取りこぼし分は再投げされる。
         // ローカルへ再生成しない（ユーザー体験を守る）目的は continue だけで達成できる。
-        apiFetch(`/api/sync/projects/${sp.id}`, { method: "DELETE" }).catch(() => {});
+        apiFetch(`/api/sync/projects/${sp.id}`, { method: "DELETE" }).catch((err) => {
+          // 冪等な DELETE なので失敗は致命的ではないが、長期間取りこぼされ続けると
+          // 墓標が積み上がるので、debug ログだけは残しておく（次の autoSync で再投げ）
+          console.debug("[sync] tombstone re-delete failed (will retry next autoSync):", err);
+        });
         continue;
       }
       const localProject = await storage.getProject(sp.id);

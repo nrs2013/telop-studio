@@ -758,7 +758,12 @@ export default function Home() {
               return;
             }
             await storage.deleteProject(id);
-            try { await storage.recordDeletion(id); } catch {}
+            try { await storage.recordDeletion(id); } catch (err) {
+        // 墓標が残らないと、別デバイスから push で復活してくる可能性がある（過去のバグ）
+        // ローカル削除自体は成功しているのでユーザー体験は阻害しないが、
+        // 復活時の自動再削除（pull 時の墓標チェック）が効かなくなるので警告だけは残す
+        console.warn("[delete] recordDeletion failed (tombstone missing, may revive from other device):", err);
+      }
             setProjects(prev => prev.filter(p => p.id !== id));
             setFolders(prev => prev.map(f => ({ ...f, projectIds: f.projectIds.filter(pid => pid !== id) })));
           },

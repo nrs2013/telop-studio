@@ -1715,9 +1715,24 @@ export default function ProjectPage() {
   const handleDropboxOAuthConnect = useCallback(async () => {
     setDropboxOAuthConnecting(true);
     const popup = window.open("/api/dropbox/oauth/start", "dropbox-auth", "width=600,height=700");
+    if (!popup) {
+      setDropboxOAuthConnecting(false);
+      toast({ title: "ポップアップがブロックされました", description: "ブラウザの設定でポップアップを許可してください。", variant: "destructive" });
+      return;
+    }
+    // listener と timer の両方を一括 cleanup できるよう、互いに参照する形にする。
+    // 接続成功時と popup 閉鎖時、どちらの経路でも漏れなくクリーンアップする。
+    let timer: ReturnType<typeof setInterval> | null = null;
+    const cleanup = () => {
+      window.removeEventListener("message", listener);
+      if (timer !== null) {
+        clearInterval(timer);
+        timer = null;
+      }
+    };
     const listener = async (e: MessageEvent) => {
       if (e.data === "dropbox-connected") {
-        window.removeEventListener("message", listener);
+        cleanup();
         await fetchDropboxOAuthStatus();
         setDropboxOAuthConnecting(false);
         setDropboxOAuthDialogOpen(false);
@@ -1727,10 +1742,9 @@ export default function ProjectPage() {
       }
     };
     window.addEventListener("message", listener);
-    const timer = setInterval(() => {
-      if (popup?.closed) {
-        clearInterval(timer);
-        window.removeEventListener("message", listener);
+    timer = setInterval(() => {
+      if (popup.closed) {
+        cleanup();
         setDropboxOAuthConnecting(false);
       }
     }, 500);
@@ -2721,6 +2735,10 @@ export default function ProjectPage() {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // IME 確定中（日本語入力中）はショートカット系を全部スキップ。
+      // これがないと Space で再生トグルや Delete でマーカー削除が IME 確定時に走ってしまう。
+      if (e.isComposing || (e as any).keyCode === 229) return;
+
       const target = e.target as HTMLElement;
       const isTextInput = target.tagName === "TEXTAREA" || target.tagName === "SELECT" ||
         (target.tagName === "INPUT" && (target as HTMLInputElement).type !== "range") ||
@@ -2958,6 +2976,9 @@ export default function ProjectPage() {
 
   useEffect(() => {
     const handler = async (e: KeyboardEvent) => {
+      // IME 確定中の Cmd+Z などが undo を発火させないようガード。
+      if (e.isComposing || (e as any).keyCode === 229) return;
+
       const target = e.target as HTMLElement;
       const isTextInput = target.tagName === "TEXTAREA" || target.tagName === "SELECT" ||
         (target.tagName === "INPUT" && (target as HTMLInputElement).type !== "range") ||
