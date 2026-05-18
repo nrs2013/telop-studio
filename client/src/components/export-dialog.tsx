@@ -39,9 +39,12 @@ interface ExportDialogProps {
 // "server"          … 既存：WebM VP9 Alpha（テロップ部分自動クロップ・縦切り詰め）。
 // "server-fullframe"… 新規：WebM VP9 Alpha を 16:9 フル解像度（典型 1920x1080）で書き出す。
 //                     クロップしないので素材そのまま重ねたい用途で楽。
+// "server-fullframe-vfr" … 新規：上記の VFR 版。静止区間を「1 フレーム + 長 duration」にまとめ、
+//                          ファイル容量を 1/5〜1/10 にする狙い。VP9 のタイムスタンプベース VFR を使用。
+//                          再生互換性は CFR よりやや弱いので試作扱い。
 // "prores"          … 既存：ProRes 4444 自動クロップ版。Arena で Y 座標再配置が必要。
 // "prores-fullframe"… 既存：ProRes 4444 16:9 フル版。Arena に放り込むだけで OK。
-type ExportMode = "server" | "server-fullframe" | "prores" | "prores-fullframe" | "zip";
+type ExportMode = "server" | "server-fullframe" | "server-fullframe-vfr" | "prores" | "prores-fullframe" | "zip";
 
 
 
@@ -637,11 +640,14 @@ export function ExportDialog({
       setStatus("コンテンツ領域スキャン中...");
       setProgress(1);
 
-      // exportMode が "server-fullframe" のときは「16:9 フル解像度」運用なので、
+      // exportMode が "server-fullframe" / "server-fullframe-vfr" のときは「16:9 フル解像度」運用なので、
       // テキスト範囲の自動クロップ自体をスキップして、プロジェクト出力解像度のまま
       // エンコードする。VJ ソフトや既存の合成パイプラインに「素材を 16:9 そのままで」
       // 渡したい用途のための分岐。
-      const fullFrameMode = exportMode === "server-fullframe";
+      const fullFrameMode = exportMode === "server-fullframe" || exportMode === "server-fullframe-vfr";
+      // VFR モード：静止区間を 1 フレーム + 長 duration に圧縮して容量削減。
+      // サーバ側で concat demuxer + duration directive で VP9 にエンコードする。
+      const vfrMode = exportMode === "server-fullframe-vfr";
 
       let cropActive = false;
       let cropY = 0;
@@ -848,6 +854,8 @@ export function ExportDialog({
           audioBitrate,
           segments,
           async: true,
+          // VFR モード：concat demuxer + duration directive で VP9 に VFR エンコードを指示
+          vfrMode,
           cropY: cropActive ? cropY : -1,
           fullHeight: cropActive ? outputHeight : 0,
         }),
@@ -1574,6 +1582,7 @@ export function ExportDialog({
                   <SelectContent>
                     <SelectItem value="server">WebM VP9 Alpha (テロップ部分のみ・縦切り詰め)</SelectItem>
                     <SelectItem value="server-fullframe">WebM VP9 Alpha (16:9フル・アルファ付き)</SelectItem>
+                    <SelectItem value="server-fullframe-vfr">WebM VP9 Alpha (16:9フル・容量最適化/VFR・試作)</SelectItem>
                     <SelectItem value="prores">ProRes 4444 MOV (テロップ部分のみ・縦切り詰め)</SelectItem>
                     <SelectItem value="prores-fullframe">ProRes 4444 MOV (16:9フル・Resolume Arena用)</SelectItem>
                     <SelectItem value="zip">フレームパック ZIP (オフライン変換用)</SelectItem>

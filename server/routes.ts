@@ -609,9 +609,14 @@ export async function registerRoutes(
     const session = getOrRevive(req.params.sessionId);
     if (!session) return res.status(404).json({ message: "Session not found" });
 
-    const { fps = 30, audioBitrate = 64000, videoBitrate = "800K", segments, codec = "vp9", async: asyncMode } = req.body;
+    const { fps = 30, audioBitrate = 64000, videoBitrate = "800K", segments, codec = "vp9", async: asyncMode, vfrMode = false } = req.body;
     const fpsNum = parseInt(String(fps));
     const isProRes = codec === "prores";
+    // VFR モード：concat demuxer + duration directive で「変化のないフレームは 1 つ + 長 duration」
+    // でエンコード。CFR 展開と比べて容量を大幅削減できる代わりに、PNG alpha が strip される
+    // ことがあるので、出力後に verifyOutputAlpha で必ず検証する。
+    // ProRes は VFR を受け付けないので、ProRes 経路では強制的に CFR に戻す。
+    const useVfr = vfrMode === true && !isProRes;
 
     const audioPath = session.audioPath || null;
 
@@ -670,7 +675,41 @@ export async function registerRoutes(
     const reqCropY = parseInt(String(req.body.cropY || "0")) || 0;
     const reqFullHeight = parseInt(String(req.body.fullHeight || "0")) || 0;
 
-    if (segments && Array.isArray(segments) && segments.length > 0) {
+    if (segments && Array.isArray(segments) && segments.length > 0 && useVfr) {
+      // === VFR モード（試作） ===
+      // concat demuxer + duration directive を使い、変化のないフレームを「1 ファイル + 長 duration」
+      // で表現する。PNG concat demuxer は alpha を strip するという既知の問題があるため、
+      // 出力時に -vf format=yuva420p で強制復元 + -auto-alt-ref 0 で VP9 alt-ref 干渉を防ぐ。
+      // 出力後に verifyOutputAlpha で必ず alpha 保持を確認すること。
+      const manifestPath = path.join(session.dir, "vfr_manifest.txt");
+      const lines: string[] = [];
+      for (const seg of segments as { frame: number; duration: number }[]) {
+        const framePng = path.join(session.dir, `frame_${String(seg.frame).padStart(6, "0")}.png`);
+        if (!fs.existsSync(framePng)) continue;
+        // concat demuxer の仕様：相対パスは manifest からの相対 or 絶対パス。絶対で書く方が安全。
+        // file 名内のシングルクォートは \\\' でエスケープする必要があるが、frame_NNNNNN.png には
+        // クォートは出てこないのでそのまま。
+        lines.push(`file '${framePng.replace(/'/g, "'\\''")}'`);
+        // duration は秒単位（小数 6 桁）。最低 1/fpsNum 秒は確保。
+        const dur = Math.max(seg.duration, 1 / fpsNum);
+        lines.push(`duration ${dur.toFixed(6)}`);
+      }
+      // concat demuxer の仕様：最後のフレームを finalize するため、最後の file を再記述（duration なし）
+      if (lines.length >= 2) {
+        const lastFile = lines[lines.length - 2];
+        lines.push(lastFile);
+      }
+      fs.writeFileSync(manifestPath, lines.join("\n"), "utf8");
+      console.log(`[VFR Export] Wrote concat manifest with ${segments.length} segments to ${manifestPath}`);
+
+      ffmpegArgs = [
+        "-y",
+        "-f", "concat",
+        "-safe", "0",
+        "-i", manifestPath,
+      ];
+    } else if (segments && Array.isArray(segments) && segments.length > 0) {
+      // === CFR モード（既存・安定） ===
       // We used to feed these segments to ffmpeg's concat demuxer, but the
       // concat demuxer silently strips the alpha channel from PNG inputs,
       // which leaves VP9 to encode an RGB-only stream and loses transparency
@@ -787,9 +826,17 @@ export async function registerRoutes(
         "-auto-alt-ref", "0",
         "-crf", "30",
         "-b:v", "0",
-        "-r", String(fpsNum),
-        "-deadline", "good",
       );
+      if (useVfr) {
+        // VFR モード：concat demuxer の duration directive をそのまま VP9 のタイムスタンプに反映。
+        // -r を指定すると CFR に強制変換されてしまうので入れない。
+        // -fps_mode vfr で「入力 pts をそのまま出力に通す」挙動になる。
+        ffmpegArgs.push("-fps_mode", "vfr");
+        console.log("[FFmpeg] VFR mode enabled: -fps_mode vfr (no -r), output uses concat manifest timestamps");
+      } else {
+        ffmpegArgs.push("-r", String(fpsNum));
+      }
+      ffmpegArgs.push("-deadline", "good");
       if (isFullFrame) {
         // フルフレーム = 1920x1080 で yuva420p 出力 = 1フレーム約 3MB。
         // libvpx-vp9 の alpha-aware エンコーダは color と alpha の二系統を持つため
