@@ -34,6 +34,11 @@ let autoPushCallback: (() => void) | null = null;
 let isSyncing = false;
 const dirtyProjects = new Set<string>();
 
+// ローカル断絶モード：本番中に「サーバから何も降りてこない」状態を作る。
+// pull / push / autoSync を全部ブロックし、編集はローカルだけに留める。
+// 解除した瞬間に蓄積された dirty を一気に push する想定（手動）。
+let localOnlyMode = false;
+
 const AUTO_PUSH_DELAY = 3000;
 const AUTO_SYNC_INTERVAL = 120000;
 
@@ -88,7 +93,23 @@ export const syncService = {
     await apiFetch("/api/auth/logout", { method: "POST" });
   },
 
+  // ローカル断絶モードの切替。本番モードと連動して呼ばれる。
+  // on のとき：pull / push / autoSync を全部止める（dirty は溜める）。
+  // off のとき：すぐに溜まった dirty を flush（呼び出し側で schedulePush を回す想定）。
+  setLocalOnlyMode(on: boolean): void {
+    localOnlyMode = on;
+    console.log(`[sync] localOnlyMode = ${on ? "ON (本番断絶)" : "OFF"}`);
+  },
+  isLocalOnlyMode(): boolean {
+    return localOnlyMode;
+  },
+
   async pushProject(projectId: string): Promise<{ success: boolean; version?: number; message?: string }> {
+    if (localOnlyMode) {
+      // 本番モード中：dirty を記録だけして、サーバへは送らない
+      dirtyProjects.add(projectId);
+      return { success: false, message: "本番モード中はサーバ送信をスキップしました（ローカル保存済み）" };
+    }
     const project = await storage.getProject(projectId);
     if (!project) throw new Error("Project not found");
 
@@ -244,6 +265,10 @@ export const syncService = {
   },
 
   async pullAndMergeToLocal(): Promise<{ added: number; updated: number }> {
+    if (localOnlyMode) {
+      // 本番モード中：サーバから何も降ろさない（過去の編集を上書きされたくない）
+      return { added: 0, updated: 0 };
+    }
     const serverData = await this.pullAll();
     let added = 0;
     let updated = 0;

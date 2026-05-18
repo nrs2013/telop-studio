@@ -1,17 +1,18 @@
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Trash2, Music, FolderOpen, Upload, Cloud, CloudOff, Pencil, Copy, ChevronDown, ChevronRight, FolderPlus, ArrowUpDown, GripVertical, Undo2, Redo2, Link2, Unlink2 } from "lucide-react";
+import { Plus, Trash2, Music, FolderOpen, Upload, Cloud, CloudOff, Pencil, Copy, ChevronDown, ChevronRight, FolderPlus, ArrowUpDown, GripVertical, Undo2, Redo2, Link2, Unlink2, Pin, Tag, History } from "lucide-react";
 import type { Project } from "@shared/schema";
 import { storage } from "@/lib/storage";
 import { syncService } from "@/lib/syncService";
 import { homeUndoManager, useUndo } from "@/lib/undoManager";
 import { TS_DESIGN } from "@/lib/designTokens";
 import { safeSetItem } from "@/lib/safeStorage";
+import { useLiveMode } from "@/lib/liveMode";
 
 function formatDate(dateStr: string | null) {
   if (!dateStr) return "";
@@ -72,6 +73,56 @@ function loadFolders(): ConcertFolder[] {
     const raw = localStorage.getItem("telop-folders");
     return raw ? JSON.parse(raw) : [];
   } catch { return []; }
+}
+
+// ピン留め（一番上に出したい曲の id 集合）。サーバには上げず、デバイスごとに保持する。
+// 本番現場で「いま編集中の曲をすぐ見つけたい」需要に応える。
+function loadPinned(): Set<string> {
+  try {
+    const raw = localStorage.getItem("telop-pinned");
+    return raw ? new Set(JSON.parse(raw) as string[]) : new Set();
+  } catch { return new Set(); }
+}
+function savePinned(pinned: Set<string>) {
+  try { localStorage.setItem("telop-pinned", JSON.stringify(Array.from(pinned))); } catch {}
+}
+
+// タグ（曲ごとの自由ラベル）。localStorage で軽量に持つ。
+// 検索バーで `#タグ名` 形式で絞り込みできる。サーバ共有は今後の課題。
+function loadTags(): Record<string, string[]> {
+  try {
+    const raw = localStorage.getItem("telop-tags");
+    return raw ? JSON.parse(raw) : {};
+  } catch { return {}; }
+}
+function saveTags(tags: Record<string, string[]>) {
+  try { localStorage.setItem("telop-tags", JSON.stringify(tags)); } catch {}
+}
+
+// 自動スナップショット（曲リストの軽量バックアップ）。
+// 5 分ごとに「id + 名前 + preset + updatedAt」だけを記録し、過去 24 件（=2 時間分）保持。
+// 音源やタイミングデータは含めない（容量爆発を避けるため）が、
+// 「いつ何曲あったか／どの曲がいつ消えたか」を後で参照できるので、
+// 「気付いたら曲が消えてた」事故の原因追跡と心理的安全に効く。
+interface Snapshot {
+  ts: number;
+  items: Array<{ id: string; name: string; preset: string; updatedAt: string | null }>;
+}
+const SNAPSHOT_KEY = "telop-snapshots-v1";
+const SNAPSHOT_MAX = 24;
+function loadSnapshots(): Snapshot[] {
+  try {
+    const raw = localStorage.getItem(SNAPSHOT_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+function saveSnapshot(items: Snapshot["items"]) {
+  try {
+    const arr = loadSnapshots();
+    arr.unshift({ ts: Date.now(), items });
+    while (arr.length > SNAPSHOT_MAX) arr.pop();
+    localStorage.setItem(SNAPSHOT_KEY, JSON.stringify(arr));
+  } catch {}
 }
 
 function getJapaneseReading(name: string): string {
@@ -186,6 +237,57 @@ export default function Home() {
   const renameFolderInputRef = useRef<HTMLInputElement>(null);
   const [dragProjectId, setDragProjectId] = useState<string | null>(null);
   const [readingsMap, setReadingsMap] = useState<Record<string, string>>({});
+
+  // 検索クエリ。曲名の部分一致、`#tag` 形式でタグ検索もできる。
+  const [searchQuery, setSearchQuery] = useState("");
+  // ピン留め（一番上に表示したい曲の id 集合）
+  const [pinned, setPinned] = useState<Set<string>>(() => loadPinned());
+  // タグ（id ごとの文字列配列）
+  const [projectTagMap, setProjectTagMap] = useState<Record<string, string[]>>(() => loadTags());
+  // タグ編集 dialog の対象 project（null なら閉じている）
+  const [tagEditTarget, setTagEditTarget] = useState<Project | null>(null);
+  const [tagEditValue, setTagEditValue] = useState("");
+  // Cmd+? で開くホットキー一覧 dialog
+  const [hotkeyDialogOpen, setHotkeyDialogOpen] = useState(false);
+  // 本番モード（LIVE）：ON のとき削除・名前変更を全部ロック、サーバ同期も停止
+  const [liveMode, setLiveModeState] = useLiveMode();
+  // 自動スナップショット履歴 Dialog
+  const [snapshotDialogOpen, setSnapshotDialogOpen] = useState(false);
+  const [snapshotList, setSnapshotList] = useState<Snapshot[]>(() => loadSnapshots());
+
+  const togglePin = useCallback((id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setPinned(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      savePinned(next);
+      return next;
+    });
+  }, []);
+
+  const openTagEditor = useCallback((project: Project, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setTagEditTarget(project);
+    setTagEditValue((projectTagMap[project.id] || []).join(", "));
+  }, [projectTagMap]);
+
+  const commitTagEdit = useCallback(() => {
+    if (!tagEditTarget) return;
+    const tags = tagEditValue
+      .split(",")
+      .map(t => t.trim())
+      .filter(t => t.length > 0);
+    setProjectTagMap(prev => {
+      const next = { ...prev };
+      if (tags.length === 0) delete next[tagEditTarget.id];
+      else next[tagEditTarget.id] = tags;
+      saveTags(next);
+      return next;
+    });
+    setTagEditTarget(null);
+    setTagEditValue("");
+  }, [tagEditTarget, tagEditValue]);
 
   useEffect(() => {
     safeSetItem(
@@ -672,6 +774,14 @@ export default function Home() {
   };
 
   const deleteProject = useCallback(async (id: string) => {
+    if (liveMode) {
+      toast({
+        title: "🔴 本番モード中は削除できません",
+        description: "ヘッダーの LIVE ボタンを押して解除してから操作してください。",
+        variant: "destructive",
+      });
+      return;
+    }
     const target = projects.find(p => p.id === id);
     if (!target) return;
 
@@ -952,8 +1062,36 @@ export default function Home() {
     if (changed) setFolders(cleaned);
   }, [projects]);
 
+  // 5 分ごとの軽量スナップショット。本番中の「気づいたら消えてた」事故の追跡用。
+  useEffect(() => {
+    if (projects.length === 0) return;
+    const takeSnapshot = () => {
+      const items = projects.map(p => ({
+        id: p.id,
+        name: p.name,
+        preset: p.preset || "other",
+        updatedAt: p.updatedAt || null,
+      }));
+      saveSnapshot(items);
+      setSnapshotList(loadSnapshots());
+    };
+    // 最初の起動から 5 分後に最初のスナップ。以降 5 分ごと。
+    const id = setInterval(takeSnapshot, 5 * 60 * 1000);
+    return () => clearInterval(id);
+  }, [projects]);
+
   useEffect(() => {
     const handler = async (e: KeyboardEvent) => {
+      // IME 確定中の Cmd+Z などが undo を発火させないようガード
+      if (e.isComposing || (e as any).keyCode === 229) return;
+
+      // Cmd+/ または Cmd+? でホットキー一覧を開く（入力欄にいても可能）
+      if ((e.ctrlKey || e.metaKey) && (e.key === "/" || e.key === "?")) {
+        e.preventDefault();
+        setHotkeyDialogOpen(prev => !prev);
+        return;
+      }
+
       const target = e.target as HTMLElement;
       const isTextInput = target.tagName === "TEXTAREA" || target.tagName === "SELECT" ||
         (target.tagName === "INPUT" && !["range", "checkbox", "radio", "button"].includes((target as HTMLInputElement).type)) ||
@@ -974,8 +1112,20 @@ export default function Home() {
     return () => window.removeEventListener("keydown", handler);
   }, [undo, redo, toast]);
 
+  // 検索フィルタ：`#tag` でタグ検索、それ以外は曲名部分一致（大文字小文字無視）
+  const filteredProjects = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return projects;
+    if (q.startsWith("#")) {
+      const tagQ = q.slice(1);
+      if (!tagQ) return projects;
+      return projects.filter(p => (projectTagMap[p.id] || []).some(t => t.toLowerCase().includes(tagQ)));
+    }
+    return projects.filter(p => p.name.toLowerCase().includes(q));
+  }, [projects, searchQuery, projectTagMap]);
+
   const groupedProjects = COLUMNS.map((col) => {
-    const colProjects = projects.filter((p) => {
+    const colProjects = filteredProjects.filter((p) => {
       const preset = p.preset || "other";
       if (col.key === "other") {
         return preset !== "sakurazaka" && preset !== "hinatazaka";
@@ -983,11 +1133,15 @@ export default function Home() {
       return preset === col.key;
     });
     const colFolders = folders.filter(f => f.preset === col.key);
+    const sorted = sortProjects(colProjects);
+    // ピン留めされた曲は最上段にまとめる（並び順は元のソート順をキープ）
+    const pinnedList = sorted.filter(p => pinned.has(p.id));
+    const restList = sorted.filter(p => !pinned.has(p.id));
     return {
       ...col,
       projects: colProjects,
       folders: colFolders,
-      allProjectsSorted: sortProjects(colProjects),
+      allProjectsSorted: [...pinnedList, ...restList],
     };
   });
 
@@ -1047,16 +1201,51 @@ export default function Home() {
         )}
       </div>
       <div className="shrink-0 flex items-center gap-0.5">
+        {/* タグ chip（最大 2 個まで横に並べる。本番中の絞り込み用） */}
+        {(projectTagMap[project.id] || []).slice(0, 2).map((t) => (
+          <span
+            key={t}
+            className="shrink-0 px-1 rounded text-[8px] font-mono uppercase tracking-wider"
+            style={{ backgroundColor: TS_DESIGN.bg2, color: TS_DESIGN.text2, lineHeight: "14px" }}
+            onClick={(e) => { e.stopPropagation(); setSearchQuery(`#${t}`); }}
+            title={`「${t}」で絞り込み`}
+          >
+            {t}
+          </span>
+        ))}
+        {/* ピン留め：押すと一番上に来る。ピン中は常時表示、未ピンは hover 表示 */}
+        <Button
+          size="icon"
+          variant="ghost"
+          className={`shrink-0 w-5 h-5 ${pinned.has(project.id) ? "" : "invisible group-hover:visible"}`}
+          onClick={(e) => togglePin(project.id, e)}
+          data-testid={`button-pin-project-${project.id}`}
+          title={pinned.has(project.id) ? "ピンを外す" : "一番上にピン留め"}
+        >
+          <Pin className="w-2.5 h-2.5" style={{ color: pinned.has(project.id) ? col.color : TS_DESIGN.text2, fill: pinned.has(project.id) ? col.color : "none" }} />
+        </Button>
+        {/* タグ編集：dialog を開く */}
+        <Button
+          size="icon"
+          variant="ghost"
+          className="shrink-0 w-5 h-5 invisible group-hover:visible"
+          onClick={(e) => openTagEditor(project, e)}
+          data-testid={`button-tag-project-${project.id}`}
+          title="タグを編集"
+        >
+          <Tag className="w-2.5 h-2.5" style={{ color: TS_DESIGN.text2 }} />
+        </Button>
         {inFolder && (
           <Button
             size="icon"
             variant="ghost"
             className="shrink-0 w-5 h-5 invisible group-hover:visible"
+            disabled={liveMode}
             onClick={(e) => {
               e.stopPropagation();
               removeProjectFromFolder(inFolder.folderId, project.id);
             }}
-            title="フォルダから外す"
+            title={liveMode ? "本番モード中は変更できません" : "フォルダから外す"}
           >
             <FolderOpen className="w-2.5 h-2.5" style={{ color: TS_DESIGN.text2 }} />
           </Button>
@@ -1065,9 +1254,10 @@ export default function Home() {
           size="icon"
           variant="ghost"
           className="shrink-0 w-5 h-5 invisible group-hover:visible"
+          disabled={liveMode}
           onClick={(e) => startRename(project, e)}
           data-testid={`button-rename-project-${project.id}`}
-          title="名前を変更"
+          title={liveMode ? "本番モード中は変更できません" : "名前を変更"}
         >
           <Pencil className="w-2.5 h-2.5" style={{ color: TS_DESIGN.text2 }} />
         </Button>
@@ -1075,9 +1265,10 @@ export default function Home() {
           size="icon"
           variant="ghost"
           className="shrink-0 w-5 h-5 invisible group-hover:visible"
+          disabled={liveMode}
           onClick={(e) => duplicateProject(project, e)}
           data-testid={`button-copy-project-${project.id}`}
-          title="コピーを作成"
+          title={liveMode ? "本番モード中は変更できません" : "コピーを作成"}
         >
           <Copy className="w-2.5 h-2.5" style={{ color: TS_DESIGN.text2 }} />
         </Button>
@@ -1085,12 +1276,13 @@ export default function Home() {
           size="icon"
           variant="ghost"
           className="shrink-0 w-5 h-5 invisible group-hover:visible"
+          disabled={liveMode}
           onClick={(e) => {
             e.stopPropagation();
             deleteProject(project.id);
           }}
           data-testid={`button-delete-project-${project.id}`}
-          title="削除"
+          title={liveMode ? "本番モード中は削除できません" : "削除"}
         >
           <Trash2 className="w-2.5 h-2.5 text-destructive" />
         </Button>
@@ -1197,6 +1389,57 @@ export default function Home() {
             data-testid="input-column-telop-file"
           />
           <div className="flex items-center gap-2 flex-wrap">
+            {/* 曲名検索：通常は曲名の部分一致、先頭 `#` を付けるとタグ検索（例: `#完成`） */}
+            <Input
+              placeholder="曲名 / #タグ"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="h-7 text-xs"
+              style={{ width: 180 }}
+              data-testid="input-search-projects"
+            />
+            <Button
+              size="icon"
+              variant="ghost"
+              className="w-7 h-7"
+              onClick={() => setHotkeyDialogOpen(true)}
+              title="ホットキー一覧 (Cmd+/)"
+              data-testid="button-hotkey-help"
+            >
+              <span style={{ fontSize: 11, fontWeight: 700 }}>?</span>
+            </Button>
+            <Button
+              size="icon"
+              variant="ghost"
+              className="w-7 h-7"
+              onClick={() => { setSnapshotList(loadSnapshots()); setSnapshotDialogOpen(true); }}
+              title="バックアップ履歴（5 分ごとに自動保存）"
+              data-testid="button-snapshot-history"
+            >
+              <History className="w-3.5 h-3.5" />
+            </Button>
+            {/* 本番モード（LIVE）トグル：削除ロック + サーバ同期停止を一括で */}
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 px-2 text-[10px] font-mono font-bold tracking-widest"
+              style={liveMode
+                ? { backgroundColor: TS_DESIGN.errorRed, color: "#fff", border: `1px solid ${TS_DESIGN.errorRed}` }
+                : { color: TS_DESIGN.text2, border: `1px solid ${TS_DESIGN.border}` }}
+              onClick={() => {
+                if (liveMode) {
+                  setLiveModeState(false);
+                  toast({ title: "本番モード OFF", description: "削除・編集と、サーバ同期を再開します。" });
+                } else {
+                  setLiveModeState(true);
+                  toast({ title: "🔴 本番モード ON", description: "削除・編集系の操作と、サーバ同期を一時停止しました。" });
+                }
+              }}
+              title={liveMode ? "本番モード解除（同期再開）" : "本番モード ON（誤操作と同期をブロック）"}
+              data-testid="button-live-mode"
+            >
+              {liveMode ? "● LIVE" : "LIVE"}
+            </Button>
             <div className="flex items-center gap-0.5 mr-2">
               <Button
                 size="icon"
@@ -1406,6 +1649,105 @@ export default function Home() {
               </DialogContent>
             );
           })()}
+        </Dialog>
+
+        {/* タグ編集 Dialog（カンマ区切りで複数タグ） */}
+        <Dialog open={tagEditTarget !== null} onOpenChange={(open) => { if (!open) { setTagEditTarget(null); setTagEditValue(""); } }}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>タグを編集</DialogTitle>
+              <DialogDescription>
+                曲「{tagEditTarget?.name}」のタグをカンマ区切りで入力（例：松山公演, 完成, アンコール）。
+                空にすると全タグを削除します。検索バーで <code>#完成</code> のように絞り込みできます。
+              </DialogDescription>
+            </DialogHeader>
+            <form onSubmit={(e) => { e.preventDefault(); commitTagEdit(); }} className="flex flex-col gap-3 mt-2">
+              <Input
+                autoFocus
+                value={tagEditValue}
+                onChange={(e) => setTagEditValue(e.target.value)}
+                placeholder="例: 完成, 松山公演, アンコール"
+                className="text-sm"
+                data-testid="input-tag-edit"
+              />
+              <div className="flex justify-end gap-2">
+                <Button type="button" variant="ghost" onClick={() => { setTagEditTarget(null); setTagEditValue(""); }} data-testid="button-tag-cancel">キャンセル</Button>
+                <Button type="submit" data-testid="button-tag-save">保存</Button>
+              </div>
+            </form>
+          </DialogContent>
+        </Dialog>
+
+        {/* 自動バックアップ履歴 Dialog */}
+        <Dialog open={snapshotDialogOpen} onOpenChange={setSnapshotDialogOpen}>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>自動バックアップ履歴</DialogTitle>
+              <DialogDescription>
+                5 分ごとに曲リストを軽量に記録（過去 2 時間分まで）。「気づいたら曲が消えてた」事故の追跡用。
+                ※ 音源やタイミングデータは含まれません（参照用）。
+              </DialogDescription>
+            </DialogHeader>
+            <div className="mt-2 max-h-[60vh] overflow-y-auto" style={{ scrollbarWidth: "thin" }}>
+              {snapshotList.length === 0 ? (
+                <p className="text-xs" style={{ color: TS_DESIGN.text3 }}>
+                  まだ履歴がありません（最初の記録まで 5 分かかります）。
+                </p>
+              ) : (
+                <table className="w-full text-xs" style={{ color: TS_DESIGN.text2 }}>
+                  <thead>
+                    <tr style={{ color: TS_DESIGN.text3, borderBottom: `1px solid ${TS_DESIGN.border}` }}>
+                      <th className="text-left py-1 font-normal">時刻</th>
+                      <th className="text-right py-1 font-normal">曲数</th>
+                      <th className="text-left py-1 pl-3 font-normal">いまと比べて消えた曲</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {snapshotList.map((s) => {
+                      const currentIds = new Set(projects.map(p => p.id));
+                      const lost = s.items.filter(i => !currentIds.has(i.id));
+                      return (
+                        <tr key={s.ts} style={{ borderBottom: `1px solid ${TS_DESIGN.border}` }}>
+                          <td className="py-1 font-mono">{new Date(s.ts).toLocaleString("ja-JP")}</td>
+                          <td className="py-1 text-right font-mono">{s.items.length}</td>
+                          <td className="py-1 pl-3" style={{ color: lost.length > 0 ? TS_DESIGN.errorRed : TS_DESIGN.text3 }}>
+                            {lost.length === 0
+                              ? "—"
+                              : `${lost.length} 曲: ${lost.slice(0, 3).map(l => l.name).join(", ")}${lost.length > 3 ? " …" : ""}`}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* ホットキー一覧 Dialog（Cmd+/ または ? ボタンで開く） */}
+        <Dialog open={hotkeyDialogOpen} onOpenChange={setHotkeyDialogOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>ホットキー一覧</DialogTitle>
+              <DialogDescription>本番現場でよく使うキー操作です。</DialogDescription>
+            </DialogHeader>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 mt-2 text-xs" style={{ color: TS_DESIGN.text2 }}>
+              <div style={{ fontWeight: 700, color: TS_DESIGN.text, gridColumn: "1 / -1", marginTop: 4 }}>＝ホーム画面＝</div>
+              <div className="flex justify-between"><span>曲名 / タグ検索</span><kbd className="font-mono">入力欄をクリック</kbd></div>
+              <div className="flex justify-between"><span>ホットキー一覧</span><kbd className="font-mono">Cmd + /</kbd></div>
+              <div className="flex justify-between"><span>元に戻す / やり直し</span><kbd className="font-mono">Cmd + Z / Shift+Z</kbd></div>
+              <div className="flex justify-between"><span>タグ絞り込み</span><kbd className="font-mono">#タグ名</kbd></div>
+
+              <div style={{ fontWeight: 700, color: TS_DESIGN.text, gridColumn: "1 / -1", marginTop: 8 }}>＝編集画面＝</div>
+              <div className="flex justify-between"><span>再生 / 一時停止</span><kbd className="font-mono">Space</kbd></div>
+              <div className="flex justify-between"><span>前 / 次の曲</span><kbd className="font-mono">[ / ]</kbd></div>
+              <div className="flex justify-between"><span>マーカー追加</span><kbd className="font-mono">M</kbd></div>
+              <div className="flex justify-between"><span>選択削除</span><kbd className="font-mono">Cmd + X</kbd></div>
+              <div className="flex justify-between"><span>1 小節進む / 戻る</span><kbd className="font-mono">→ / ←</kbd></div>
+              <div className="flex justify-between"><span>タイミングカット</span><kbd className="font-mono">Cmd + X (選択時)</kbd></div>
+            </div>
+          </DialogContent>
         </Dialog>
       </div>
 

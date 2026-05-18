@@ -177,9 +177,12 @@ import {
   HardDrive,
   Link2,
   Unlink2,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { formatTime } from "@/lib/formatTime";
 import { drawTextWithRuby } from "@/lib/rubyParser";
+import { useLiveMode } from "@/lib/liveMode";
 import { TimelineEditor } from "@/components/timeline-editor";
 import { syncService } from "@/lib/syncService";
 import { ExportDialog } from "@/components/export-dialog";
@@ -403,6 +406,15 @@ export default function ProjectPage() {
   const [, navigate] = useLocation();
   const { toast, dismiss: dismissToast } = useToast();
   const { undo, redo, canUndo, canRedo, push: pushUndo, clear: clearUndo, undoDescription, redoDescription } = useUndo(projectUndoManager);
+
+  // セットリスト内の前後曲ナビゲーション。同じ preset を「兄弟曲」として扱い、
+  // home.tsx と同じソート順（あいうえお順 or 作成日順）で並べて前/次を出す。
+  const [siblings, setSiblings] = useState<{ id: string; name: string }[]>([]);
+  const [siblingIndex, setSiblingIndex] = useState<number>(-1);
+
+  // 本番モード（LIVE）：home から ON にしたものを project でも検知。
+  // ON のときヘッダーに赤バナーを出し、サーバ同期は syncService 側で自動停止する。
+  const [liveMode, setLiveModeState] = useLiveMode();
 
   // プロジェクト切替（id 変更）の度に、前のプロジェクトで出した古いトーストを
   // 全部消す。これがないと、TOAST_LIMIT = 1 + 自動消去ほぼ無限の組み合わせで、
@@ -628,6 +640,63 @@ export default function ProjectPage() {
 
   const [project, setProject] = useState<Project | undefined>();
   const [projectLoading, setProjectLoading] = useState(true);
+
+  // 兄弟曲（同じ preset の全曲）リストを home と同じソート順で取得。
+  // 前/次曲ナビゲーションのために、現在曲の idx も持っておく。
+  useEffect(() => {
+    if (!id || !project) return;
+    let cancelled = false;
+    (async () => {
+      const all = await storage.getProjects();
+      if (cancelled) return;
+      const myPreset = project.preset || "other";
+      const sameKind = all.filter(p => {
+        const pre = p.preset || "other";
+        // SAKURAZAKA / HINATAZAKA は厳密一致、OTHER はその他全部をまとめる（home.tsx と同じロジック）
+        if (myPreset === "sakurazaka" || myPreset === "hinatazaka") return pre === myPreset;
+        return pre !== "sakurazaka" && pre !== "hinatazaka";
+      });
+      const sortMode = (localStorage.getItem("telop-sort-mode") as "name" | "date") || "name";
+      if (sortMode === "name") {
+        sameKind.sort((a, b) => (a.name || "").localeCompare(b.name || "", "ja"));
+      } else {
+        sameKind.sort((a, b) => new Date(b.createdAt || "").getTime() - new Date(a.createdAt || "").getTime());
+      }
+      const idx = sameKind.findIndex(p => p.id === id);
+      setSiblings(sameKind.map(p => ({ id: p.id, name: p.name })));
+      setSiblingIndex(idx);
+    })();
+    return () => { cancelled = true; };
+  }, [id, project?.preset]);
+
+  const navigateToSibling = useCallback((offset: number) => {
+    if (siblingIndex < 0 || siblings.length === 0) return;
+    const newIdx = siblingIndex + offset;
+    if (newIdx < 0 || newIdx >= siblings.length) return;
+    navigate(`/project/${siblings[newIdx].id}`);
+  }, [siblings, siblingIndex, navigate]);
+
+  // キーボード [ / ] で前/次曲ナビゲーション。テキスト入力中・IME 中は無視。
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.isComposing || (e as any).keyCode === 229) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const target = e.target as HTMLElement;
+      const isTextInput = target.tagName === "TEXTAREA" || target.tagName === "SELECT" ||
+        (target.tagName === "INPUT" && (target as HTMLInputElement).type !== "range") ||
+        !!target.closest("[contenteditable]");
+      if (isTextInput) return;
+      if (e.key === "[") {
+        e.preventDefault();
+        navigateToSibling(-1);
+      } else if (e.key === "]") {
+        e.preventDefault();
+        navigateToSibling(1);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [navigateToSibling]);
 
   useEffect(() => {
     if (!id) return;
@@ -4531,6 +4600,51 @@ export default function ProjectPage() {
         <div className="flex items-center gap-2.5 min-w-0 overflow-hidden" style={{ flex: "1 1 50%", maxWidth: "50%" }}>
           <Button tabIndex={-1} size="icon" variant="ghost" onClick={() => navigate("/")} data-testid="button-back" className="shrink-0">
             <ArrowLeft className="w-4 h-4" />
+          </Button>
+          {/* 前 / 次曲ナビゲーション。本番進行中にワンタップで隣の曲へ */}
+          <Button
+            tabIndex={-1}
+            size="icon"
+            variant="ghost"
+            onClick={() => navigateToSibling(-1)}
+            disabled={siblingIndex <= 0}
+            data-testid="button-prev-song"
+            className="shrink-0"
+            title={`前の曲 [ ${siblingIndex > 0 ? siblings[siblingIndex - 1]?.name : ""}`.trim()}
+          >
+            <ChevronLeft className="w-4 h-4" />
+          </Button>
+          <Button
+            tabIndex={-1}
+            size="icon"
+            variant="ghost"
+            onClick={() => navigateToSibling(1)}
+            disabled={siblingIndex < 0 || siblingIndex >= siblings.length - 1}
+            data-testid="button-next-song"
+            className="shrink-0"
+            title={`次の曲 ] ${siblingIndex >= 0 && siblingIndex < siblings.length - 1 ? siblings[siblingIndex + 1]?.name : ""}`.trim()}
+          >
+            <ChevronRight className="w-4 h-4" />
+          </Button>
+          {siblings.length > 0 && siblingIndex >= 0 && (
+            <span className="shrink-0 text-[9px] font-mono opacity-70" style={{ color: "hsl(0 0% 60%)" }}>
+              {siblingIndex + 1}/{siblings.length}
+            </span>
+          )}
+          {/* 本番モードインジケータ：押すと OFF にできる */}
+          <Button
+            tabIndex={-1}
+            size="sm"
+            variant="ghost"
+            className="shrink-0 h-6 px-2 text-[9px] font-mono font-bold tracking-widest"
+            style={liveMode
+              ? { backgroundColor: "hsl(0 70% 50%)", color: "#fff" }
+              : { color: "hsl(0 0% 55%)", border: "1px solid hsl(0 0% 25%)" }}
+            onClick={() => setLiveModeState(!liveMode)}
+            title={liveMode ? "本番モード解除（同期再開）" : "本番モード ON（同期一時停止）"}
+            data-testid="button-live-mode-project"
+          >
+            {liveMode ? "● LIVE" : "LIVE"}
           </Button>
           <div className="w-px h-5 shrink-0" style={{ backgroundColor: "hsl(0 0% 18%)" }} />
           <span className="shrink-0 text-center flex flex-col items-center justify-center" style={{ color: "hsl(48 100% 50%)", lineHeight: "1.15" }}>
