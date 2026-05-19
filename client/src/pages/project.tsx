@@ -183,6 +183,7 @@ import {
 import { formatTime } from "@/lib/formatTime";
 import { drawTextWithRuby } from "@/lib/rubyParser";
 import { useLiveMode } from "@/lib/liveMode";
+import { pushRecentProject } from "@/lib/recentProjects";
 import { TimelineEditor } from "@/components/timeline-editor";
 import { syncService } from "@/lib/syncService";
 import { ExportDialog } from "@/components/export-dialog";
@@ -700,6 +701,8 @@ export default function ProjectPage() {
 
   useEffect(() => {
     if (!id) return;
+    // 最近開いた曲履歴に記録（prefetch の優先対象になる）
+    pushRecentProject(id);
     clearUndo();
     setProjectLoading(true);
     storage.getProject(id).then(async (p) => {

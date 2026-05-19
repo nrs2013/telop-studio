@@ -13,6 +13,7 @@ import { homeUndoManager, useUndo } from "@/lib/undoManager";
 import { TS_DESIGN } from "@/lib/designTokens";
 import { safeSetItem } from "@/lib/safeStorage";
 import { useLiveMode } from "@/lib/liveMode";
+import { schedulePrefetchAudios } from "@/lib/prefetchAudio";
 
 function formatDate(dateStr: string | null) {
   if (!dateStr) return "";
@@ -1061,6 +1062,13 @@ export default function Home() {
     });
     if (changed) setFolders(cleaned);
   }, [projects]);
+
+  // 起動後にバックグラウンドで「ピン留め + 最近開いた 10 曲」の音源を事前ダウンロード。
+  // これがあると、本番現場で曲をクリックした瞬間に開ける（毎回 Dropbox download 待ちにならない）。
+  // 失敗は silent、本番モード（LIVE）中は実行しない方針は prefetchAudio.ts 側で処理。
+  useEffect(() => {
+    schedulePrefetchAudios();
+  }, []);
 
   // 5 分ごとの軽量スナップショット。本番中の「気づいたら消えてた」事故の追跡用。
   useEffect(() => {
