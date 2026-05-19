@@ -417,12 +417,13 @@ export default function ProjectPage() {
   // ON のときヘッダーに赤バナーを出し、サーバ同期は syncService 側で自動停止する。
   const [liveMode, setLiveModeState] = useLiveMode();
 
-  // fuzzy 候補が複数あったとき、トーストではなく Dialog でクリック選択させる。
-  // 「ヘッダーの TEAM/MDB から選び直し」の手動 UX を改善するための新規追加。
+  // fuzzy 候補が複数 / 同名複数 (ambiguous) のとき、トーストではなく Dialog でクリック選択させる。
+  // toast は本番中に dismiss すると復元手段がなくなる弱点があったので、必ず明示確認させる。
   const [fuzzyChoiceDialog, setFuzzyChoiceDialog] = useState<{
     trackId: string;
     attemptedName: string;
     suggestions: { path: string; name?: string; size?: number; source?: string }[];
+    mode: "fuzzy" | "ambiguous"; // ambiguous は「同名の音源が複数」、fuzzy は「似た名前の候補」
   } | null>(null);
 
   // 1 つの候補パスにリンクし直す処理。fuzzy choice Dialog の各候補ボタンと、
@@ -446,6 +447,8 @@ export default function ProjectPage() {
       }
       await storage.updateAudioTrackBlob(trackId, ab);
       await storage.updateAudioTrackDropboxPath(trackId, candidatePath);
+      // autoSync race 対策：60 秒間この track への upsert を skip させる
+      syncService.markTrackTouched(trackId);
       if (id) {
         syncService.markDirty(id);
         syncService.immediatePush(id).catch((e) => {
@@ -2322,6 +2325,8 @@ export default function ProjectPage() {
                 // Unique auto-link successful.
                 await storage.updateAudioTrackBlob(trackId, ab);
                 await storage.updateAudioTrackDropboxPath(trackId, finalPath);
+                // autoSync race 対策：60 秒間この track への upsert を skip させる
+                syncService.markTrackTouched(trackId);
                 // Push the new path to the server immediately so autoSync
                 // doesn't pull the stale server row back over our new link.
                 // immediatePush で確実に「サーバ側を先に正しい path に」しておく。
@@ -2345,12 +2350,13 @@ export default function ProjectPage() {
               } else if (ambiguousHit) {
                 // Multiple Dropbox files share this name. Refuse to pick one
                 // automatically — that was the source of the April 2026
-                // wrong-link incident. Prompt the user to disambiguate.
-                const preview = ambiguousHit.candidates.slice(0, 3).map((c: any) => c.path).join("\n");
-                toast({
-                  title: "同名の音源が複数あります",
-                  description: `「${ambiguousHit.attemptedName}」に一致するファイルが Dropbox に ${ambiguousHit.candidates.length} 件あります。自動でリンクはしません。ヘッダーの「Dropboxから選ぶ」から正しい曲を手動で選んでください。\n\n候補:\n${preview}${ambiguousHit.candidates.length > 3 ? "\n..." : ""}`,
-                  variant: "destructive",
+                // wrong-link incident. Prompt the user via Dialog (not toast)
+                // since toast can be dismissed mid-show and leave the track unrecoverable.
+                setFuzzyChoiceDialog({
+                  trackId,
+                  attemptedName: ambiguousHit.attemptedName,
+                  suggestions: ambiguousHit.candidates,
+                  mode: "ambiguous",
                 });
               } else if (fuzzyHit) {
                 // 完全一致は無いが、似たファイルが見つかった。
@@ -2363,6 +2369,7 @@ export default function ProjectPage() {
                     trackId,
                     attemptedName: fuzzyHit.attemptedName,
                     suggestions: fuzzyHit.suggestions,
+                    mode: "fuzzy",
                   });
                   return;
                 }
@@ -2395,6 +2402,8 @@ export default function ProjectPage() {
                           // 同じ候補を辿る必要なく一発で開ける。
                           await storage.updateAudioTrackBlob(trackId, dl.data);
                           await storage.updateAudioTrackDropboxPath(trackId, candidatePath);
+                          // autoSync race 対策：60 秒間この track への upsert を skip させる
+                          syncService.markTrackTouched(trackId);
                           if (id) {
                             syncService.markDirty(id);
                             // 即サーバ反映：schedulePush（3秒後）の間に autoSync が走ると
@@ -4669,15 +4678,22 @@ export default function ProjectPage() {
         data-testid="input-audio-file"
       />
 
-      {/* Fuzzy 候補（複数件）から選ぶ Dialog。
-          1 件のときはトーストにアクションボタン、2 件以上のときはこちらで一覧表示する。 */}
+      {/* Fuzzy / ambiguous 候補から選ぶ Dialog。
+          - mode="fuzzy": 似た名前のファイルが複数。完全一致無し。
+          - mode="ambiguous": 同名のファイルが Dropbox に複数（位置違い）。
+          どちらも誤マッチ防止のため自動リンクは絶対せず、ここでユーザーに明示選択させる。 */}
       <Dialog open={fuzzyChoiceDialog !== null} onOpenChange={(o) => { if (!o) setFuzzyChoiceDialog(null); }}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>音源の候補を選んでください</DialogTitle>
+            <DialogTitle>
+              {fuzzyChoiceDialog?.mode === "ambiguous"
+                ? "同名の音源が複数あります"
+                : "音源の候補を選んでください"}
+            </DialogTitle>
             <DialogDescription>
-              「{fuzzyChoiceDialog?.attemptedName}」と完全一致するファイルが Dropbox に見つかりませんでした。
-              下の候補から正しいものをクリックすると、その場でリンクし直し・サーバへ反映します。
+              {fuzzyChoiceDialog?.mode === "ambiguous"
+                ? `「${fuzzyChoiceDialog?.attemptedName}」と同じ名前のファイルが Dropbox に複数あります。正しい場所のファイルをクリックしてください。`
+                : `「${fuzzyChoiceDialog?.attemptedName}」と完全一致するファイルが見つかりませんでした。下の候補から正しいものをクリックすると、その場でリンクし直し・サーバへ反映します。`}
             </DialogDescription>
           </DialogHeader>
           <div className="flex flex-col gap-1 max-h-[60vh] overflow-y-auto" style={{ scrollbarWidth: "thin" }}>

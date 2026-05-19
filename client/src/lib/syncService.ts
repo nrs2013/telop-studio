@@ -39,6 +39,15 @@ const dirtyProjects = new Set<string>();
 // 解除した瞬間に蓄積された dirty を一気に push する想定（手動）。
 let localOnlyMode = false;
 
+// 「relink 直後の autoSync race」対策：
+// クライアントが曲の dropboxPath を書き換えて immediatePush した直後、
+// もしまだサーバ側の処理が終わっていなければ、次の autoSync pull が古い path を
+// 降ろしてきてローカルを上書き → 復元が消える、という事故が起きていた。
+// このマップに「いつローカルで track を触ったか」を記録し、TOUCH_PROTECTION_MS 以内に
+// touch された track は autoSync の upsert から外す。これで race を物理的に塞ぐ。
+const recentlyTouchedTracks = new Map<string, number>();
+const TOUCH_PROTECTION_MS = 60 * 1000;
+
 const AUTO_PUSH_DELAY = 3000;
 const AUTO_SYNC_INTERVAL = 120000;
 
@@ -102,6 +111,21 @@ export const syncService = {
   },
   isLocalOnlyMode(): boolean {
     return localOnlyMode;
+  },
+
+  // クライアント側で audio track を書き換えた瞬間に呼ぶ。
+  // 60 秒間は autoSync の upsert からこの track を除外し、relink が race で消えるのを防ぐ。
+  markTrackTouched(trackId: string): void {
+    recentlyTouchedTracks.set(trackId, Date.now());
+  },
+  isTrackRecentlyTouched(trackId: string): boolean {
+    const t = recentlyTouchedTracks.get(trackId);
+    if (!t) return false;
+    if (Date.now() - t > TOUCH_PROTECTION_MS) {
+      recentlyTouchedTracks.delete(trackId);
+      return false;
+    }
+    return true;
   },
 
   async pushProject(projectId: string): Promise<{ success: boolean; version?: number; message?: string }> {
@@ -416,6 +440,13 @@ export const syncService = {
       const serverAudioTracks = serverData.audioTracks[sp.id] || [];
       if (!dirtyProjects.has(sp.id)) {
         for (const sat of serverAudioTracks) {
+          // relink race 対策：直近 60 秒でローカルから書き換えた track は、
+          // サーバ側がまだ最新値を返していない可能性が高いので upsert をスキップ。
+          // ローカルの新しい dropboxPath を保護する。
+          if (this.isTrackRecentlyTouched(sat.id)) {
+            console.log(`[autoSync] Skipping upsert for recently-touched track: ${sat.id}`);
+            continue;
+          }
           await storage.upsertAudioTrackMeta({
             id: sat.id,
             projectId: sp.id,

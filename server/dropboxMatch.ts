@@ -138,7 +138,9 @@ function isSignificantToken(t: string): boolean {
  *   - MIN_SCORE 未満の候補は捨てる（無関係な雑音候補を除外）
  *   - 同点時は entry name の短い方を優先（ノイズの少ない名前を上位に）
  */
-const MIN_FUZZY_SCORE = 0.4;
+// 半分以上の意味のあるトークンが一致しないと候補に出さない。
+// 0.4 でも誤候補が出ることが確認されたため 0.5 に引き上げ。
+const MIN_FUZZY_SCORE = 0.5;
 
 export function findFuzzyMatches(
   query: string,

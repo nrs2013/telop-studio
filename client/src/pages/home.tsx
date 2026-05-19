@@ -2,7 +2,7 @@ import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { Plus, Trash2, Music, FolderOpen, Upload, Cloud, CloudOff, Pencil, Copy, ChevronDown, ChevronRight, FolderPlus, ArrowUpDown, GripVertical, Undo2, Redo2, Link2, Unlink2, Pin, Tag, History } from "lucide-react";
@@ -14,6 +14,8 @@ import { TS_DESIGN } from "@/lib/designTokens";
 import { safeSetItem } from "@/lib/safeStorage";
 import { useLiveMode } from "@/lib/liveMode";
 import { schedulePrefetchAudios } from "@/lib/prefetchAudio";
+import { runBulkRelink, type BulkRelinkProgress, type BulkRelinkResult } from "@/lib/audioBulkRelink";
+import { Wrench } from "lucide-react";
 
 function formatDate(dateStr: string | null) {
   if (!dateStr) return "";
@@ -255,6 +257,41 @@ export default function Home() {
   // 自動スナップショット履歴 Dialog
   const [snapshotDialogOpen, setSnapshotDialogOpen] = useState(false);
   const [snapshotList, setSnapshotList] = useState<Snapshot[]>(() => loadSnapshots());
+
+  // 全曲リンク復元（bulk relink）
+  const [bulkRelinkDialogOpen, setBulkRelinkDialogOpen] = useState(false);
+  const [bulkRelinkProgress, setBulkRelinkProgress] = useState<BulkRelinkProgress | null>(null);
+  const [bulkRelinkResult, setBulkRelinkResult] = useState<BulkRelinkResult | null>(null);
+  const bulkRelinkAbortRef = useRef<AbortController | null>(null);
+
+  const startBulkRelink = useCallback(async () => {
+    if (bulkRelinkProgress && !bulkRelinkResult) return; // 既に実行中
+    setBulkRelinkResult(null);
+    setBulkRelinkProgress({ total: 0, done: 0, alreadyOk: 0, autoRelinked: 0, needsManual: 0, noMatch: 0, error: 0, currentName: null });
+    setBulkRelinkDialogOpen(true);
+    const ac = new AbortController();
+    bulkRelinkAbortRef.current = ac;
+    try {
+      const result = await runBulkRelink({
+        signal: ac.signal,
+        onProgress: (p) => setBulkRelinkProgress({ ...p }),
+      });
+      setBulkRelinkResult(result);
+      toast({
+        title: result.cancelled ? "リンク復元を中止しました" : "リンク復元が完了しました",
+        description: `自動復元 ${result.autoRelinked} 曲 / 既に OK ${result.alreadyOk} 曲 / 手動要 ${result.needsManual} 曲 / Dropbox に無 ${result.noMatch} 曲 / エラー ${result.error} 曲`,
+      });
+    } catch (e: any) {
+      toast({ title: "リンク復元でエラー", description: e?.message || String(e), variant: "destructive" });
+      setBulkRelinkResult(null);
+    } finally {
+      bulkRelinkAbortRef.current = null;
+    }
+  }, [bulkRelinkProgress, bulkRelinkResult, toast]);
+
+  const cancelBulkRelink = useCallback(() => {
+    bulkRelinkAbortRef.current?.abort();
+  }, []);
 
   const togglePin = useCallback((id: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -1426,6 +1463,17 @@ export default function Home() {
             >
               <History className="w-3.5 h-3.5" />
             </Button>
+            {/* 全曲リンク復元：path 切れの曲を一括 fuzzy 修復（exact match のみ自動、fuzzy/ambiguous は skip） */}
+            <Button
+              size="icon"
+              variant="ghost"
+              className="w-7 h-7"
+              onClick={startBulkRelink}
+              title="全曲リンク復元（Dropbox 上の正しい音源を一括で再リンク）"
+              data-testid="button-bulk-relink"
+            >
+              <Wrench className="w-3.5 h-3.5" />
+            </Button>
             {/* 本番モード（LIVE）トグル：削除ロック + サーバ同期停止を一括で */}
             <Button
               size="sm"
@@ -1683,6 +1731,55 @@ export default function Home() {
                 <Button type="submit" data-testid="button-tag-save">保存</Button>
               </div>
             </form>
+          </DialogContent>
+        </Dialog>
+
+        {/* 全曲リンク復元 Dialog（進捗 + 完了サマリー） */}
+        <Dialog open={bulkRelinkDialogOpen} onOpenChange={(o) => {
+          // 実行中はバックドロップクリックで閉じさせない（cancel ボタンを必ず使わせる）
+          if (!o && bulkRelinkProgress && !bulkRelinkResult) return;
+          setBulkRelinkDialogOpen(o);
+          if (!o) { setBulkRelinkProgress(null); setBulkRelinkResult(null); }
+        }}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>全曲リンク復元</DialogTitle>
+              <DialogDescription>
+                path 切れの曲を Dropbox から自動的に再リンクします。完全一致だけ自動、似た名前の候補がある曲は次回開いたとき Dialog で選んでください。
+              </DialogDescription>
+            </DialogHeader>
+            {bulkRelinkProgress && (
+              <div className="mt-2 flex flex-col gap-2 text-xs" style={{ color: TS_DESIGN.text2 }}>
+                <div className="flex justify-between">
+                  <span>進捗</span>
+                  <span className="font-mono">{bulkRelinkProgress.done} / {bulkRelinkProgress.total}</span>
+                </div>
+                <div className="w-full h-1.5 rounded overflow-hidden" style={{ backgroundColor: TS_DESIGN.bg2 }}>
+                  <div className="h-full" style={{ backgroundColor: TS_DESIGN.accent, width: `${bulkRelinkProgress.total > 0 ? (bulkRelinkProgress.done / bulkRelinkProgress.total) * 100 : 0}%`, transition: "width .2s" }} />
+                </div>
+                {bulkRelinkProgress.currentName && (
+                  <div className="truncate opacity-70">処理中: {bulkRelinkProgress.currentName}</div>
+                )}
+                <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 mt-2 text-[11px]">
+                  <div className="flex justify-between"><span style={{ color: TS_DESIGN.okGreen }}>既に OK</span><span className="font-mono">{bulkRelinkProgress.alreadyOk}</span></div>
+                  <div className="flex justify-between"><span style={{ color: TS_DESIGN.okGreen }}>自動復元</span><span className="font-mono">{bulkRelinkProgress.autoRelinked}</span></div>
+                  <div className="flex justify-between"><span style={{ color: "hsl(45 80% 60%)" }}>手動要</span><span className="font-mono">{bulkRelinkProgress.needsManual}</span></div>
+                  <div className="flex justify-between"><span style={{ color: TS_DESIGN.errorRed }}>Dropbox 無</span><span className="font-mono">{bulkRelinkProgress.noMatch}</span></div>
+                  <div className="flex justify-between"><span style={{ color: TS_DESIGN.errorRed }}>エラー</span><span className="font-mono">{bulkRelinkProgress.error}</span></div>
+                </div>
+              </div>
+            )}
+            <DialogFooter>
+              {bulkRelinkResult ? (
+                <Button onClick={() => { setBulkRelinkDialogOpen(false); setBulkRelinkProgress(null); setBulkRelinkResult(null); }} data-testid="button-bulk-relink-close">
+                  閉じる
+                </Button>
+              ) : (
+                <Button variant="ghost" onClick={cancelBulkRelink} data-testid="button-bulk-relink-cancel">
+                  中止
+                </Button>
+              )}
+            </DialogFooter>
           </DialogContent>
         </Dialog>
 
