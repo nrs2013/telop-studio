@@ -103,25 +103,51 @@ export function tokenizeForFuzzy(name: string): string[] {
 }
 
 /**
+ * "意味のある（significant）" トークンの判定：
+ *   - 純粋な数字単体（"3", "44k16" の中の "3" 単独）は除外。バージョン尾や _3 等のサフィックスで
+ *     関係ない曲とマッチしてしまうため。
+ *   - 2 文字以下の短すぎる token も除外（"v", "ft" 等の補助語が誤マッチを起こす）。
+ *   - 漢字・ひらがな・カタカナを含む token は短くても残す（日本語の「あ」など 1 文字でも意味語）。
+ *
+ * これで「ANTHEM TIME ドローン旋回中v.3」を検索したときに、
+ * 「確信的クロワッサン_3」「Second Jump_44k16_3」が末尾「3」だけで誤候補化する事故を防ぐ。
+ */
+function isSignificantToken(t: string): boolean {
+  if (!t) return false;
+  // 数字のみは捨てる（曲のバージョン尾やトラック番号は識別子としては弱すぎる）
+  if (/^\d+$/.test(t)) return false;
+  // CJK（漢字・ひらがな・カタカナ）を含むなら短くても意味語として保持
+  if (/[぀-ヿ一-鿿]/.test(t)) return true;
+  // ASCII / ラテン文字は 3 文字以上ないと識別力が弱い
+  return t.length >= 3;
+}
+
+/**
  * Find fuzzy candidates for `query` among `entries` when the strict
  * matcher returns nothing. Returns up to `maxResults` entries scored
- * by token overlap.
+ * by significant-token overlap.
  *
  * Important: this is intended for SUGGESTING candidates to the user,
  * not for auto-linking. The caller MUST present these as choices and
  * never silently link to one. (See the historical OPENING/DXTEEN_OPENING
  * substring incident — that's why exact match owns the auto-link path.)
  *
- * Scoring rule: token-level overlap with a small bonus for shared
- * 3+ char substrings. Stable tie-break by entry.name length so shorter
- * (less noisy) names sort first when scores tie.
+ * Scoring rule:
+ *   - significant tokens のみで token-level overlap を計算
+ *   - score = matched / significantQueryTokens.length
+ *   - MIN_SCORE 未満の候補は捨てる（無関係な雑音候補を除外）
+ *   - 同点時は entry name の短い方を優先（ノイズの少ない名前を上位に）
  */
+const MIN_FUZZY_SCORE = 0.4;
+
 export function findFuzzyMatches(
   query: string,
   entries: DropboxEntry[],
   maxResults: number = 8
 ): DropboxEntry[] {
-  const queryTokens = tokenizeForFuzzy(query);
+  const rawQueryTokens = tokenizeForFuzzy(query);
+  const queryTokens = rawQueryTokens.filter(isSignificantToken);
+  // 意味のある token がゼロ（数字とバージョン記号しかない query）→ fuzzy 不可
   if (queryTokens.length === 0) return [];
 
   type Scored = { entry: DropboxEntry; score: number; matched: number };
@@ -131,7 +157,8 @@ export function findFuzzyMatches(
   for (const e of entries) {
     if (!e || !e.name || !e.path) continue;
     if (seenPath.has(e.path)) continue;
-    const entryTokens = tokenizeForFuzzy(e.name);
+    const rawEntryTokens = tokenizeForFuzzy(e.name);
+    const entryTokens = rawEntryTokens.filter(isSignificantToken);
     if (entryTokens.length === 0) continue;
     let matched = 0;
     for (const qt of queryTokens) {
@@ -147,8 +174,9 @@ export function findFuzzyMatches(
       }
     }
     if (matched === 0) continue;
-    // Score = ratio of query tokens hit. Caps at 1.0.
+    // Score = ratio of significant query tokens hit. Caps at 1.0.
     const score = matched / queryTokens.length;
+    if (score < MIN_FUZZY_SCORE) continue; // 関係薄い候補を除外
     scored.push({ entry: e, score, matched });
     seenPath.add(e.path);
   }

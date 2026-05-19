@@ -417,6 +417,53 @@ export default function ProjectPage() {
   // ON のときヘッダーに赤バナーを出し、サーバ同期は syncService 側で自動停止する。
   const [liveMode, setLiveModeState] = useLiveMode();
 
+  // fuzzy 候補が複数あったとき、トーストではなく Dialog でクリック選択させる。
+  // 「ヘッダーの TEAM/MDB から選び直し」の手動 UX を改善するための新規追加。
+  const [fuzzyChoiceDialog, setFuzzyChoiceDialog] = useState<{
+    trackId: string;
+    attemptedName: string;
+    suggestions: { path: string; name?: string; size?: number; source?: string }[];
+  } | null>(null);
+
+  // 1 つの候補パスにリンクし直す処理。fuzzy choice Dialog の各候補ボタンと、
+  // 単一候補トーストの「これでリンクし直す」ボタンから呼ばれる共通ロジック。
+  const relinkAudioToPath = useCallback(async (trackId: string, candidatePath: string) => {
+    try {
+      const ext = candidatePath.split(".").pop()?.toLowerCase() || "";
+      const needsConvert = ext !== "mp3" && ["wav", "m4a", "aac", "ogg", "flac", "wma", "aiff"].includes(ext);
+      const url = needsConvert
+        ? `/api/dropbox/download?path=${encodeURIComponent(candidatePath)}&convert=mp3`
+        : `/api/dropbox/download?path=${encodeURIComponent(candidatePath)}`;
+      const res = await fetchDropbox(url);
+      if (!res.ok) {
+        toast({ title: "リンクし直しに失敗しました", description: `候補ファイルのダウンロードに失敗（status=${res.status}）。`, variant: "destructive" });
+        return;
+      }
+      const ab = await res.arrayBuffer();
+      if (!ab || ab.byteLength === 0) {
+        toast({ title: "リンクし直しに失敗しました", description: "候補ファイルが空でした。", variant: "destructive" });
+        return;
+      }
+      await storage.updateAudioTrackBlob(trackId, ab);
+      await storage.updateAudioTrackDropboxPath(trackId, candidatePath);
+      if (id) {
+        syncService.markDirty(id);
+        syncService.immediatePush(id).catch((e) => {
+          console.warn("[fuzzy-dialog] immediatePush failed; falling back to schedulePush:", e);
+          syncService.schedulePush(id);
+        });
+      }
+      const blob = new Blob([ab], { type: "audio/mpeg" });
+      const newUrl = URL.createObjectURL(blob);
+      // 既存の audioUrl があれば revoke してから差し替え（メモリリーク防止）
+      setAudioUrl((prev) => { if (prev) try { URL.revokeObjectURL(prev); } catch {} return newUrl; });
+      setAudioArrayBuffer(ab);
+      toast({ title: "リンクし直しました", description: candidatePath });
+    } catch (e: any) {
+      toast({ title: "リンクし直しに失敗しました", description: e?.message || "想定外のエラー", variant: "destructive" });
+    }
+  }, [id, toast]);
+
   // プロジェクト切替（id 変更）の度に、前のプロジェクトで出した古いトーストを
   // 全部消す。これがないと、TOAST_LIMIT = 1 + 自動消去ほぼ無限の組み合わせで、
   // 別プロジェクトの「リンクし直しました」「音源が見つかりません」等のトーストが
@@ -2307,18 +2354,23 @@ export default function ProjectPage() {
                 });
               } else if (fuzzyHit) {
                 // 完全一致は無いが、似たファイルが見つかった。
-                // 自動リンクはしない（誤マッチ防止：2026-04 アンセムタイム事象）。
-                // ただし候補が「ちょうど 1 件」の場合は、ワンクリックでリンクし直せる
-                // ボタンをトーストに足して、操作の手間を最小化する。
-                // クリックで保存された結果（dropboxPath）はサーバーへも push されるので、
-                // 一度誰かが直せば他のユーザーは何もしなくても次回から開ける。
+                // - 1 件のみ → トースト + 「これでリンクし直す」ワンクリック確定
+                // - 2 件以上 → Dialog で全候補をクリック選択できる UX に
+                //   （以前は「ヘッダーの TEAM/MDB から選び直し」と手動誘導していたが、
+                //    操作が遠回りすぎたので Dialog に統一）
+                if (fuzzyHit.suggestions.length >= 2) {
+                  setFuzzyChoiceDialog({
+                    trackId,
+                    attemptedName: fuzzyHit.attemptedName,
+                    suggestions: fuzzyHit.suggestions,
+                  });
+                  return;
+                }
                 const preview = fuzzyHit.suggestions.slice(0, 5).map((c: any) => c.path).join("\n");
                 const onlyOne = fuzzyHit.suggestions.length === 1;
                 const candidatePath: string | null = onlyOne ? (fuzzyHit.suggestions[0].path || null) : null;
 
-                const description = onlyOne
-                  ? `「${fuzzyHit.attemptedName}」と完全一致は見つかりませんでした。Dropbox 側で名前変更や移動があった可能性があります。\n\n候補（1 件）:\n${preview}\n\n下の「これでリンクし直す」を押すと、この候補で自動リンクします。違う場合は、ヘッダーの「TEAM」または「MDB」から手動で選んでください。`
-                  : `「${fuzzyHit.attemptedName}」と完全一致は見つかりませんでした。Dropbox 側で名前変更や移動があった可能性があります。\n\n候補（${fuzzyHit.suggestions.length} 件）:\n${preview}${fuzzyHit.suggestions.length > 5 ? "\n..." : ""}\n\nヘッダーの「TEAM」または「MDB」ボタンから正しいファイルを選び直してください。`;
+                const description = `「${fuzzyHit.attemptedName}」と完全一致は見つかりませんでした。Dropbox 側で名前変更や移動があった可能性があります。\n\n候補（1 件）:\n${preview}\n\n下の「これでリンクし直す」を押すと、この候補で自動リンクします。違う場合は、ヘッダーの「TEAM」または「MDB」から手動で選んでください。`;
 
                 let actionElement: React.ReactElement | undefined;
                 if (onlyOne && candidatePath) {
@@ -4616,6 +4668,46 @@ export default function ProjectPage() {
         }}
         data-testid="input-audio-file"
       />
+
+      {/* Fuzzy 候補（複数件）から選ぶ Dialog。
+          1 件のときはトーストにアクションボタン、2 件以上のときはこちらで一覧表示する。 */}
+      <Dialog open={fuzzyChoiceDialog !== null} onOpenChange={(o) => { if (!o) setFuzzyChoiceDialog(null); }}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>音源の候補を選んでください</DialogTitle>
+            <DialogDescription>
+              「{fuzzyChoiceDialog?.attemptedName}」と完全一致するファイルが Dropbox に見つかりませんでした。
+              下の候補から正しいものをクリックすると、その場でリンクし直し・サーバへ反映します。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col gap-1 max-h-[60vh] overflow-y-auto" style={{ scrollbarWidth: "thin" }}>
+            {fuzzyChoiceDialog?.suggestions.map((c) => (
+              <button
+                key={c.path}
+                className="text-left p-2 rounded hover:bg-accent/40 text-xs font-mono break-all border"
+                style={{ borderColor: "hsl(0 0% 18%)" }}
+                onClick={async () => {
+                  const dlg = fuzzyChoiceDialog;
+                  setFuzzyChoiceDialog(null);
+                  if (dlg) await relinkAudioToPath(dlg.trackId, c.path);
+                }}
+              >
+                <div>{c.path}</div>
+                {(c.size || c.source) && (
+                  <div className="opacity-60 mt-1 text-[10px]">
+                    {c.size ? `${Math.round((c.size / 1024 / 1024) * 10) / 10} MB` : ""}
+                    {c.size && c.source ? " · " : ""}
+                    {c.source || ""}
+                  </div>
+                )}
+              </button>
+            ))}
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setFuzzyChoiceDialog(null)}>キャンセル</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <header className="flex items-center justify-between gap-4 px-3 py-1.5 shrink-0" style={{ backgroundColor: TS_DESIGN.bg2, border: `1px solid ${TS_DESIGN.border}` }}>
         <div className="flex items-center gap-2.5 min-w-0 overflow-hidden" style={{ flex: "1 1 50%", maxWidth: "50%" }}>
