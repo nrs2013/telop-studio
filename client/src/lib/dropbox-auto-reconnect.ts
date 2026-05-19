@@ -81,20 +81,52 @@ export function isDropboxAuthError(bodyText: string, status: number): boolean {
 interface FetchDropboxOptions {
   /** false にすると自動再接続を走らせず、素のレスポンスをそのまま返す(バックグラウンド用) */
   allowReconnect?: boolean;
+  /** 1 リクエストあたりのタイムアウト（ms）。デフォルト 30 秒。
+   *  これを入れないと、サーバ応答が来ないときに UI のローディングが永遠に止まる。 */
+  timeoutMs?: number;
+}
+
+/**
+ * AbortController でラップした fetch。タイムアウトすると AbortError を throw する。
+ * 上位の呼び出し側が `signal` を渡していれば、そちらも尊重する（user の手動キャンセル）。
+ */
+async function fetchWithTimeout(input: RequestInfo, init: RequestInit | undefined, timeoutMs: number): Promise<Response> {
+  const ac = new AbortController();
+  const userSignal = init?.signal;
+  const onUserAbort = () => ac.abort();
+  if (userSignal) {
+    if (userSignal.aborted) ac.abort();
+    else userSignal.addEventListener("abort", onUserAbort);
+  }
+  const timer = setTimeout(() => ac.abort(), timeoutMs);
+  try {
+    return await fetch(input, { ...(init || {}), signal: ac.signal });
+  } finally {
+    clearTimeout(timer);
+    if (userSignal) userSignal.removeEventListener("abort", onUserAbort);
+  }
 }
 
 /**
  * Dropbox 関連 API 呼び出し用の fetch ラッパー。
  * 認証エラーを検知したら自動で OAuth 再接続ポップアップを開き、認可完了後に1度だけリトライする。
+ * 30 秒（デフォルト）でタイムアウト：UI ローディングが固まる事故の防止。
  */
 export async function fetchDropbox(
   input: RequestInfo,
   init?: RequestInit,
   opts: FetchDropboxOptions = {}
 ): Promise<Response> {
-  const { allowReconnect = true } = opts;
+  const { allowReconnect = true, timeoutMs = 30000 } = opts;
 
-  const res = await fetch(input, init);
+  let res: Response;
+  try {
+    res = await fetchWithTimeout(input, init, timeoutMs);
+  } catch (err: any) {
+    // タイムアウト or ネットワークエラー：上位に伝播させて UI を「失敗」状態へ遷移させる。
+    // ここで握りつぶすと UI が固まったままになるので絶対に NG。
+    throw err;
+  }
   if (res.ok || !allowReconnect) return res;
 
   // レスポンスボディをクローンして内容確認(呼び出し側でも読めるように)
@@ -116,7 +148,7 @@ export async function fetchDropbox(
 
   // 再接続後に1度だけリトライ。さらに失敗したらそのまま返す(無限ループ防止)
   try {
-    return await fetch(input, init);
+    return await fetchWithTimeout(input, init, timeoutMs);
   } catch {
     return res;
   }
