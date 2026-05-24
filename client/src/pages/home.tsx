@@ -537,32 +537,26 @@ export default function Home() {
 
   useEffect(() => { fetchDropboxStatus(); }, [fetchDropboxStatus]);
 
-  const openDropboxConnect = useCallback(() => {
+  const openDropboxConnect = useCallback(async () => {
     setDropboxConnecting(true);
-    const popup = window.open("/api/dropbox/oauth/start", "dropbox-auth", "width=600,height=700");
-    const handler = (e: MessageEvent) => {
-      if (e.data === "dropbox-connected") {
-        fetchDropboxStatus();
-        setDropboxDialogOpen(false);
-        toast({ title: "✓ Dropbox接続完了", description: "永続トークンが保存されました。今後は自動的に再接続します。" });
-        window.removeEventListener("message", handler);
-        setDropboxConnecting(false);
-      }
-    };
-    window.addEventListener("message", handler);
-    const check = setInterval(() => {
-      if (popup?.closed) {
-        clearInterval(check);
-        window.removeEventListener("message", handler);
-        setDropboxConnecting(false);
-        fetchDropboxStatus();
-      }
-    }, 500);
-  }, [fetchDropboxStatus, toast]);
+    // Pages 経路では /api/dropbox/oauth/start が無いので、最初から PKCE flow に統一。
+    // dev サーバ経路でも PKCE 単体で完結するので両環境互換。
+    try {
+      await startDropboxOAuth();
+      // startDropboxOAuth は window.location で遷移するので、ここには戻ってこない
+    } catch (err: any) {
+      setDropboxConnecting(false);
+      toast({ title: "Dropbox 接続失敗", description: err?.message || String(err), variant: "destructive" });
+    }
+  }, [toast]);
 
   const disconnectDropbox = useCallback(async () => {
     if (!confirm("Dropboxの接続を切断しますか?\n\n再度接続するには「Dropboxに接続」ボタンを押してください。")) return;
     setDropboxConnecting(true);
+    // PKCE 経路の token は localStorage にあるので、まずそちらを必ず消す。
+    // サーバ経路（dev）の token も /api/dropbox/oauth/disconnect で消す（404 なら shim が success 返す）。
+    try { dbxSignOut(); } catch {}
+    setDbxLoggedIn(false);
     try {
       const res = await fetch("/api/dropbox/oauth/disconnect", { method: "POST", credentials: "include" });
       if (res.ok) {
