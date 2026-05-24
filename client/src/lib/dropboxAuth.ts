@@ -18,7 +18,10 @@
 
 import { Dropbox, DropboxAuth } from "dropbox";
 
-const APP_KEY = "ntg90kn8q9us8h6"; // TELOP STUDIO 2026 app key（公開可能、secret はクライアントに持たない）
+// TELOP STUDIO 2026 app key（公開可能、secret はクライアントに持たない）
+// ※ 旧 "TELOPSTUDIO" app (key=ntg90kn8q9us8h6) ではなく、新規の "TELOP STUDIO 2026" app
+//    を使う。リダイレクト URI も 2026 側にだけ登録済み。
+const APP_KEY = "mdt05rlzjykkriu";
 
 const LS_ACCESS_TOKEN = "telop-dbx-access-token";
 const LS_REFRESH_TOKEN = "telop-dbx-refresh-token";
