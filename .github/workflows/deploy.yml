@@ -51,6 +51,10 @@ jobs:
           touch dist/public/.nojekyll
 
       - uses: actions/configure-pages@v5
+        with:
+          # 初回起動時に Pages 未有効でも自動で有効化を試みる。
+          # 既に有効ならそのまま続行（idempotent）。
+          enablement: true
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist/public
