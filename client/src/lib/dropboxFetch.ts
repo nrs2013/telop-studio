@@ -19,6 +19,61 @@ import {
 
 let installed = false;
 
+// ─── localhost dev サーバ proxy ───
+// Pages 上では書き出し（/api/export/*）と mp3 変換（/api/audio/convert-to-mp3）が
+// 動かない。しかし、のむさんが Mac で `npm run dev` を起動していれば、Pages の
+// UI からでも localhost:5001 に CORS 越しに POST して書き出しできる。
+//
+// 起動時に一度 probe して、available なら localStorage に flag を立てる。
+// flag があれば、書き出し系の fetch はすべて localhost:5001 に rewrite する。
+
+const LS_DEV_PROXY = "telop-dev-proxy-available";
+const DEV_PROXY_URLS = ["http://localhost:5001", "http://localhost:5000"];
+
+let probedDevProxy: string | null = null; // 起動後に確定する dev サーバ URL
+
+export async function probeDevProxy(): Promise<string | null> {
+  // 同 origin が localhost:* なら proxy 不要
+  if (window.location.origin.startsWith("http://localhost")) {
+    probedDevProxy = null;
+    localStorage.removeItem(LS_DEV_PROXY);
+    return null;
+  }
+  for (const base of DEV_PROXY_URLS) {
+    try {
+      const res = await fetch(`${base}/api/auth/me`, {
+        credentials: "include",
+        // 短いタイムアウト：dev サーバ無いとき何秒も待たない
+        signal: AbortSignal.timeout(800),
+      });
+      // 200/401/403 どれでもサーバが居れば available。404 はそのサーバが /api を持ってない。
+      if (res.status < 500 && res.status !== 404) {
+        probedDevProxy = base;
+        localStorage.setItem(LS_DEV_PROXY, base);
+        console.log(`[dev-proxy] detected dev server at ${base}`);
+        return base;
+      }
+    } catch {
+      // 接続失敗 → 次の候補
+    }
+  }
+  probedDevProxy = null;
+  localStorage.removeItem(LS_DEV_PROXY);
+  return null;
+}
+
+export function getDevProxyUrl(): string | null {
+  if (probedDevProxy) return probedDevProxy;
+  return localStorage.getItem(LS_DEV_PROXY);
+}
+
+// 書き出し系の URL かどうか判定。これに該当する path は dev proxy 経由にする。
+function shouldUseDevProxy(pathname: string): boolean {
+  return pathname.startsWith("/api/export/") ||
+         pathname === "/api/export" ||
+         pathname === "/api/audio/convert-to-mp3";
+}
+
 // ─── 定数（server/dropbox.ts と一致させる） ───
 const NEW_TELOP_ROOT = "/nrs チーム フォルダ/NEW TELOP";
 const BASE_FOLDER = `${NEW_TELOP_ROOT}/Telop音源`;
@@ -466,13 +521,13 @@ const handleConvertToMp3Stub: Handler = async (_url, init) => {
 };
 
 // /api/export/* ─── ビデオ書き出しはサーバ ffmpeg 必須（ffmpeg.wasm 移行は Phase D 未済）。
-// Pages では「localhost dev サーバで書き出してください」と分かるメッセージを返す。
+// Pages では dev サーバが起動していれば自動 proxy するが、ここに来てるということは
+// proxy も失敗（dev サーバ停止中）。明示的に「dev サーバを起動して」と返す。
 const handleExportUnsupported: Handler = async (url) =>
   jsonResponse({
     message:
-      "Web 公開版では書き出しできません。Mac の dev サーバで開いてください：" +
-      "Terminal で `cd ~/Projects/telop-studio && npm run dev`、" +
-      "ブラウザで http://localhost:5001/ を開いて同じ曲を選択 → 書き出し。",
+      "書き出しには Mac の dev サーバが必要です。Terminal で `cd ~/Projects/telop-studio && npm run dev` を" +
+      "実行してから、もう一度「書き出し」を押してください。dev サーバが起動すれば自動で書き出しが始まります。",
     code: "EXPORT_REQUIRES_LOCAL_SERVER",
     path: url.pathname,
   }, 501);
@@ -535,6 +590,23 @@ export function installDropboxFetchShim(): void {
       parsed = new URL(urlStr, window.location.origin);
     } catch {
       return origFetch(input, init);
+    }
+
+    // ─── dev-proxy 経路：書き出し系は dev サーバ available なら localhost に投げる ───
+    // 起動時 probe で見つかった dev サーバ URL に rewrite。Pages の UI から
+    // Mac の localhost:5001 に CORS 越しで書き出し依頼が飛ぶ。
+    if (shouldUseDevProxy(parsed.pathname)) {
+      const proxyBase = getDevProxyUrl();
+      if (proxyBase) {
+        const proxyUrl = `${proxyBase}${parsed.pathname}${parsed.search}`;
+        const proxyInit: RequestInit = { ...(init || {}), credentials: "include" };
+        try {
+          return await origFetch(proxyUrl, proxyInit);
+        } catch (err) {
+          console.warn("[dev-proxy] forward failed, falling back to shim:", err);
+          // proxy 失敗時：handler に流す（501 が出るので UI に「dev サーバを起動して」が出る）
+        }
+      }
     }
 
     const handler = pickHandler(parsed);

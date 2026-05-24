@@ -14,6 +14,30 @@ declare module "http" {
   }
 }
 
+// ─── CORS: GitHub Pages からの書き出し依頼を受け付ける ───
+// Pages 単独運用ではサーバ無しで動かしているが、書き出し（/api/export/*）と
+// mp3 変換（/api/audio/convert-to-mp3）はサーバ ffmpeg が必須。のむさん本人が
+// Mac で dev サーバを起動していれば、Pages の UI から localhost:5001 に
+// proxy して書き出せるよう、Pages origin からの CORS を許可する。
+const ALLOWED_ORIGINS = new Set<string>([
+  "https://nrs2013.github.io",
+]);
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin && ALLOWED_ORIGINS.has(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Access-Control-Allow-Credentials", "true");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    res.setHeader("Access-Control-Max-Age", "86400");
+  }
+  if (req.method === "OPTIONS") {
+    res.status(204).end();
+    return;
+  }
+  next();
+});
+
 app.use(
   express.json({
     limit: "50mb",

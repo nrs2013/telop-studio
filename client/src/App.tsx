@@ -7,6 +7,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { useToast } from "@/hooks/use-toast";
 import { syncService, type AuthUser } from "@/lib/syncService";
 import { isDropboxLoggedIn, startDropboxOAuth, handleOAuthCallback } from "@/lib/dropboxAuth";
+import { probeDevProxy } from "@/lib/dropboxFetch";
 import Home from "@/pages/home";
 import ProjectPage from "@/pages/project";
 import NotFound from "@/pages/not-found";
@@ -473,6 +474,20 @@ function App() {
         console.warn("[App] OAuth callback failed:", err);
       }
     })();
+  }, []);
+
+  // ─── 起動時に localhost dev サーバを probe ───
+  // 居れば書き出し系（/api/export/*, /api/audio/convert-to-mp3）の fetch がそっちに
+  // proxy される。30 秒ごとに再 probe して、起動／停止が変わったら即反映。
+  useEffect(() => {
+    let cancelled = false;
+    const tick = async () => {
+      if (cancelled) return;
+      try { await probeDevProxy(); } catch {}
+    };
+    tick();
+    const id = setInterval(tick, 30_000);
+    return () => { cancelled = true; clearInterval(id); };
   }, []);
 
   useEffect(() => {
