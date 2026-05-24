@@ -1,5 +1,66 @@
 import { storage } from "./storage";
 import type { Project, LyricLine } from "@shared/schema";
+import { isDropboxLoggedIn } from "./dropboxAuth";
+
+// ─── Dropbox-fallback helpers ───
+// 既存の Express + Postgres 経由 sync が使えない（404 / オフライン）とき、
+// Dropbox にログインしていれば Dropbox 直書きに切り替える。
+// 動的 import にしているのは：dropboxSyncService → storage → syncService の循環を避けるため。
+async function dbxPush(projectId: string): Promise<boolean> {
+  if (!isDropboxLoggedIn()) return false;
+  try {
+    const m = await import("./dropboxSyncService");
+    await m.dropboxPushProject(projectId);
+    console.log("[sync→dbx] pushed project to Dropbox:", projectId);
+    return true;
+  } catch (err: any) {
+    console.warn("[sync→dbx] Dropbox push failed:", err?.message || err);
+    return false;
+  }
+}
+
+async function dbxPull(): Promise<{ added: number; updated: number; deleted: number } | null> {
+  if (!isDropboxLoggedIn()) return null;
+  try {
+    const m = await import("./dropboxSyncService");
+    const r = await m.dropboxPullAll();
+    console.log("[sync→dbx] pulled from Dropbox:", r);
+    return { added: r.added, updated: r.updated, deleted: r.deleted };
+  } catch (err: any) {
+    console.warn("[sync→dbx] Dropbox pull failed:", err?.message || err);
+    return null;
+  }
+}
+
+async function dbxDelete(projectId: string): Promise<boolean> {
+  if (!isDropboxLoggedIn()) return false;
+  try {
+    const m = await import("./dropboxSyncService");
+    await m.dropboxDeleteProject(projectId);
+    console.log("[sync→dbx] recorded deletion in Dropbox:", projectId);
+    return true;
+  } catch (err: any) {
+    console.warn("[sync→dbx] Dropbox delete failed:", err?.message || err);
+    return false;
+  }
+}
+
+// サーバ /api/auth/me が常に 404 を返す環境（GitHub Pages 等）では checkAuth を毎回叩くと
+// ネットワークがうるさいので、一度判定したら結果をキャッシュ。
+// false（=サーバ無し）にロックされたら次回以降 checkAuth はスキップして Dropbox 直行。
+let serverKnownAvailable: boolean | null = null;
+async function probeServer(): Promise<boolean> {
+  if (serverKnownAvailable !== null) return serverKnownAvailable;
+  try {
+    const res = await fetch("/api/auth/me", { credentials: "include" });
+    // 401（未ログイン）でもサーバ自体は存在する → available 扱い
+    serverKnownAvailable = res.status !== 404;
+  } catch {
+    serverKnownAvailable = false;
+  }
+  console.log("[sync] server availability probed:", serverKnownAvailable);
+  return serverKnownAvailable;
+}
 
 export interface SyncStatus {
   online: boolean;
@@ -30,6 +91,7 @@ let autoPushTimer: ReturnType<typeof setTimeout> | null = null;
 let autoPushProjectId: string | null = null;
 let recordingActive = false;
 let autoSyncInterval: ReturnType<typeof setInterval> | null = null;
+let dropboxAutoInterval: ReturnType<typeof setInterval> | null = null;
 let autoPushCallback: (() => void) | null = null;
 let isSyncing = false;
 const dirtyProjects = new Set<string>();
@@ -500,13 +562,27 @@ export const syncService = {
     }
     isSyncing = true;
     try {
+      if (!navigator.onLine) return;
+      // サーバが存在しなければ即 Dropbox 試行（GitHub Pages 経路）
+      if (!(await probeServer())) {
+        if (await dbxPush(projectId)) dirtyProjects.delete(projectId);
+        return;
+      }
       const user = await this.checkAuth();
-      if (!user || !navigator.onLine) return;
+      if (!user) {
+        // サーバはあるが未ログイン → Dropbox にだけ落とす
+        if (await dbxPush(projectId)) dirtyProjects.delete(projectId);
+        return;
+      }
       await this.pushProject(projectId);
       dirtyProjects.delete(projectId);
+      // 二重保険：サーバに push 済みでも、Dropbox にもログインしているなら同期しておく
+      await dbxPush(projectId);
       console.log("[AutoSync] Immediate push completed for", projectId);
     } catch (err: any) {
       console.warn("[AutoSync] Immediate push failed:", err.message);
+      // 例外時の最終手段：Dropbox 直書きで最低限の永続化
+      await dbxPush(projectId).catch(() => {});
     } finally {
       isSyncing = false;
     }
@@ -532,14 +608,26 @@ export const syncService = {
       const cb = autoPushCallback;
       autoPushCallback = null;
       try {
+        if (!navigator.onLine) return;
+        if (!(await probeServer())) {
+          if (await dbxPush(pid)) dirtyProjects.delete(pid);
+          if (cb) cb();
+          return;
+        }
         const user = await this.checkAuth();
-        if (!user || !navigator.onLine) return;
+        if (!user) {
+          if (await dbxPush(pid)) dirtyProjects.delete(pid);
+          if (cb) cb();
+          return;
+        }
         await this.pushProject(pid);
         dirtyProjects.delete(pid);
+        await dbxPush(pid);
         console.log("[AutoSync] Push completed for", pid);
         if (cb) cb();
       } catch (err: any) {
         console.warn("[AutoSync] Push failed:", err.message);
+        await dbxPush(pid).catch(() => {});
       } finally {
         isSyncing = false;
         autoPushTimer = null;
@@ -674,5 +762,46 @@ export const syncService = {
 
   isOnline(): boolean {
     return navigator.onLine;
+  },
+
+  // ─── Dropbox-only auto sync（GitHub Pages 経路用） ───
+  // サーバが居ない環境向け：定期的に Dropbox から pull、dirty を Dropbox に push。
+  // 既存 startAutoSync は checkAuth が通らないと何もしないので、こちらが代役を務める。
+  async dropboxAutoSyncOnOpen(onResult?: (r: { added: number; updated: number; deleted: number }) => void): Promise<void> {
+    if (!navigator.onLine) return;
+    const r = await dbxPull();
+    if (r && onResult) onResult(r);
+  },
+
+  startDropboxAutoSync(onPull?: () => void): void {
+    this.stopDropboxAutoSync();
+    dropboxAutoInterval = setInterval(async () => {
+      if (recordingActive) return;
+      if (isSyncing || !navigator.onLine) return;
+      if (!isDropboxLoggedIn()) return;
+      isSyncing = true;
+      try {
+        // 1) dirty を Dropbox に push
+        for (const pid of Array.from(dirtyProjects)) {
+          if (await dbxPush(pid)) dirtyProjects.delete(pid);
+        }
+        // 2) Dropbox から pull
+        const r = await dbxPull();
+        if (r && onPull) onPull();
+      } finally {
+        isSyncing = false;
+      }
+    }, AUTO_SYNC_INTERVAL);
+  },
+
+  stopDropboxAutoSync(): void {
+    if (dropboxAutoInterval) {
+      clearInterval(dropboxAutoInterval);
+      dropboxAutoInterval = null;
+    }
+  },
+
+  async dropboxDeleteProject(projectId: string): Promise<boolean> {
+    return dbxDelete(projectId);
   },
 };

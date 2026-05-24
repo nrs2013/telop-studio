@@ -287,6 +287,43 @@ export default function Home() {
     })();
   }, []);
 
+  // Dropbox ログイン中の自動同期：
+  //   - マウント時に 1 回 pull（Dropbox 経由で別ブラウザの変更を取り込む）
+  //   - 2 分おきに pull / dirty を push（既存 syncService.startAutoSync の Dropbox 版）
+  // サーバ（Express + Postgres）が居ない GitHub Pages 経路で「いままで通り」自動同期を実現する。
+  useEffect(() => {
+    if (!dbxLoggedIn) return;
+    let cancelled = false;
+
+    // 1) マウント時 pull（OAuth callback と二重発火しないよう、最初の reload は控えめに toast）
+    (async () => {
+      try {
+        await syncService.dropboxAutoSyncOnOpen(async (r) => {
+          if (cancelled) return;
+          if (r.added > 0 || r.updated > 0 || r.deleted > 0) {
+            const list = await storage.getProjects();
+            setProjects(list);
+            toast({ title: "Dropbox 同期", description: `追加 ${r.added} / 更新 ${r.updated} / 削除 ${r.deleted}` });
+          }
+        });
+      } catch (err) {
+        console.warn("[home] dropbox autoSync on open failed:", err);
+      }
+    })();
+
+    // 2) 定期同期
+    syncService.startDropboxAutoSync(async () => {
+      if (cancelled) return;
+      const list = await storage.getProjects();
+      setProjects(list);
+    });
+
+    return () => {
+      cancelled = true;
+      syncService.stopDropboxAutoSync();
+    };
+  }, [dbxLoggedIn, toast]);
+
   const handleDbxLogin = useCallback(async () => {
     try {
       await startDropboxOAuth();
@@ -934,10 +971,22 @@ export default function Home() {
           credentials: "include",
         });
         if (res.ok) return true;
-        // 404 = 既にサーバー側で消えている。OK 扱い。
-        if (res.status === 404) return true;
+        // 404 のうち「サーバ自体が無い」(GitHub Pages) のは Dropbox 経路に逃がす。
+        // 「サーバはあるけど id が無い」は OK 扱い。判別は応答 body の有無で大体決まるが、
+        // ここでは簡略化して Dropbox ログイン中なら DBX で削除墓標を残す。
+        if (res.status === 404) {
+          if (isDropboxLoggedIn()) {
+            const ok = await syncService.dropboxDeleteProject(id);
+            if (ok) return true;
+          }
+          return true; // サーバ側でとっくに消えているケース
+        }
       } catch {
-        // ネットワーク瞬断 → リトライ対象
+        // ネットワーク瞬断 → リトライ対象。ただし fetch 自体が完全に通らないなら Dropbox に逃がす。
+        if (isDropboxLoggedIn()) {
+          const ok = await syncService.dropboxDeleteProject(id);
+          if (ok) return true;
+        }
       }
       if (attempt < 2) {
         await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
