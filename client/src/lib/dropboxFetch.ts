@@ -94,6 +94,75 @@ type CachedEntry = { name: string; path: string; size: number };
 let cachedAudioIndex: { entries: CachedEntry[]; at: number } | null = null;
 const INDEX_TTL_MS = 5 * 60 * 1000;
 
+// ─── 最優先フォルダ（のむさん指定の共有フォルダ） ───
+// 検索時は、まずこのフォルダ配下を最優先で見る。exact match があれば即採用、
+// 無ければ通常の全体検索（global search）にフェイルセーフ。
+// shared link は起動時に Dropbox API で resolve して実 path を確定する。
+const PRIORITY_SHARED_LINK = "https://www.dropbox.com/scl/fo/o1o8d9arwjt8hulh9r04x/AA_ORtFhcvalOdjVXULYpFw?rlkey=emtrsa0os8sjh0bm1ak8aq534&dl=0";
+
+let priorityFolderPath: string | null = null;
+let priorityFolderResolved = false;
+let cachedPriorityIndex: { entries: CachedEntry[]; at: number } | null = null;
+
+async function resolvePriorityFolderPath(): Promise<string | null> {
+  if (priorityFolderResolved) return priorityFolderPath;
+  const dbx = await getDropboxClient();
+  if (!dbx) return null;
+  try {
+    // shared link のメタデータから実 path を取得する。
+    const meta: any = await (dbx as any).sharingGetSharedLinkMetadata({ url: PRIORITY_SHARED_LINK });
+    const m = meta?.result || meta;
+    // path_lower / path_display があれば team scope 内の実 path
+    priorityFolderPath = m?.path_lower || m?.path_display || m?.name ? `/${m.name}` : null;
+    priorityFolderResolved = true;
+    console.log(`[dbx-fetch] priority folder resolved to: ${priorityFolderPath}`);
+    return priorityFolderPath;
+  } catch (err) {
+    console.warn("[dbx-fetch] priority folder resolve failed:", err);
+    priorityFolderResolved = true; // 再試行しない（諦める）
+    return null;
+  }
+}
+
+async function listPriorityFolderAudio(): Promise<CachedEntry[]> {
+  if (cachedPriorityIndex && Date.now() - cachedPriorityIndex.at < INDEX_TTL_MS) {
+    return cachedPriorityIndex.entries;
+  }
+  const path = await resolvePriorityFolderPath();
+  if (!path) return [];
+  const dbx = await getDropboxClient();
+  if (!dbx) return [];
+
+  const out: CachedEntry[] = [];
+  const audioExt = /\.(mp3|wav|m4a|aac|ogg|flac|wma|aiff|aif|opus)$/i;
+  try {
+    let res: any = await dbx.filesListFolder({
+      path,
+      recursive: true,
+      include_non_downloadable_files: false,
+    });
+    while (true) {
+      for (const entry of res.result.entries) {
+        if (entry[".tag"] !== "file") continue;
+        const nm: string = entry.name || "";
+        if (!audioExt.test(nm)) continue;
+        out.push({
+          name: nm,
+          path: entry.path_display || entry.path_lower || "",
+          size: entry.size ?? 0,
+        });
+      }
+      if (!res.result.has_more) break;
+      res = await dbx.filesListFolderContinue({ cursor: res.result.cursor });
+    }
+  } catch (err) {
+    console.warn("[dbx-fetch] listPriorityFolderAudio failed:", err);
+  }
+  cachedPriorityIndex = { entries: out, at: Date.now() };
+  console.log(`[dbx-fetch] priority folder index: ${out.length} files cached`);
+  return out;
+}
+
 async function listTelopAudioRecursive(): Promise<CachedEntry[]> {
   if (cachedAudioIndex && Date.now() - cachedAudioIndex.at < INDEX_TTL_MS) {
     return cachedAudioIndex.entries;
@@ -181,19 +250,59 @@ const handleDownload: Handler = async (url) => {
 };
 
 // /api/dropbox/find?fileName=... ─── 音源検索
+// 検索戦略（フェイルセーフ二段階）：
+//   Phase A: 最優先フォルダ（のむさん指定の共有フォルダ）配下のみで exact match を探す。
+//     - 見つかれば即 found:true で確定（global search 不要）
+//     - 同名複数（ambiguous）なら priority 内候補だけを返す
+//   Phase B: Phase A で exact 0 件 → 全体（priority + Telop音源 listing + global search）
+//     から exact / fuzzy 候補を出す
+// これで「優先フォルダ内に正解があるとき」は無関係な候補が混ざらない。
 const handleFind: Handler = async (url) => {
   const fileName = url.searchParams.get("fileName") || "";
   if (!fileName) return jsonResponse({ message: "fileName required" }, 400);
 
-  const entries: DropboxEntry[] = [];
+  // ── Phase A: 最優先フォルダだけで exact match を試す ──
+  const priorityEntries: DropboxEntry[] = [];
+  const priorityListing = await listPriorityFolderAudio();
+  for (const e of priorityListing) {
+    priorityEntries.push({ name: e.name, path: e.path, size: e.size, source: "priority-folder" });
+  }
+  if (priorityEntries.length > 0) {
+    const priorityOutcome = findExactMatches(fileName, priorityEntries);
+    if (priorityOutcome.kind === "unique") {
+      console.log(`[dbx-fetch] find "${fileName}" → priority folder UNIQUE: ${priorityOutcome.match.path}`);
+      return jsonResponse({
+        found: true,
+        path: priorityOutcome.match.path,
+        candidates: [priorityOutcome.match],
+        normalizedQuery: priorityOutcome.normalizedQuery,
+        source: "priority",
+      });
+    }
+    if (priorityOutcome.kind === "ambiguous") {
+      // 優先フォルダ内に同名複数 → 全体検索広げず priority 候補だけで dialog 出す
+      console.log(`[dbx-fetch] find "${fileName}" → priority folder AMBIGUOUS (${priorityOutcome.candidates.length})`);
+      return jsonResponse({
+        found: false,
+        ambiguous: true,
+        candidates: priorityOutcome.candidates,
+        normalizedQuery: priorityOutcome.normalizedQuery,
+        source: "priority",
+      });
+    }
+    // priority に exact 無し → Phase B に進む
+  }
 
-  // 1) Telop音源 配下を listing から
-  const listing = await listTelopAudioRecursive();
-  for (const e of listing) {
+  // ── Phase B: 全体検索 ──
+  const entries: DropboxEntry[] = [...priorityEntries]; // priority のは既に source タグ付きで持ってる
+
+  // Telop音源 listing も
+  const telopListing = await listTelopAudioRecursive();
+  for (const e of telopListing) {
     entries.push({ name: e.name, path: e.path, size: e.size, source: "telop-ongen-list" });
   }
 
-  // 2) Dropbox global search で広めに拾う
+  // Dropbox global search で広めに拾う
   try {
     const dbx = await getDropboxClient();
     if (dbx) {
@@ -230,29 +339,88 @@ const handleFind: Handler = async (url) => {
     });
   }
   if (outcome.kind === "ambiguous") {
+    // 候補を priority folder のものを先頭に並べ替え（UI で見やすく）
+    const sorted = [...outcome.candidates].sort((a, b) => {
+      const aPri = a.source === "priority-folder" ? 0 : 1;
+      const bPri = b.source === "priority-folder" ? 0 : 1;
+      return aPri - bPri;
+    });
     return jsonResponse({
       found: false,
       ambiguous: true,
-      candidates: outcome.candidates,
+      candidates: sorted,
       normalizedQuery: outcome.normalizedQuery,
     });
   }
   const suggestions = findFuzzyMatches(fileName, entries, 8);
+  // 提案も priority folder のものを優先
+  const sortedSuggestions = [...suggestions].sort((a, b) => {
+    const aPri = a.source === "priority-folder" ? 0 : 1;
+    const bPri = b.source === "priority-folder" ? 0 : 1;
+    return aPri - bPri;
+  });
   return jsonResponse({
     found: false,
     ambiguous: false,
     candidates: [],
-    suggestions,
+    suggestions: sortedSuggestions,
     normalizedQuery: outcome.normalizedQuery,
   });
 };
 
 // /api/dropbox/auto-relink?fileName=...&preset=... ─── 自動リンク
+// 検索順位（フェイルセーフ）：
+//   1. 最優先フォルダ配下を fuzzy 検索（最も高い基準で採用判定）
+//   2. なければ Telop音源/<preset> folder fuzzy
+//   3. それでもなければ Telop音源 全体 fuzzy（緩めの基準で）
 const handleAutoRelink: Handler = async (url) => {
   const fileName = url.searchParams.get("fileName") || "";
   const preset = url.searchParams.get("preset") || "";
   if (!fileName) return jsonResponse({ message: "fileName required" }, 400);
 
+  // ── Step 1: 最優先フォルダ ──
+  const priorityListing = await listPriorityFolderAudio();
+  if (priorityListing.length > 0) {
+    const priorityEntries: DropboxEntry[] = priorityListing.map(e => ({ name: e.name, path: e.path, size: e.size }));
+    const priorityScored = findFuzzyMatchesScored(fileName, priorityEntries, 8);
+    if (priorityScored.length > 0) {
+      // dedupe
+      const seen = new Set<string>();
+      const dedup: typeof priorityScored = [];
+      for (const s of priorityScored) {
+        const base = s.entry.name.toLocaleLowerCase("ja-JP");
+        if (seen.has(base)) continue;
+        seen.add(base);
+        dedup.push(s);
+      }
+      // 単独 high-confidence → 採用（priority folder の score 0.7 以上）
+      if (dedup.length === 1 && dedup[0].score >= 0.7) {
+        console.log(`[auto-relink] PRIORITY 単独採用: "${fileName}" → ${dedup[0].entry.path} (score=${dedup[0].score.toFixed(2)})`);
+        return jsonResponse({ accepted: true, path: dedup[0].entry.path, name: dedup[0].entry.name, source: "priority" });
+      }
+      // 複数：top vs 2nd gap で確定判定
+      if (dedup.length >= 2) {
+        const top = dedup[0];
+        const second = dedup[1];
+        const gap = top.score - second.score;
+        if (top.score >= 0.9 && gap >= 0.3) {
+          console.log(`[auto-relink] PRIORITY top 採用: "${fileName}" → ${top.entry.path} (score=${top.score.toFixed(2)}, gap=${gap.toFixed(2)})`);
+          return jsonResponse({ accepted: true, path: top.entry.path, name: top.entry.name, source: "priority" });
+        }
+      }
+      // priority 内で確定できない → suggestions 出して手動
+      // ただし priority に該当ありなので、Telop音源 fallback は使わず ambiguous で返す
+      return jsonResponse({
+        accepted: false,
+        reason: `priority folder fuzzy ambiguous (${dedup.length} candidates)`,
+        suggestions: dedup.map(s => s.entry),
+        source: "priority",
+      });
+    }
+    // priority listing あるが fuzzy 0 件 → Step 2 へフェイルオーバー
+  }
+
+  // ── Step 2 & 3: 従来の Telop音源 fallback ──
   const listing = await listTelopAudioRecursive();
   if (listing.length === 0) {
     return jsonResponse({ accepted: false, reason: "no index" });
