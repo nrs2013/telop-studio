@@ -735,7 +735,14 @@ export function ExportDialog({
       setProgress(4);
 
       const sessionRes = await fetch("/api/export/session", { method: "POST" });
-      if (!sessionRes.ok) throw new Error("セッション作成に失敗しました");
+      if (!sessionRes.ok) {
+        // GitHub Pages 経路では書き出しサーバが居ない。Pages 用に分かりやすいメッセージにする。
+        if (sessionRes.status === 501) {
+          const errData = await sessionRes.json().catch(() => ({}));
+          throw new Error(errData.message || "Web 公開版では書き出しできません。Mac の localhost dev サーバで開いてください。");
+        }
+        throw new Error("セッション作成に失敗しました");
+      }
       const { sessionId } = (await sessionRes.json());
 
       const blobs: Blob[] = [];
@@ -1040,7 +1047,14 @@ export function ExportDialog({
       setProgress(4);
 
       const sessionRes = await fetch("/api/export/session", { method: "POST" });
-      if (!sessionRes.ok) throw new Error("セッション作成に失敗しました");
+      if (!sessionRes.ok) {
+        // GitHub Pages 経路では書き出しサーバが居ない。Pages 用に分かりやすいメッセージにする。
+        if (sessionRes.status === 501) {
+          const errData = await sessionRes.json().catch(() => ({}));
+          throw new Error(errData.message || "Web 公開版では書き出しできません。Mac の localhost dev サーバで開いてください。");
+        }
+        throw new Error("セッション作成に失敗しました");
+      }
       const sessionId = (await sessionRes.json()).sessionId;
 
       const canvasToBlob = (cvs: HTMLCanvasElement): Promise<Blob> =>

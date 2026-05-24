@@ -465,6 +465,28 @@ const handleConvertToMp3Stub: Handler = async (_url, init) => {
   });
 };
 
+// /api/export/* ─── ビデオ書き出しはサーバ ffmpeg 必須（ffmpeg.wasm 移行は Phase D 未済）。
+// Pages では「localhost dev サーバで書き出してください」と分かるメッセージを返す。
+const handleExportUnsupported: Handler = async (url) =>
+  jsonResponse({
+    message:
+      "Web 公開版では書き出しできません。Mac の dev サーバで開いてください：" +
+      "Terminal で `cd ~/Projects/telop-studio && npm run dev`、" +
+      "ブラウザで http://localhost:5001/ を開いて同じ曲を選択 → 書き出し。",
+    code: "EXPORT_REQUIRES_LOCAL_SERVER",
+    path: url.pathname,
+  }, 501);
+
+// /api/sync/* も同様 — 既に syncService 側で Dropbox fallback を仕込んだが、
+// 念のため pull-all / push 等もここで明示的に 501 を返してログを綺麗にする。
+// ※ syncService が先に await checkAuth() で失敗するので、ここはほぼ来ない。
+const handleSyncUnsupported: Handler = async (url) =>
+  jsonResponse({ message: "Use Dropbox sync instead", path: url.pathname }, 501);
+
+// /api/auth/* も同様 — Pages では Dropbox login が認証担当。
+const handleAuthUnsupported: Handler = async (url) =>
+  jsonResponse({ message: "Use Dropbox login instead", user: null, path: url.pathname }, 401);
+
 // ─── path → handler ディスパッチ ───
 function pickHandler(url: URL): Handler | null {
   const p = url.pathname;
@@ -482,6 +504,10 @@ function pickHandler(url: URL): Handler | null {
   if (p === "/api/audio/convert-to-mp3") return handleConvertToMp3Stub;
   if (p === "/api/dropbox/oauth/status") return handleOAuthStatus;
   if (p === "/api/dropbox/oauth/disconnect") return handleOAuthDisconnect;
+  // 大分類で潰す（Pages では確実に動かないもの）
+  if (p.startsWith("/api/export/")) return handleExportUnsupported;
+  if (p.startsWith("/api/sync/")) return handleSyncUnsupported;
+  if (p.startsWith("/api/auth/")) return handleAuthUnsupported;
   return null;
 }
 
