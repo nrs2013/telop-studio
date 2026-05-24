@@ -1204,6 +1204,59 @@ export async function registerRoutes(
     }
   });
 
+  // ─── Local Dropbox fallback ──────────────────────────────────────────
+  // Dropbox API なし / 別 account 環境で、Mac の Dropbox 同期 folder から
+  // 直接ファイルを読むためのフォールバック。LOCAL_DROPBOX_ROOTS（":" 区切り）に
+  // sync folder の root を列挙すると、requested path と結合してファイル存在を試す。
+  // 見つかれば API 不要で即返却（download / find / browse すべてで使う）。
+  function tryLocalDropboxFile(dropboxPath: string): string | null {
+    const roots = (process.env.LOCAL_DROPBOX_ROOTS || "").split(":").map(s => s.trim()).filter(Boolean);
+    if (roots.length === 0) return null;
+    const rel = dropboxPath.replace(/^\/+/, "");
+    for (const root of roots) {
+      const full = path.join(root, rel);
+      try {
+        if (fs.existsSync(full) && fs.statSync(full).isFile()) return full;
+      } catch {}
+    }
+    return null;
+  }
+
+  // Local index: 起動後 1 回だけ walk して全音源ファイルを記憶。以後は即返却。
+  let _localDropboxIndex: DropboxEntry[] | null = null;
+  const AUDIO_EXT_RE = /\.(mp3|wav|m4a|aac|ogg|flac|wma|aiff|aif|opus)$/i;
+  function listLocalDropboxAudio(): DropboxEntry[] {
+    if (_localDropboxIndex !== null) return _localDropboxIndex;
+    const roots = (process.env.LOCAL_DROPBOX_ROOTS || "").split(":").map(s => s.trim()).filter(Boolean);
+    if (roots.length === 0) {
+      _localDropboxIndex = [];
+      return _localDropboxIndex;
+    }
+    const entries: DropboxEntry[] = [];
+    const walk = (dir: string, rootBase: string) => {
+      let items: string[];
+      try { items = fs.readdirSync(dir); } catch { return; }
+      for (const item of items) {
+        // 隠しファイルと特殊ディレクトリは無視（パフォーマンスとノイズ削減）
+        if (item.startsWith(".")) continue;
+        const full = path.join(dir, item);
+        let stat: fs.Stats;
+        try { stat = fs.statSync(full); } catch { continue; }
+        if (stat.isDirectory()) {
+          walk(full, rootBase);
+        } else if (stat.isFile() && AUDIO_EXT_RE.test(item)) {
+          const rel = full.substring(rootBase.length); // "/nrs チーム フォルダ/..." 形式
+          entries.push({ name: item, path: rel, size: stat.size, source: "local-fs" });
+        }
+      }
+    };
+    const t0 = Date.now();
+    for (const root of roots) walk(root, root);
+    console.log(`[local-dropbox] indexed ${entries.length} audio files from ${roots.length} root(s) in ${Date.now() - t0}ms`);
+    _localDropboxIndex = entries;
+    return entries;
+  }
+
   app.get("/api/dropbox/download", async (req, res) => {
     const dropboxPath = req.query.path as string;
     const convertToMp3 = req.query.convert === "mp3";
@@ -1212,6 +1265,51 @@ export async function registerRoutes(
     const fileName = path.basename(dropboxPath);
     const fileExt = path.extname(fileName).toLowerCase();
     const needsConvert = convertToMp3 && fileExt !== ".mp3";
+
+    // ─── Local fs フォールバック（Dropbox 同期フォルダから直接読み込み）───
+    // dev / serverless モードでは Dropbox API なしでも、Mac の Dropbox client が
+    // 同期している folder から音源を取れる。これで Dropbox 連携が完全復活する。
+    const localPath = tryLocalDropboxFile(dropboxPath);
+    if (localPath) {
+      console.log(`[dropbox-local] serving from local fs: ${localPath}`);
+      if (needsConvert) {
+        const mp3Name = fileName.replace(/\.[^.]+$/i, ".mp3");
+        res.setHeader("Content-Type", "audio/mpeg");
+        res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(mp3Name)}"`);
+        const ff = spawn(FFMPEG_BIN, [
+          "-hide_banner", "-loglevel", "error",
+          "-i", localPath,
+          "-vn", "-ar", "44100", "-ac", "2", "-b:a", "192k",
+          "-threads", "2",
+          "-f", "mp3", "pipe:1",
+        ], { stdio: ["ignore", "pipe", "pipe"] });
+        let stderr = "";
+        ff.stderr.on("data", (d: Buffer) => {
+          stderr += d.toString();
+          if (stderr.length > 4000) stderr = stderr.slice(-2000);
+        });
+        ff.stdout.pipe(res);
+        ff.on("close", (code) => {
+          if (code !== 0 && !res.headersSent) {
+            res.status(500).json({ message: "MP3 変換に失敗しました", error: stderr.slice(-400) });
+          } else if (code !== 0) {
+            console.error(`[dropbox-local] ffmpeg exited ${code}: ${stderr.slice(-200)}`);
+            res.end();
+          }
+        });
+        req.on("close", () => { if (!ff.killed) ff.kill("SIGKILL"); });
+        return;
+      }
+      // Passthrough：ファイル直送り
+      const extMapLocal: Record<string, string> = {
+        ".mp3": "audio/mpeg", ".wav": "audio/wav", ".m4a": "audio/mp4", ".aac": "audio/aac",
+        ".ogg": "audio/ogg", ".flac": "audio/flac",
+      };
+      res.setHeader("Content-Type", extMapLocal[fileExt] || "application/octet-stream");
+      res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(fileName)}"`);
+      res.sendFile(localPath);
+      return;
+    }
 
     try {
       // Streaming pipeline — replaces the old buffer-then-disk-then-ffmpeg flow.
@@ -1398,6 +1496,19 @@ export async function registerRoutes(
       // per-source — a flaky global search shouldn't prevent the curated
       // listing from being consulted, and vice versa.
       const entries: DropboxEntry[] = [];
+
+      // ─── Local fs から index 取得（最優先、API 不要）───
+      // LOCAL_DROPBOX_ROOTS が設定されていれば、その下を recursive walk して
+      // 音源ファイル全部を candidate に。Dropbox API より速くて確実。
+      try {
+        const localEntries = listLocalDropboxAudio();
+        for (const e of localEntries) entries.push(e);
+        if (localEntries.length > 0) {
+          console.log(`[Dropbox] find "${fileName}": local fs index → ${localEntries.length} entries`);
+        }
+      } catch (e: any) {
+        console.warn(`[Dropbox] find "${fileName}": local fs index failed: ${e.message}`);
+      }
 
       try {
         const listed = await listDropboxFiles();
