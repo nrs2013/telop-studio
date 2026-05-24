@@ -16,7 +16,9 @@ import { useLiveMode } from "@/lib/liveMode";
 import { schedulePrefetchAudios } from "@/lib/prefetchAudio";
 import { runBulkRelink, type BulkRelinkProgress, type BulkRelinkResult } from "@/lib/audioBulkRelink";
 import { exportBackup, downloadBackup, importBackup, type ImportResult } from "@/lib/backupRestore";
-import { Wrench, Download as DownloadIcon, FileUp } from "lucide-react";
+import { Wrench, Download as DownloadIcon, FileUp, LogIn, LogOut } from "lucide-react";
+import { startDropboxOAuth, handleOAuthCallback, signOut as dbxSignOut, isDropboxLoggedIn } from "@/lib/dropboxAuth";
+import { dropboxPullAll, dropboxPushProject, isDropboxSyncAvailable, type DropboxPullResult } from "@/lib/dropboxSyncService";
 
 function formatDate(dateStr: string | null) {
   if (!dateStr) return "";
@@ -255,6 +257,96 @@ export default function Home() {
   const [hotkeyDialogOpen, setHotkeyDialogOpen] = useState(false);
   // 本番モード（LIVE）：ON のとき削除・名前変更を全部ロック、サーバ同期も停止
   const [liveMode, setLiveModeState] = useLiveMode();
+
+  // ─── Dropbox-centric serverless 化（GitHub Pages で動かすため） ───
+  // ログイン状態を state で管理。OAuth callback 後の token 反映を即座に画面に出す。
+  const [dbxLoggedIn, setDbxLoggedIn] = useState<boolean>(() => isDropboxLoggedIn());
+  const [dbxSyncing, setDbxSyncing] = useState<boolean>(false);
+
+  // 起動時に OAuth callback（URL の ?code= を access_token に交換）を試みる。
+  // ?code= が無ければ no-op。成功すれば dbxLoggedIn を true に。
+  useEffect(() => {
+    (async () => {
+      const ok = await handleOAuthCallback();
+      if (ok) {
+        setDbxLoggedIn(true);
+        toast({ title: "Dropbox にログインしました", description: "プロジェクトを取得します..." });
+        // ログイン直後に自動 pull
+        try {
+          setDbxSyncing(true);
+          const r = await dropboxPullAll();
+          toast({ title: "✅ Dropbox から取得しました", description: `追加 ${r.added} / 更新 ${r.updated} / 削除 ${r.deleted}` });
+          const list = await storage.getProjects();
+          setProjects(list);
+        } catch (err: any) {
+          toast({ title: "Dropbox 取得失敗", description: err?.message || String(err), variant: "destructive" });
+        } finally {
+          setDbxSyncing(false);
+        }
+      }
+    })();
+  }, []);
+
+  const handleDbxLogin = useCallback(async () => {
+    try {
+      await startDropboxOAuth();
+      // startDropboxOAuth は window.location.href で遷移するので、ここには戻ってこない
+    } catch (err: any) {
+      toast({ title: "Dropbox ログイン失敗", description: err?.message || String(err), variant: "destructive" });
+    }
+  }, [toast]);
+
+  const handleDbxSignOut = useCallback(() => {
+    dbxSignOut();
+    setDbxLoggedIn(false);
+    toast({ title: "Dropbox をログアウトしました" });
+  }, [toast]);
+
+  const handleDbxPull = useCallback(async () => {
+    if (!isDropboxSyncAvailable()) {
+      toast({ title: "Dropbox にログインしていません", variant: "destructive" });
+      return;
+    }
+    setDbxSyncing(true);
+    try {
+      const r = await dropboxPullAll();
+      toast({ title: "✅ Dropbox から取得しました", description: `追加 ${r.added} / 更新 ${r.updated} / 削除 ${r.deleted}` });
+      const list = await storage.getProjects();
+      setProjects(list);
+    } catch (err: any) {
+      toast({ title: "Dropbox 取得失敗", description: err?.message || String(err), variant: "destructive" });
+    } finally {
+      setDbxSyncing(false);
+    }
+  }, [toast]);
+
+  // Phase F: 既存ローカル IndexedDB の全 project を Dropbox に一括 push する。
+  // 初回 migration で使う：Express + Supabase で運用していた既存データを Dropbox に移す。
+  // 1 project ずつ順次 push、進捗 toast 出力。
+  const handleDbxMigrate = useCallback(async () => {
+    if (!isDropboxSyncAvailable()) {
+      toast({ title: "Dropbox にログインしていません", variant: "destructive" });
+      return;
+    }
+    if (!confirm(`ローカルの全 ${projects.length} プロジェクトを Dropbox に push します。\n初回 migration なら推奨、既に Dropbox 同期済みなら不要です。実行しますか？`)) return;
+    setDbxSyncing(true);
+    let ok = 0;
+    let fail = 0;
+    try {
+      for (const p of projects) {
+        try {
+          await dropboxPushProject(p.id);
+          ok++;
+        } catch (e) {
+          console.warn(`[dbx-migrate] push failed for ${p.name}:`, e);
+          fail++;
+        }
+      }
+      toast({ title: "Migration 完了", description: `成功 ${ok} 件 / 失敗 ${fail} 件` });
+    } finally {
+      setDbxSyncing(false);
+    }
+  }, [projects, toast]);
   // 自動スナップショット履歴 Dialog
   const [snapshotDialogOpen, setSnapshotDialogOpen] = useState(false);
   const [snapshotList, setSnapshotList] = useState<Snapshot[]>(() => loadSnapshots());
@@ -1547,6 +1639,55 @@ export default function Home() {
               onChange={handleRestoreFile}
               data-testid="input-restore-file"
             />
+            {/* Dropbox ログイン UI（serverless 化用、GitHub Pages 環境でメイン同期手段） */}
+            {!dbxLoggedIn ? (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7 px-2 text-[10px] font-mono font-bold tracking-widest"
+                style={{ color: TS_DESIGN.text2, border: `1px solid ${TS_DESIGN.border}` }}
+                onClick={handleDbxLogin}
+                title="Dropbox にログイン（serverless 同期用）"
+                data-testid="button-dbx-login"
+              >
+                <LogIn className="w-3 h-3 mr-1" /> DBX
+              </Button>
+            ) : (
+              <>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="w-7 h-7"
+                  onClick={handleDbxPull}
+                  disabled={dbxSyncing}
+                  title="Dropbox から最新を取得"
+                  data-testid="button-dbx-pull"
+                >
+                  <Cloud className="w-3.5 h-3.5" style={{ color: dbxSyncing ? TS_DESIGN.text3 : TS_DESIGN.okGreen }} />
+                </Button>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="w-7 h-7"
+                  onClick={handleDbxMigrate}
+                  disabled={dbxSyncing}
+                  title={`全 ${projects.length} project をローカル → Dropbox に一括 push（初回 migration 用）`}
+                  data-testid="button-dbx-migrate"
+                >
+                  <Upload className="w-3.5 h-3.5" style={{ color: TS_DESIGN.text2 }} />
+                </Button>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="w-7 h-7"
+                  onClick={handleDbxSignOut}
+                  title="Dropbox からログアウト"
+                  data-testid="button-dbx-logout"
+                >
+                  <LogOut className="w-3.5 h-3.5" style={{ color: TS_DESIGN.text3 }} />
+                </Button>
+              </>
+            )}
             {/* 本番モード（LIVE）トグル：削除ロック + サーバ同期停止を一括で */}
             <Button
               size="sm"
