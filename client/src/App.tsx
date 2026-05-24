@@ -6,6 +6,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useToast } from "@/hooks/use-toast";
 import { syncService, type AuthUser } from "@/lib/syncService";
+import { isDropboxLoggedIn, startDropboxOAuth, handleOAuthCallback } from "@/lib/dropboxAuth";
 import Home from "@/pages/home";
 import ProjectPage from "@/pages/project";
 import NotFound from "@/pages/not-found";
@@ -331,30 +332,168 @@ function LoginScreen({ onLogin }: { onLogin: (user: AuthUser) => void }) {
   );
 }
 
+// Dropbox ログイン専用画面（GitHub Pages 等のサーバ無し環境向け）。
+// 旧 LoginScreen（ユーザー名 + パスワード）はサーバが居る前提なので Pages では
+// 何を入れても "Unexpected token '<', '<html>'" になる。代わりにこれを出す。
+function DropboxLoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
+  const [connecting, setConnecting] = useState(false);
+  const [error, setError] = useState("");
+
+  const handleConnect = useCallback(async () => {
+    setConnecting(true);
+    setError("");
+    try {
+      await startDropboxOAuth(); // window.location 遷移なのでここには戻らない
+    } catch (err: any) {
+      setError(err?.message || String(err));
+      setConnecting(false);
+    }
+  }, []);
+
+  // 既に localStorage に token がある（リロード直後など）→ 即上に通知
+  useEffect(() => {
+    if (isDropboxLoggedIn()) onLoggedIn();
+  }, [onLoggedIn]);
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "linear-gradient(135deg, #1e1e1c 0%, #2e2e2b 50%, #1a1a18 100%)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        fontFamily: '"Hiragino Sans", "Yu Gothic", "Noto Sans JP", sans-serif',
+        color: TS_DESIGN.text,
+      }}
+    >
+      <div
+        style={{
+          background: TS_DESIGN.bg2,
+          border: `1px solid ${TS_DESIGN.border}`,
+          borderRadius: 16,
+          padding: "48px 56px",
+          width: 440,
+          boxShadow: "0 20px 60px rgba(0,0,0,0.7)",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 32 }}>
+          <div
+            style={{
+              width: 44, height: 44,
+              background: TS_DESIGN.accent, borderRadius: 8,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              fontFamily: '"Helvetica Neue", "Hiragino Sans", sans-serif',
+              fontWeight: 900, fontSize: 28, color: "#262624",
+              letterSpacing: "-0.02em",
+              boxShadow: `0 0 20px ${TS_DESIGN.accentGlow}`,
+            }}
+          >T</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+            <div style={{
+              fontFamily: '"Helvetica Neue", "Hiragino Sans", sans-serif',
+              fontWeight: 300, letterSpacing: "0.03em", fontSize: 26,
+              color: TS_DESIGN.text, lineHeight: 1,
+            }}>
+              <b style={{ fontWeight: 800, color: TS_DESIGN.accent }}>TELOP</b> STUDIO
+            </div>
+            <div style={{
+              fontSize: 10, color: TS_DESIGN.text3,
+              letterSpacing: "0.25em", textTransform: "uppercase", fontWeight: 700,
+            }}>Lyric Subtitle Creator</div>
+          </div>
+        </div>
+
+        <div style={{ fontSize: 13, color: TS_DESIGN.text2, lineHeight: 1.7, marginBottom: 24 }}>
+          このアプリは Dropbox に直接データを保存します。<br />
+          Dropbox にログインして始めてください。
+        </div>
+
+        <button
+          type="button"
+          disabled={connecting}
+          onClick={handleConnect}
+          style={{
+            width: "100%",
+            background: TS_DESIGN.accent,
+            border: "none",
+            color: "#1a1a18",
+            borderRadius: 8,
+            padding: 14,
+            fontFamily: "inherit",
+            fontSize: 14,
+            fontWeight: 700,
+            letterSpacing: "0.05em",
+            cursor: connecting ? "not-allowed" : "pointer",
+            opacity: connecting ? 0.5 : 1,
+          }}
+        >
+          {connecting ? "Dropbox に接続中..." : "Dropbox にログイン"}
+        </button>
+
+        {error && (
+          <p style={{ fontSize: 12, color: TS_DESIGN.errorRed, marginTop: 14 }}>{error}</p>
+        )}
+
+        <div style={{ marginTop: 18, textAlign: "center", fontSize: 12, color: TS_DESIGN.text3 }}>
+          データはあなたの Dropbox に保存されます
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function App() {
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+  const [serverAlive, setServerAlive] = useState<boolean | null>(null); // null = 判定中
+  const [dbxOk, setDbxOk] = useState<boolean>(() => isDropboxLoggedIn());
   const [checking, setChecking] = useState(true);
 
+  // ─── 起動時 OAuth callback 処理（?code= が URL にあれば access_token に交換） ───
+  // 旧 home.tsx 側でも handleOAuthCallback を呼んでいたが、App.tsx で先に処理しないと
+  // checkAuth 失敗 → LoginScreen 表示 → callback 処理されずに ?code= が消える、になる。
   useEffect(() => {
-    // Robust auth check: retry a few times before giving up and showing the
-    // login screen. Transient network blips or a cold server can otherwise
-    // briefly flash the login UI at people who ARE actually logged in.
-    let cancelled = false;
-    const attempt = async (remaining: number): Promise<AuthUser | null> => {
+    (async () => {
       try {
-        const user = await syncService.checkAuth();
-        if (user) return user;
+        const ok = await handleOAuthCallback();
+        if (ok) setDbxOk(true);
+      } catch (err) {
+        console.warn("[App] OAuth callback failed:", err);
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    // サーバ生存確認 + auth 取得をまとめてやる。
+    //   - 200/401 → サーバ生存。401 なら未ログイン
+    //   - 404/network err → サーバ無し（GitHub Pages 等）
+    let cancelled = false;
+    const attempt = async (remaining: number): Promise<{ alive: boolean; user: AuthUser | null }> => {
+      try {
+        const res = await fetch("/api/auth/me", { credentials: "include" });
+        if (res.status === 404) {
+          // 完全に Pages 経路。サーバ無し。
+          return { alive: false, user: null };
+        }
+        if (res.ok) {
+          const data = await res.json().catch(() => ({}));
+          return { alive: true, user: data?.user || null };
+        }
+        // 401, 5xx 等：サーバ生存 + 未ログイン
+        return { alive: true, user: null };
       } catch {
-        // fall through to retry
+        // fetch 失敗 → サーバ不在の可能性大
+        if (remaining > 0) {
+          await new Promise(r => setTimeout(r, 600));
+          return attempt(remaining - 1);
+        }
+        return { alive: false, user: null };
       }
-      if (remaining > 0) {
-        await new Promise(r => setTimeout(r, 600));
-        return attempt(remaining - 1);
-      }
-      return null;
     };
-    attempt(2).then(user => {
+    attempt(2).then(({ alive, user }) => {
       if (cancelled) return;
+      setServerAlive(alive);
       setAuthUser(user);
       setChecking(false);
     });
@@ -417,7 +556,26 @@ function App() {
     );
   }
 
-  if (!authUser) {
+  // ─── ログイン経路の振り分け ───
+  // Pages（サーバ無し）：Dropbox ログインを使う。dbxOk になったら認証済み扱い。
+  // dev（サーバ有り）：従来のユーザー名/パスワード LoginScreen を出す。
+  //                    ただし Dropbox にもログイン済みなら無条件で通す（dev mode 認証 bypass）。
+  const isServerless = serverAlive === false;
+  const dbxAuthenticated = dbxOk;
+
+  if (!authUser && !dbxAuthenticated) {
+    if (isServerless) {
+      // サーバ不在 → Dropbox ログイン画面
+      return (
+        <QueryClientProvider client={queryClient}>
+          <TooltipProvider>
+            <Toaster />
+            <DropboxLoginScreen onLoggedIn={() => setDbxOk(true)} />
+          </TooltipProvider>
+        </QueryClientProvider>
+      );
+    }
+    // サーバ生存 → 従来の Login 画面
     return (
       <QueryClientProvider client={queryClient}>
         <TooltipProvider>
