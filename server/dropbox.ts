@@ -11,8 +11,20 @@ import { eq } from 'drizzle-orm';
 const APP_KEY = () => process.env.DROPBOX_APP_KEY?.trim();
 const APP_SECRET = () => process.env.DROPBOX_APP_SECRET?.trim();
 
+// dev / serverless-migration モード用：DB なし環境で Dropbox を使えるよう、
+// 環境変数で refresh_token（または短期 access_token）を渡せるようにする。
+//   DROPBOX_REFRESH_TOKEN  : 長期トークン（OAuth flow で取得した正規 refresh_token）
+//   DROPBOX_ACCESS_TOKEN   : 短期トークン（4 時間有効。Developer Console から手動生成）
+// いずれかが設定されていれば DB 不要で Dropbox API が叩ける。
+const ENV_REFRESH_TOKEN = () => process.env.DROPBOX_REFRESH_TOKEN?.trim();
+const ENV_ACCESS_TOKEN = () => process.env.DROPBOX_ACCESS_TOKEN?.trim();
+
 function useCustomOAuth(): boolean {
   return !!(APP_KEY() && APP_SECRET());
+}
+
+function hasDb(): boolean {
+  return !!process.env.DATABASE_URL;
 }
 
 // ── In-memory cache ────────────────────────────────────────────────────────────
@@ -46,28 +58,56 @@ async function refreshWithStoredToken(refreshToken: string): Promise<string> {
   const expiresAt = new Date(Date.now() + (data.expires_in ?? 14400) * 1000 - 60_000);
   tokenCache = { accessToken: data.access_token, expiresAt: expiresAt.getTime() };
 
-  await db.update(dropboxTokens)
-    .set({ accessToken: data.access_token, expiresAt, updatedAt: new Date() })
-    .where(eq(dropboxTokens.id, 'default'));
+  // DB がある時だけ永続化（dev / serverless モードは tokenCache のみ）
+  if (hasDb()) {
+    try {
+      await db.update(dropboxTokens)
+        .set({ accessToken: data.access_token, expiresAt, updatedAt: new Date() })
+        .where(eq(dropboxTokens.id, 'default'));
+    } catch (err: any) {
+      console.warn('[dropbox] token DB update failed (continuing with in-memory cache):', err?.message);
+    }
+  }
 
   return data.access_token;
 }
 
-// ── Custom OAuth: get access token (from cache → DB → refresh) ─────────────────
+// ── Custom OAuth: get access token (from cache → ENV → DB → refresh) ───────────
 async function getAccessTokenCustom(): Promise<string> {
   // 1. In-memory cache
   if (tokenCache && tokenCache.expiresAt > Date.now()) {
     return tokenCache.accessToken;
   }
 
-  // 2. Load from DB
+  // 2. ENV 経由（dev / serverless モード）
+  //    優先順: REFRESH_TOKEN > ACCESS_TOKEN
+  //    REFRESH があれば refresh して新しい access を取る（長期運用に最適）
+  //    ACCESS だけなら短期トークンとして 4 時間有効ということにしてキャッシュ
+  const envRefresh = ENV_REFRESH_TOKEN();
+  if (envRefresh && useCustomOAuth()) {
+    console.log('[dropbox] using DROPBOX_REFRESH_TOKEN from env');
+    return await refreshWithStoredToken(envRefresh);
+  }
+  const envAccess = ENV_ACCESS_TOKEN();
+  if (envAccess) {
+    console.log('[dropbox] using DROPBOX_ACCESS_TOKEN from env (4-hour token, no refresh)');
+    // Developer Console で発行された短期トークンは 4 時間有効。安全マージンで 3.5h で expire 扱い。
+    const expiresAt = Date.now() + 3.5 * 60 * 60 * 1000;
+    tokenCache = { accessToken: envAccess, expiresAt };
+    return envAccess;
+  }
+
+  // 3. DB から読み込み（本番経路）
+  if (!hasDb()) {
+    throw new Error('Dropbox not connected: no DROPBOX_REFRESH_TOKEN / DROPBOX_ACCESS_TOKEN in env and no DB available.');
+  }
   const [stored] = await db.select().from(dropboxTokens).where(eq(dropboxTokens.id, 'default'));
 
   if (!stored?.refreshToken) {
     throw new Error('Dropbox not connected: no refresh token stored. Please reconnect Dropbox from the settings.');
   }
 
-  // 3. Access token still valid?
+  // 4. Access token still valid?
   if (stored.accessToken && stored.expiresAt && stored.expiresAt.getTime() > Date.now()) {
     tokenCache = { accessToken: stored.accessToken, expiresAt: stored.expiresAt.getTime() };
     return stored.accessToken;
@@ -831,8 +871,18 @@ export async function getDropboxOAuthStatus(): Promise<{
   let customConnected = false;
 
   if (customConfigured) {
-    const [stored] = await db.select().from(dropboxTokens).where(eq(dropboxTokens.id, 'default'));
-    customConnected = !!(stored?.refreshToken);
+    // ENV 経由でトークンが渡されていれば「connected」扱い（dev / serverless モード）
+    if (ENV_REFRESH_TOKEN() || ENV_ACCESS_TOKEN()) {
+      customConnected = true;
+    } else if (hasDb()) {
+      try {
+        const [stored] = await db.select().from(dropboxTokens).where(eq(dropboxTokens.id, 'default'));
+        customConnected = !!(stored?.refreshToken);
+      } catch (err: any) {
+        console.warn('[dropbox] oauth status DB query failed:', err?.message);
+        customConnected = false;
+      }
+    }
   }
 
   return {
