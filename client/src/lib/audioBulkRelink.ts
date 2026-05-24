@@ -150,6 +150,8 @@ export async function runBulkRelink(options: BulkRelinkOptions = {}): Promise<Bu
       }
 
       const searchName = fileName.replace(/\.(mp3|wav|m4a|aac|ogg|flac|wma|aiff|aif|opus)$/i, "");
+
+      // Step 3-a: まず exact match を試す（厳格、サーバ unique 判定）
       const findUrl = `/api/dropbox/find?fileName=${encodeURIComponent(searchName)}`;
       const findRes = await fetchDropbox(findUrl, { signal }, { allowReconnect: false, timeoutMs: 30000 });
       if (!findRes.ok) {
@@ -159,24 +161,53 @@ export async function runBulkRelink(options: BulkRelinkOptions = {}): Promise<Bu
       }
       const findData = await findRes.json();
 
-      // 完全一致（サーバ側で unique 判定済）のみ自動リンク
       if (findData.found && findData.path) {
         const dl = await tryDownload(findData.path, signal);
         if (dl.data && dl.data.byteLength > 0) {
           await storage.updateAudioTrackBlob(trackId, dl.data);
           await storage.updateAudioTrackDropboxPath(trackId, findData.path);
           syncService.markTrackTouched(trackId);
-          // サーバへ push（dirty フラグ立てて、後でまとめて schedulePush）
           syncService.markDirty(projectId);
           progress.autoRelinked++;
         } else {
           progress.error++;
         }
-      } else if (findData.ambiguous || (Array.isArray(findData.suggestions) && findData.suggestions.length > 0)) {
-        // 候補ありだが ambiguous or fuzzy → 自動リンクしない（手動 Dialog 待ち）
+        counted = true;
+        continue;
+      }
+
+      // Step 3-b: exact match なし → /auto-relink で「preset folder 内で 1 件確定の fuzzy」を試す
+      // ここで採用されるのは「preset folder 内の Telop音源 配下」で「同名候補が 1 件だけ」のもの。
+      // 厳格な safeguard 下なので誤マッチリスクは低い。
+      try {
+        // project preset を取得（自動採用の絞り込み材料）
+        const proj = await storage.getProject(projectId);
+        const presetParam = (proj?.preset || "").trim();
+        const autoUrl = `/api/dropbox/auto-relink?fileName=${encodeURIComponent(searchName)}${presetParam ? `&preset=${encodeURIComponent(presetParam)}` : ""}`;
+        const autoRes = await fetchDropbox(autoUrl, { signal }, { allowReconnect: false, timeoutMs: 30000 });
+        if (autoRes.ok) {
+          const autoData = await autoRes.json();
+          if (autoData.accepted && autoData.path) {
+            const dl2 = await tryDownload(autoData.path, signal);
+            if (dl2.data && dl2.data.byteLength > 0) {
+              await storage.updateAudioTrackBlob(trackId, dl2.data);
+              await storage.updateAudioTrackDropboxPath(trackId, autoData.path);
+              syncService.markTrackTouched(trackId);
+              syncService.markDirty(projectId);
+              progress.autoRelinked++;
+              counted = true;
+              continue;
+            }
+          }
+        }
+      } catch (autoErr) {
+        console.debug(`[bulk-relink] auto-relink failed on ${fileName}:`, autoErr);
+      }
+
+      // Step 3-c: それでもダメ → fuzzy 候補ありなら手動 Dialog 待ち、無ければ no match
+      if (findData.ambiguous || (Array.isArray(findData.suggestions) && findData.suggestions.length > 0)) {
         progress.needsManual++;
       } else {
-        // Dropbox 上に該当無し
         progress.noMatch++;
       }
       counted = true;

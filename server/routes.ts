@@ -41,7 +41,7 @@ import pg from "pg";
 import rateLimit from "express-rate-limit";
 import { uploadToDropbox, downloadFromDropbox, downloadFromDropboxStream, listDropboxFiles, searchDropboxFiles, checkDropboxConnection, checkDropboxFileExists, deleteFromDropbox, renameInDropbox, getUncachableDropboxClient, getTeamDropboxClient, getDropboxAuthUrl, exchangeDropboxCode, disconnectDropboxCustom, getDropboxOAuthStatus, browseDropboxFolder, diagnoseDrpboxStructure } from "./dropbox";
 import { Readable } from "stream";
-import { findExactMatches, findFuzzyMatches, type DropboxEntry } from "./dropboxMatch";
+import { findExactMatches, findFuzzyMatches, findFuzzyMatchesScored, type DropboxEntry } from "./dropboxMatch";
 import kuromoji from "kuromoji";
 
 let kuromojiTokenizer: kuromoji.Tokenizer<kuromoji.IpadicFeatures> | null = null;
@@ -1486,6 +1486,107 @@ export async function registerRoutes(
   //     user to choose. `none` returns empty candidates.
   //   - NEVER silently pick one of multiple matches. NEVER fall back to
   //     substring matching. That is the whole point of this rewrite.
+  // ─── auto-relink: bulk 復元用の安全な fuzzy 自動採用 ───────────────────
+  // 通常の /find は「fuzzy 候補は手動 Dialog で選ぶ」設計だが、
+  // 200 曲規模の一括復元には fuzzy も自動採用したい。
+  // ここでは厳格な safeguard 下で 1 件だけ「自動採用候補」を返す：
+  //   1. listLocalDropboxAudio() から候補を集める（trusted source）
+  //   2. findFuzzyMatches で fuzzy ソート
+  //   3. 採用条件：
+  //      a) preset が指定されてれば、その preset folder（SAKURAZAKA/HINATAZAKA/OTHER）
+  //         配下の候補だけに絞る → 全然違うジャンルへの誤マッチを防ぐ
+  //      b) basename の significant token がクエリの半分以上一致する
+  //      c) 同条件を満たす候補が 1 件だけ（複数あれば手動 Dialog 維持）
+  //   満たさなければ found:false で返し、クライアント側で従来の Dialog 経路へ。
+  app.get("/api/dropbox/auto-relink", async (req, res) => {
+    try {
+      const fileName = (req.query.fileName as string) || "";
+      const preset = (req.query.preset as string) || ""; // "sakurazaka" / "hinatazaka" / "other"
+      if (!fileName) return res.status(400).json({ message: "fileName is required" });
+
+      const localEntries = listLocalDropboxAudio();
+      if (localEntries.length === 0) {
+        return res.json({ accepted: false, reason: "no local index" });
+      }
+
+      // preset 制約：Telop音源/<preset> 配下にある候補だけに絞る。空 preset なら制約なし。
+      const presetFolder =
+        preset === "sakurazaka" ? "SAKURAZAKA" :
+        preset === "hinatazaka" ? "HINATAZAKA" :
+        preset === "other" ? "OTHER" : null;
+      const filtered = presetFolder
+        ? localEntries.filter(e => e.path.includes(`/Telop音源/${presetFolder}/`))
+        : localEntries;
+
+      if (filtered.length === 0) {
+        return res.json({ accepted: false, reason: `no candidates in preset folder ${presetFolder}` });
+      }
+
+      // fuzzy match（score 付き）
+      // preset folder で見つからなければ全体に広げる（fallback）。
+      // 全体検索のときは採用基準を厳しくして誤マッチを抑える。
+      let scored = findFuzzyMatchesScored(fileName, filtered, 8);
+      let usedFallback = false;
+      if (scored.length === 0 && presetFolder) {
+        usedFallback = true;
+        scored = findFuzzyMatchesScored(fileName, localEntries, 8);
+      }
+      if (scored.length === 0) {
+        return res.json({ accepted: false, reason: "no fuzzy match" });
+      }
+
+      // basename で dedupe：同じファイル名が複数 path にある（duplicate folder 等）
+      // 場合、最初の 1 件だけ残す。これで「同じファイル別 path」を 1 件扱いに。
+      const seenBasename = new Set<string>();
+      const dedup: typeof scored = [];
+      for (const s of scored) {
+        const base = s.entry.name.toLocaleLowerCase("ja-JP");
+        if (seenBasename.has(base)) continue;
+        seenBasename.add(base);
+        dedup.push(s);
+      }
+
+      // 採用条件（dedupe 後）：
+      //  1. 候補 1 件のみ → 採用（score >= MIN_FUZZY_SCORE は既に保証）
+      //  2. 複数あるが、top score 1.0（全 token 一致）+ 2nd と 0.3 以上差 → 採用
+      //  3. 複数あって top score >= 0.9 + 2nd と 0.3 以上差 → 採用
+      // fallback（全体検索）の場合は基準を 1.0 のみに引き上げ（誤マッチリスク高いため）
+      if (dedup.length === 1) {
+        const winner = dedup[0];
+        // fallback で 1 件のみ採用するなら、せめて score 0.8 以上は欲しい
+        if (usedFallback && winner.score < 0.8) {
+          return res.json({
+            accepted: false,
+            reason: `fallback single hit but score too low (${winner.score.toFixed(2)})`,
+            suggestions: dedup.map(s => s.entry),
+          });
+        }
+        console.log(`[auto-relink] "${fileName}" (preset=${preset || "-"}${usedFallback ? ",fallback" : ""}) → ${winner.entry.path} (score=${winner.score.toFixed(2)}, dedup 1)`);
+        return res.json({ accepted: true, path: winner.entry.path, name: winner.entry.name });
+      }
+      const top = dedup[0];
+      const second = dedup[1];
+      const gap = top.score - second.score;
+      // fallback は採用条件厳しく：top 1.0 必須
+      const threshold = usedFallback ? 1.0 : 0.9;
+      const decisive = top.score >= threshold && gap >= 0.3;
+      if (decisive) {
+        console.log(`[auto-relink] "${fileName}" (preset=${preset || "-"}${usedFallback ? ",fallback" : ""}) → ${top.entry.path} (score=${top.score.toFixed(2)}, gap=${gap.toFixed(2)})`);
+        return res.json({ accepted: true, path: top.entry.path, name: top.entry.name });
+      }
+
+      // 不確実 → 手動
+      return res.json({
+        accepted: false,
+        reason: `ambiguous (${dedup.length} fuzzy candidates, top=${top.score.toFixed(2)}, 2nd=${second.score.toFixed(2)})`,
+        suggestions: dedup.map(s => s.entry),
+      });
+    } catch (err: any) {
+      console.error("[auto-relink] error:", err);
+      res.status(500).json({ message: err?.message || "auto-relink failed" });
+    }
+  });
+
   app.get("/api/dropbox/find", async (req, res) => {
     try {
       const fileName = req.query.fileName as string;

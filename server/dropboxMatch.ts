@@ -192,3 +192,54 @@ export function findFuzzyMatches(
 
   return scored.slice(0, maxResults).map(s => s.entry);
 }
+
+/**
+ * 内部 score 付き fuzzy match。auto-relink で「top vs 2nd の差で自動採用判定」に使う。
+ */
+export function findFuzzyMatchesScored(
+  query: string,
+  entries: DropboxEntry[],
+  maxResults: number = 8
+): Array<{ entry: DropboxEntry; score: number; matched: number }> {
+  const rawQueryTokens = tokenizeForFuzzy(query);
+  const queryTokens = rawQueryTokens.filter(isSignificantToken);
+  if (queryTokens.length === 0) return [];
+
+  const scored: Array<{ entry: DropboxEntry; score: number; matched: number }> = [];
+  const seenPath = new Set<string>();
+
+  for (const e of entries) {
+    if (!e || !e.name || !e.path) continue;
+    if (seenPath.has(e.path)) continue;
+    const rawEntryTokens = tokenizeForFuzzy(e.name);
+    const entryTokens = rawEntryTokens.filter(isSignificantToken);
+    if (entryTokens.length === 0) continue;
+    let matched = 0;
+    for (const qt of queryTokens) {
+      for (const et of entryTokens) {
+        if (
+          qt === et ||
+          (qt.length >= 3 && et.includes(qt)) ||
+          (et.length >= 3 && qt.includes(et))
+        ) {
+          matched++;
+          break;
+        }
+      }
+    }
+    if (matched === 0) continue;
+    const score = matched / queryTokens.length;
+    if (score < MIN_FUZZY_SCORE) continue;
+    scored.push({ entry: e, score, matched });
+    seenPath.add(e.path);
+  }
+
+  scored.sort(
+    (a, b) =>
+      b.score - a.score ||
+      b.matched - a.matched ||
+      a.entry.name.length - b.entry.name.length
+  );
+
+  return scored.slice(0, maxResults);
+}
