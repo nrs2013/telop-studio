@@ -170,6 +170,30 @@ export async function registerRoutes(
     },
   }));
 
+  // ── Dev モード認証 bypass + DB 系 API ガード ──────────────────────────
+  // Railway / 本番 DB なしでローカル開発するときに「ログインできずに詰む」を回避。
+  // - production では絶対に動かない（isProduction で gate）
+  // - DATABASE_URL が設定されている場合（本番 DB に繋がっている開発環境）も動かさない
+  // - それ以外（純粋な npm run dev）では：
+  //   (1) 未ログインのリクエストに自動で dev user を割当
+  //   (2) DB を必要とする /api/sync/* を 503 で返し、クライアント側で catch されるようにする
+  //       （クライアントは IndexedDB ベースで動くので 503 を握りつぶせば作業継続可）
+  // serverless 化が完了して GitHub Pages へ移行するまでの繋ぎ実装。
+  if (!isProduction && !process.env.DATABASE_URL) {
+    console.log("[dev-auth] Bypass enabled: requests without session auto-assigned to 'dev-local-user'");
+    console.log("[dev-auth] /api/sync/* will return 503 (no DB). Client uses IndexedDB only.");
+    app.use((req, _res, next) => {
+      if (!req.session.userId) {
+        req.session.userId = "dev-local-user";
+        req.session.username = "dev";
+      }
+      next();
+    });
+    app.use("/api/sync", (_req, res) => {
+      res.status(503).json({ message: "Sync disabled in dev mode (no DATABASE_URL). Use IndexedDB only." });
+    });
+  }
+
   // ── Rate limiting ────────────────────────────────────────────────
   // 認証系（login/register）はブルートフォース対策で厳しめに、
   // 全 API は本番運用中のスパイクを許容しつつ DoS を防ぐ程度の上限に設定。
