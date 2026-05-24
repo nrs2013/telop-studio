@@ -1,0 +1,66 @@
+# GitHub Pages 自動デプロイ。
+# main にコミット push されると、vite build で静的サイトを作って Pages に公開。
+# 公開 URL: https://nrs2013.github.io/telop-studio/
+#
+# 完全 serverless 化（Express / Railway / Supabase 全部不要、月 $0）の最終段。
+# クライアントは Dropbox JS SDK で直接 Dropbox にアクセスして動作する。
+
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 同じデプロイが同時に走らないようにする
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - run: npm ci
+
+      # GitHub Pages のサブパス用に base path を切替。
+      # vite.config.ts が VITE_GITHUB_PAGES=1 のとき /telop-studio/ を base にする。
+      - name: Build for GitHub Pages
+        env:
+          VITE_GITHUB_PAGES: "1"
+        run: |
+          # vite で client/ を build。dist/public に出力される。
+          npx vite build
+          # SPA ルーティングのため 404.html を index.html のコピーで作る。
+          # GitHub Pages は 404 時にこのファイルを返すので、深い URL でも index.html が
+          # ロードされて React Router が動く。
+          cp dist/public/index.html dist/public/404.html
+          # .nojekyll を置いて Jekyll の処理（_ 始まりファイル除外等）を無効化。
+          touch dist/public/.nojekyll
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist/public
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -4,6 +4,10 @@ import path from "path";
 
 export default defineConfig({
   plugins: [react()],
+  // GitHub Pages: https://nrs2013.github.io/telop-studio/ で公開するので、
+  // 全ての asset URL に /telop-studio/ を前置する必要がある。
+  // dev サーバ（localhost）では '/'。VITE_GITHUB_PAGES=1 のときだけサブパスに。
+  base: process.env.VITE_GITHUB_PAGES === "1" ? "/telop-studio/" : "/",
   resolve: {
     alias: {
       "@": path.resolve(import.meta.dirname, "client", "src"),
