@@ -15,7 +15,8 @@ import { safeSetItem } from "@/lib/safeStorage";
 import { useLiveMode } from "@/lib/liveMode";
 import { schedulePrefetchAudios } from "@/lib/prefetchAudio";
 import { runBulkRelink, type BulkRelinkProgress, type BulkRelinkResult } from "@/lib/audioBulkRelink";
-import { Wrench } from "lucide-react";
+import { exportBackup, downloadBackup, importBackup, type ImportResult } from "@/lib/backupRestore";
+import { Wrench, Download as DownloadIcon, FileUp } from "lucide-react";
 
 function formatDate(dateStr: string | null) {
   if (!dateStr) return "";
@@ -292,6 +293,48 @@ export default function Home() {
   const cancelBulkRelink = useCallback(() => {
     bulkRelinkAbortRef.current?.abort();
   }, []);
+
+  // Backup / Restore（別 origin への移行や事故復旧用）
+  const restoreFileInputRef = useRef<HTMLInputElement>(null);
+  const [restoreResult, setRestoreResult] = useState<ImportResult | null>(null);
+  const [restoreDialogOpen, setRestoreDialogOpen] = useState(false);
+
+  const handleDownloadBackup = useCallback(async () => {
+    try {
+      const data = await exportBackup();
+      downloadBackup(data);
+      toast({ title: "バックアップを保存しました", description: `projects=${data.projects?.length || 0}, audioTracks=${data.audioTracks?.length || 0}` });
+    } catch (e: any) {
+      toast({ title: "バックアップに失敗", description: e?.message || String(e), variant: "destructive" });
+    }
+  }, [toast]);
+
+  const handleRestoreClick = useCallback(() => {
+    restoreFileInputRef.current?.click();
+  }, []);
+
+  const handleRestoreFile = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // 同じファイルを連続選択可能に
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const json = JSON.parse(text);
+      const result = await importBackup(json);
+      setRestoreResult(result);
+      setRestoreDialogOpen(true);
+      // インポート完了後にプロジェクト一覧を refresh
+      const refreshed = await storage.getProjects();
+      setProjects(refreshed);
+      // folders などの localStorage 系も即時反映するためにフォルダ state を更新
+      try {
+        const raw = localStorage.getItem("telop-folders");
+        if (raw) setFolders(JSON.parse(raw));
+      } catch {}
+    } catch (e: any) {
+      toast({ title: "リストアに失敗", description: e?.message || "JSON 形式が違うかもしれません", variant: "destructive" });
+    }
+  }, [toast]);
 
   const togglePin = useCallback((id: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -1474,6 +1517,36 @@ export default function Home() {
             >
               <Wrench className="w-3.5 h-3.5" />
             </Button>
+            {/* バックアップ取得（JSON ダウンロード） */}
+            <Button
+              size="icon"
+              variant="ghost"
+              className="w-7 h-7"
+              onClick={handleDownloadBackup}
+              title="バックアップを JSON でダウンロード"
+              data-testid="button-backup-download"
+            >
+              <DownloadIcon className="w-3.5 h-3.5" />
+            </Button>
+            {/* バックアップから復元（別 origin からの移行や事故復旧） */}
+            <Button
+              size="icon"
+              variant="ghost"
+              className="w-7 h-7"
+              onClick={handleRestoreClick}
+              title="バックアップ JSON からデータを復元"
+              data-testid="button-backup-restore"
+            >
+              <FileUp className="w-3.5 h-3.5" />
+            </Button>
+            <input
+              ref={restoreFileInputRef}
+              type="file"
+              accept="application/json,.json"
+              className="hidden"
+              onChange={handleRestoreFile}
+              data-testid="input-restore-file"
+            />
             {/* 本番モード（LIVE）トグル：削除ロック + サーバ同期停止を一括で */}
             <Button
               size="sm"
@@ -1731,6 +1804,32 @@ export default function Home() {
                 <Button type="submit" data-testid="button-tag-save">保存</Button>
               </div>
             </form>
+          </DialogContent>
+        </Dialog>
+
+        {/* Restore 完了 Dialog */}
+        <Dialog open={restoreDialogOpen} onOpenChange={(o) => { setRestoreDialogOpen(o); if (!o) setRestoreResult(null); }}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>復元が完了しました</DialogTitle>
+              <DialogDescription>
+                バックアップ JSON から IndexedDB にデータをマージしました。
+                音源 blob は含まれていないので、必要に応じて「🔧 全曲リンク復元」ボタンで再 download してください。
+              </DialogDescription>
+            </DialogHeader>
+            {restoreResult && (
+              <div className="grid grid-cols-2 gap-x-4 gap-y-1 mt-2 text-xs font-mono" style={{ color: TS_DESIGN.text2 }}>
+                <div className="flex justify-between"><span>projects</span><span>{restoreResult.projects}</span></div>
+                <div className="flex justify-between"><span>lyrics</span><span>{restoreResult.lyrics}</span></div>
+                <div className="flex justify-between"><span>audioTracks</span><span>{restoreResult.audioTracks}</span></div>
+                <div className="flex justify-between"><span>markers</span><span>{restoreResult.markers}</span></div>
+                <div className="flex justify-between"><span>deletedProjects</span><span>{restoreResult.deleted}</span></div>
+                <div className="flex justify-between"><span>localStorage</span><span>{restoreResult.localStorage}</span></div>
+              </div>
+            )}
+            <DialogFooter>
+              <Button onClick={() => { setRestoreDialogOpen(false); setRestoreResult(null); }}>閉じる</Button>
+            </DialogFooter>
           </DialogContent>
         </Dialog>
 
