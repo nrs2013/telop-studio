@@ -579,12 +579,37 @@ export default function Home() {
   }, [fetchDropboxStatus, toast]);
 
   useEffect(() => {
-    const fetchEditingStatus = () => {
-      fetch("/api/editing/status").then(r => r.json()).then(setEditingStatus).catch(() => {});
+    let interval: ReturnType<typeof setInterval> | null = null;
+    let cancelled = false;
+
+    const fetchEditingStatus = async () => {
+      try {
+        const r = await fetch("/api/editing/status");
+        if (!r.ok) {
+          // サーバ無し（GitHub Pages 等）→ ポーリングを停止して console noise を抑える
+          if (r.status === 404 && interval) {
+            clearInterval(interval);
+            interval = null;
+          }
+          return;
+        }
+        const json = await r.json();
+        if (!cancelled) setEditingStatus(json);
+      } catch {
+        // ネットワーク完全断 or サーバ不在 → ポーリング停止
+        if (interval) {
+          clearInterval(interval);
+          interval = null;
+        }
+      }
     };
+
     fetchEditingStatus();
-    const interval = setInterval(fetchEditingStatus, 10_000);
-    return () => clearInterval(interval);
+    interval = setInterval(fetchEditingStatus, 10_000);
+    return () => {
+      cancelled = true;
+      if (interval) clearInterval(interval);
+    };
   }, []);
 
   useEffect(() => {
