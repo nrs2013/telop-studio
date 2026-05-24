@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, Component, type ReactNode, type ErrorInfo } from "react";
-import { Switch, Route } from "wouter";
+import { Switch, Route, Router as WouterRouter } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -42,13 +42,24 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boole
   }
 }
 
+// GitHub Pages 用 base path 取得。
+// dev (Express): "/" → wouter base = "" (空)
+// Pages: "/telop-studio/" → wouter base = "/telop-studio"（末尾スラッシュは付けない）
+function getRouterBase(): string {
+  const base = import.meta.env.BASE_URL || "/";
+  if (base === "/" || base === "") return "";
+  return base.endsWith("/") ? base.slice(0, -1) : base;
+}
+
 function Router() {
   return (
-    <Switch>
-      <Route path="/" component={Home} />
-      <Route path="/project/:id" component={ProjectPage} />
-      <Route component={NotFound} />
-    </Switch>
+    <WouterRouter base={getRouterBase()}>
+      <Switch>
+        <Route path="/" component={Home} />
+        <Route path="/project/:id" component={ProjectPage} />
+        <Route component={NotFound} />
+      </Switch>
+    </WouterRouter>
   );
 }
 
