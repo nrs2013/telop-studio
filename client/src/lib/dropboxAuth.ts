@@ -18,10 +18,11 @@
 
 import { Dropbox, DropboxAuth } from "dropbox";
 
-// TELOP STUDIO 2026 app key（公開可能、secret はクライアントに持たない）
-// ※ 旧 "TELOPSTUDIO" app (key=ntg90kn8q9us8h6) ではなく、新規の "TELOP STUDIO 2026" app
-//    を使う。リダイレクト URI も 2026 側にだけ登録済み。
-const APP_KEY = "mdt05rlzjykkriu";
+// "Telop Studio Lyric Sync nomura" app key（公開可能、secret はクライアントに持たない）
+// ※ Railway 時代から使っていた既存 app。nrs アカウント配下で承認済み・PKCE Allow 済み。
+// ※ 個人 Dropbox 配下に作った TELOP STUDIO 2026 (mdt05rlzjykkriu) は team admin 承認が
+//    必要で詰むので使えない。これに切り替えれば既存音源 path も全部そのまま動く。
+const APP_KEY = "50csjjo4u9fvfxw";
 
 const LS_ACCESS_TOKEN = "telop-dbx-access-token";
 const LS_REFRESH_TOKEN = "telop-dbx-refresh-token";
