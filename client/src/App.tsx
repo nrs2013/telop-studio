@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, Component, type ReactNode, type ErrorInfo } from "react";
+import { useState, useEffect, useCallback, useRef, Component, type ReactNode, type ErrorInfo } from "react";
 import { Switch, Route, Router as WouterRouter } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
@@ -6,8 +6,10 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useToast } from "@/hooks/use-toast";
 import { syncService, type AuthUser } from "@/lib/syncService";
-import { isDropboxLoggedIn, startDropboxOAuth, handleOAuthCallback } from "@/lib/dropboxAuth";
+import { isDropboxLoggedIn, startDropboxOAuth, handleOAuthCallback, signOut as dbxSignOut, resetSessionExpiredFlag, DBX_SESSION_EXPIRED_EVENT } from "@/lib/dropboxAuth";
 import { probeDevProxy } from "@/lib/dropboxFetch";
+import { getLiveMode } from "@/lib/liveMode";
+import { ToastAction } from "@/components/ui/toast";
 import Home from "@/pages/home";
 import ProjectPage from "@/pages/project";
 import NotFound from "@/pages/not-found";
@@ -461,6 +463,7 @@ function App() {
   const [serverAlive, setServerAlive] = useState<boolean | null>(null); // null = 判定中
   const [dbxOk, setDbxOk] = useState<boolean>(() => isDropboxLoggedIn());
   const [checking, setChecking] = useState(true);
+  const { toast } = useToast();
 
   // ─── 起動時 OAuth callback 処理（?code= が URL にあれば access_token に交換） ───
   // 旧 home.tsx 側でも handleOAuthCallback を呼んでいたが、App.tsx で先に処理しないと
@@ -489,6 +492,70 @@ function App() {
     const id = setInterval(tick, 30_000);
     return () => { cancelled = true; clearInterval(id); };
   }, []);
+
+  // ─── Dropbox セッション期限切れの一元処理 ───
+  // getDropboxClient / 各 handler が refresh 失敗を検知すると DBX_SESSION_EXPIRED_EVENT を発火する。
+  // ここで受けて：
+  //   - 本番（LIVE）モード中 → 自動ログアウトせず toast だけ（演出中に画面が飛ぶ事故を防ぐ）
+  //   - それ以外 → token を破棄し再ログイン画面へ。IndexedDB のデータは一切触らないので 155 曲は無傷。
+  const sessionExpiredHandledRef = useRef(false);
+  useEffect(() => {
+    const onExpired = () => {
+      if (sessionExpiredHandledRef.current) return;
+      sessionExpiredHandledRef.current = true;
+
+      // 本番モード中は画面を飛ばさない（演出を止めない）
+      if (getLiveMode()) {
+        toast({
+          title: "Dropbox の接続が切れました",
+          description: "本番モード中はログアウトしません。本番終了後にヘッダーから再ログインしてください。",
+          variant: "destructive",
+        });
+        // 次の期限切れ通知をまた拾えるようにフラグを戻す（少し待ってから）
+        setTimeout(() => { sessionExpiredHandledRef.current = false; }, 30_000);
+        return;
+      }
+
+      // token を破棄（IndexedDB は触らない）して再ログイン画面へ
+      try { dbxSignOut(); } catch {}
+      setDbxOk(false);
+      resetSessionExpiredFlag();
+      sessionExpiredHandledRef.current = false;
+
+      toast({
+        title: "Dropbox の再ログインが必要です",
+        description: "セッションの有効期限が切れました。プロジェクトデータは保持されています。",
+        variant: "destructive",
+        action: (
+          <ToastAction altText="再ログイン" onClick={() => { startDropboxOAuth(); }}>
+            再ログイン
+          </ToastAction>
+        ),
+      });
+    };
+
+    window.addEventListener(DBX_SESSION_EXPIRED_EVENT, onExpired);
+    return () => window.removeEventListener(DBX_SESSION_EXPIRED_EVENT, onExpired);
+  }, [toast]);
+
+  // ─── 別タブ同期：他タブでログアウトしたら、このタブも再ログイン画面へ ───
+  // localStorage の access/refresh token が他タブで消えたら storage イベントが飛ぶ。
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === "telop-dbx-access-token" || e.key === "telop-dbx-refresh-token") {
+        const stillLoggedIn = isDropboxLoggedIn();
+        if (!stillLoggedIn && dbxOk) {
+          setDbxOk(false);
+        } else if (stillLoggedIn && !dbxOk) {
+          // 他タブで再ログインした → こちらも復帰
+          setDbxOk(true);
+          resetSessionExpiredFlag();
+        }
+      }
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, [dbxOk]);
 
   useEffect(() => {
     // サーバ生存確認 + auth 取得をまとめてやる。

@@ -9,13 +9,15 @@
 //
 // 既存サーバ endpoint との互換性が最重要。レスポンス shape を絶対崩さない。
 
-import { getDropboxClient, isDropboxLoggedIn } from "./dropboxAuth";
+import { getDropboxClient, isDropboxLoggedIn, handleDbxError } from "./dropboxAuth";
 import {
   findExactMatches,
   findFuzzyMatches,
   findFuzzyMatchesScored,
   type DropboxEntry,
 } from "../../../shared/dropboxMatch";
+
+const AUDIO_EXT_RE = /\.(mp3|wav|m4a|aac|ogg|flac|wma|aiff|aif|opus)$/i;
 
 let installed = false;
 
@@ -112,8 +114,10 @@ async function resolvePriorityFolderPath(): Promise<string | null> {
     // shared link のメタデータから実 path を取得する。
     const meta: any = await (dbx as any).sharingGetSharedLinkMetadata({ url: PRIORITY_SHARED_LINK });
     const m = meta?.result || meta;
-    // path_lower / path_display があれば team scope 内の実 path
-    priorityFolderPath = m?.path_lower || m?.path_display || m?.name ? `/${m.name}` : null;
+    // path_lower / path_display があれば team scope 内の実 path。
+    // 無ければ folder 名で namespace root 直下を仮定（pathRoot 設定済みなので /name で辿れる）。
+    // ※ 括弧で優先順位を明示（path_lower → path_display → /name の順）。
+    priorityFolderPath = m?.path_lower || m?.path_display || (m?.name ? `/${m.name}` : null);
     priorityFolderResolved = true;
     console.log(`[dbx-fetch] priority folder resolved to: ${priorityFolderPath}`);
     return priorityFolderPath;
@@ -245,7 +249,90 @@ const handleDownload: Handler = async (url) => {
     });
   } catch (err) {
     console.warn("[dbx-fetch] download failed:", err);
+    handleDbxError(err); // 401 ならセッション期限切れ通知
     return null;
+  }
+};
+
+// /api/dropbox/browse?path=... ─── フォルダブラウザ（dropbox-picker.tsx 用）
+// レスポンス shape はサーバ互換： { entries: [{name, path, type, size}], path }
+// pathRoot が getDropboxClient で team root namespace に設定されているので
+// "/nrs チーム フォルダ/..." 等の team space path も filesListFolder で辿れる。
+const handleBrowse: Handler = async (url) => {
+  const folderPath = url.searchParams.get("path") || "";
+  const dbx = await getDropboxClient();
+  if (!dbx) return jsonResponse({ message: "Dropbox にログインしていません" }, 401);
+  try {
+    const entries: Array<{ name: string; path: string; type: "folder" | "file"; size: number }> = [];
+    let res: any = await dbx.filesListFolder({
+      path: folderPath, // "" = namespace root（チーム全体）
+      recursive: false,
+      include_non_downloadable_files: true,
+    });
+    while (true) {
+      for (const e of res.result.entries) {
+        const tag = e[".tag"];
+        if (tag !== "folder" && tag !== "file") continue;
+        entries.push({
+          name: e.name,
+          path: e.path_display || e.path_lower || "",
+          type: tag === "folder" ? "folder" : "file",
+          size: e.size ?? 0,
+        });
+      }
+      if (!res.result.has_more) break;
+      res = await dbx.filesListFolderContinue({ cursor: res.result.cursor });
+    }
+    // フォルダを先に、その後ファイル。各群は名前順（自然な並び）。
+    entries.sort((a, b) => {
+      if (a.type !== b.type) return a.type === "folder" ? -1 : 1;
+      return a.name.localeCompare(b.name, "ja");
+    });
+    return jsonResponse({ entries, path: folderPath });
+  } catch (err: any) {
+    console.warn("[dbx-fetch] browse failed:", err);
+    if (handleDbxError(err)) {
+      return jsonResponse({ message: "Dropbox の再ログインが必要です" }, 401);
+    }
+    const summary = JSON.stringify(err?.error || "");
+    if (summary.includes("path/not_found")) {
+      // フォルダが無い → 空扱い（エラーにしない）
+      return jsonResponse({ entries: [], path: folderPath });
+    }
+    return jsonResponse({ message: "フォルダの取得に失敗しました", error: err?.message }, 500);
+  }
+};
+
+// /api/dropbox/search?q=... ─── Dropbox 全体ファイル検索（dropbox-picker.tsx 用）
+// レスポンス shape はサーバ互換： { results: [{name, path, size}] }
+const handleSearch: Handler = async (url) => {
+  const q = (url.searchParams.get("q") || "").trim();
+  if (!q) return jsonResponse({ results: [] });
+  const dbx = await getDropboxClient();
+  if (!dbx) return jsonResponse({ message: "Dropbox にログインしていません" }, 401);
+  try {
+    const results: Array<{ name: string; path: string; size: number }> = [];
+    const sr: any = await dbx.filesSearchV2({
+      query: q,
+      options: { max_results: 100, file_status: "active", filename_only: true } as any,
+    });
+    const matches = sr?.result?.matches || [];
+    for (const m of matches) {
+      const md = m?.metadata?.metadata;
+      if (!md || md[".tag"] !== "file") continue;
+      results.push({
+        name: md.name || "",
+        path: md.path_display || md.path_lower || "",
+        size: md.size ?? 0,
+      });
+    }
+    return jsonResponse({ results });
+  } catch (err: any) {
+    console.warn("[dbx-fetch] search failed:", err);
+    if (handleDbxError(err)) {
+      return jsonResponse({ message: "Dropbox の再ログインが必要です" }, 401);
+    }
+    return jsonResponse({ message: "検索に失敗しました", error: err?.message }, 500);
   }
 };
 
@@ -309,7 +396,7 @@ const handleFind: Handler = async (url) => {
       const baseQuery = fileName.replace(/\.(mp3|wav|m4a|aac|ogg|flac|wma|aiff|aif|opus)$/i, "");
       const sr: any = await dbx.filesSearchV2({
         query: baseQuery,
-        options: { max_results: 100, file_status: "active", filename_only: true },
+        options: { max_results: 100, file_status: "active", filename_only: true } as any,
       });
       const matches = sr?.result?.matches || [];
       for (const m of matches) {
@@ -714,6 +801,8 @@ const handleAuthUnsupported: Handler = async (url) =>
 function pickHandler(url: URL): Handler | null {
   const p = url.pathname;
   if (p === "/api/dropbox/download") return handleDownload;
+  if (p === "/api/dropbox/browse") return handleBrowse;
+  if (p === "/api/dropbox/search") return handleSearch;
   if (p === "/api/dropbox/find") return handleFind;
   if (p === "/api/dropbox/auto-relink") return handleAutoRelink;
   if (p === "/api/dropbox/check-exists") return handleCheckExists;

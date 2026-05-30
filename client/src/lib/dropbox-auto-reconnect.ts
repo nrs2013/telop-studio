@@ -11,53 +11,38 @@
 //   - 一度自動再接続して更に失敗した場合はループさせず、エラーをそのまま返す
 //   - バックグラウンド status ポーリングなど「静かに扱いたい」呼び出し側では allowReconnect:false を指定
 
+import { isDropboxLoggedIn, notifySessionExpired } from "./dropboxAuth";
+
 let activeReconnectPromise: Promise<void> | null = null;
 
 /**
- * Dropbox の OAuth 再接続ポップアップを開き、認可完了 or キャンセルされるまで待つ。
- * 複数同時に呼ばれた場合も 1 つのポップアップにまとめる(dedupe)。
+ * Dropbox 認証エラー時の再接続処理。
+ *
+ * 2026-05-30 改修：
+ *   PKCE 完全移行後は、サーバ /api/dropbox/oauth/start ポップアップ（Railway 時代の遺物。
+ *   GitHub Pages では 404）ではなく、グローバルな「セッション期限切れ」イベントを発火し、
+ *   App.tsx 側の再ログイン UI に処理を委ねる。
+ *
+ *   PKCE トークンが localStorage にある（= 通常運用）→ notifySessionExpired() で
+ *   再ログイン UI へ。サーバ側 OAuth はもう使わない。
+ *
+ *   dev サーバ運用（Express）でも getDropboxClient の自動 refresh が効くので、
+ *   ここに来る = refresh_token が死んでいる = 再ログインが必要、というケースに収束する。
  */
 export async function triggerDropboxReconnect(): Promise<void> {
   if (activeReconnectPromise) return activeReconnectPromise;
 
   activeReconnectPromise = new Promise<void>((resolve) => {
-    const popup = window.open(
-      "/api/dropbox/oauth/start",
-      "dropbox-auth",
-      "width=600,height=700"
-    );
-
-    if (!popup) {
-      // ポップアップブロックされた場合は同タブ遷移にフォールバック
-      // 遷移が走るので resolve は呼ばれないが、万一遷移が CSP 等で失敗したケースに
-      // 備えて activeReconnectPromise を null に戻しておく（次回の dedupe が固まらないため）
-      activeReconnectPromise = null;
-      window.location.href = "/api/dropbox/oauth/start";
-      return;
+    if (isDropboxLoggedIn()) {
+      // PKCE モード：グローバルイベントで再ログイン UI を出す
+      notifySessionExpired();
+    } else {
+      // 未ログイン：同じくイベントで再ログイン画面へ
+      notifySessionExpired();
     }
-
-    const onMessage = (e: MessageEvent) => {
-      if (e.data === "dropbox-connected") {
-        cleanup();
-        resolve();
-      }
-    };
-
-    const cleanup = () => {
-      window.removeEventListener("message", onMessage);
-      clearInterval(pollClosed);
-      activeReconnectPromise = null;
-    };
-
-    window.addEventListener("message", onMessage);
-
-    // ポップアップが閉じられたら、接続完了メッセージ未受信でも終了扱い
-    const pollClosed = setInterval(() => {
-      if (popup.closed) {
-        cleanup();
-        resolve();
-      }
-    }, 500);
+    // すぐ解決（呼び出し側のリトライは 401 のまま返るが、UI 側で再ログイン誘導される）
+    activeReconnectPromise = null;
+    resolve();
   });
 
   return activeReconnectPromise;
